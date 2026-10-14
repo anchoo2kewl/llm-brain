@@ -97,7 +97,11 @@ func (c *Collector) Cycle(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := c.syncFile(ctx, s, offsets[s.path]); err != nil {
+		off, known := offsets[s.path]
+		if !known && s.kind == KindRunLog {
+			off = -1 // never seen: register it even while empty
+		}
+		if err := c.syncFile(ctx, s, off); err != nil {
 			c.logf("sync %s: %v", s.path, err)
 			if firstErr == nil {
 				firstErr = err
@@ -122,6 +126,13 @@ func (c *Collector) syncFile(ctx context.Context, s source, off int64) error {
 		return nil // vanished between glob and stat
 	}
 	size := st.Size()
+	if off < 0 { // a worker log the sink has never seen
+		if size == 0 {
+			_, err := c.Sink.Chunk(ctx, Chunk{Host: c.Host, Kind: s.kind, Path: s.path, Mtime: st.ModTime(), TZ: c.TZ, EOF: true})
+			return err
+		}
+		off = 0
+	}
 	if size == off {
 		return nil
 	}

@@ -70,6 +70,8 @@ func fixture(t *testing.T) (home string, claudeFile string) {
 	appendFile(t, filepath.Join(state, "logs", "review-blue-stack-uiv3-839.20261014-160000.log"), "working\nREVIEWED https://github.com/elastio/blue-stack-uiv3/pull/839 APPROVE 1 inline\n")
 	appendFile(t, filepath.Join(state, "logs", "fleet.log"), "2026-10-14 16:00:00 [h] tick\nstray stderr line\n")
 	appendFile(t, filepath.Join(state, "logs", "hub.log"), "not a worker log\n")
+	appendFile(t, filepath.Join(state, "logs", "issue-5.20261014-160500.log"), "") // a claude -p worker prints nothing until it ends
+	appendFile(t, filepath.Join(state, "runs", "issue-5.pid"), fmt.Sprint(os.Getpid()))
 	appendFile(t, filepath.Join(state, "runs", "review-blue-stack-uiv3-839.prompt"), "Review the PR")
 	return home, claudeFile
 }
@@ -109,6 +111,9 @@ func TestCollectorIdempotentAndIncremental(t *testing.T) {
 		_ = e.S.DB.QueryRow(`SELECT status, prompt, target, session_id FROM runs`).Scan(&st, &pr, &tg, &sid)
 		t.Fatalf("review run should be succeeded, have its prompt, and be linked to the fleet-named session: %q %q %q %v", st, pr, tg, sid)
 	}
+	if n := count(t, e, `SELECT count(*) FROM runs WHERE key = 'issue-5' AND status = 'running' AND ended_at = '' AND log = ''`); n != 1 {
+		t.Fatal("an empty worker log with a live pid must be a running run")
+	}
 	if n := count(t, e, `SELECT count(*) FROM sessions WHERE parent_uuid = 's1' AND project = '-Users-a-w'`); n != 1 {
 		t.Fatal("subagent parent/project")
 	}
@@ -123,7 +128,7 @@ func TestCollectorIdempotentAndIncremental(t *testing.T) {
 		t.Fatalf("after re-scan events = %d", n)
 	}
 	var logText string
-	must(t, e.S.DB.QueryRow(`SELECT log FROM runs`).Scan(&logText))
+	must(t, e.S.DB.QueryRow(`SELECT log FROM runs WHERE kind = 'review'`).Scan(&logText))
 	if strings.Count(logText, "REVIEWED") != 1 {
 		t.Fatalf("log duplicated: %q", logText)
 	}
