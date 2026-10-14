@@ -219,6 +219,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		RecentRuns []store.Run
 		Models     []store.ModelUsage
 		Quotas     []store.QuotaObservation
+		Gateway    []store.GatewayAccount
+		GwRequests []store.GatewayRequest
 		Now        time.Time
 	}{page: page{Title: "Overview", Nav: "overview"}, Now: time.Now()}
 	st, err := readStatus(filepath.Join(s.StateDir, "status.json"))
@@ -237,6 +239,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	data.Hosts, e = s.Store.Hosts(ctx)
 	errs = append(errs, e)
 	data.Quotas, e = s.Store.Quotas(ctx)
+	errs = append(errs, e)
+	data.Gateway, e = s.Store.GatewayAccounts(ctx)
+	errs = append(errs, e)
+	data.GwRequests, e = s.Store.RecentGatewayRequests(ctx, 12)
 	errs = append(errs, e)
 	data.Models, e = s.Store.ModelUsage(ctx)
 	errs = append(errs, e)

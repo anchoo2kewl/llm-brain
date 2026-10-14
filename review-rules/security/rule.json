@@ -1,0 +1,14 @@
+{
+  "name": "security",
+  "description": "OWASP Top 10 (2021, with the 2025 additions) applied to every changed file, plus performance checks. Reviews weigh these first.",
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security — OWASP Top 10. Check each that applies to the diff:\n- A01 Broken access control: every read/write checks the caller's tenant AND role; ids from the request are re-checked against the caller's scope (no IDOR); admin-only verbs enforce the role server-side; CORS and redirects are not open.\n- A02 Cryptographic failures: no secrets, tokens or PII in code, logs, errors, fixtures or URLs; TLS on; no home-made crypto; no weak hashes for passwords/tokens.\n- A03 Injection: SQL/NoSQL/shell/LDAP/template values are bound parameters or escaped; identifiers (sort/group/column) come from allow-lists; HTML output is escaped (XSS); no eval/exec of user input.\n- A04 Insecure design: limits on anything a user can make large (page size, batch size, upload size, regex); state transitions validated server-side; rate limits on auth and expensive endpoints.\n- A05 Security misconfiguration: no debug endpoints, default creds, verbose errors or permissive defaults shipped; headers and cookie flags kept.\n- A06 Vulnerable components: new or bumped dependencies are maintained and not known-vulnerable; lockfiles updated.\n- A07 Identification & auth failures: tokens validated (signature, audience, expiry); sessions invalidated on logout/role change; no auth bypass on new routes.\n- A08 Software & data integrity: no unsigned/unpinned downloads in build or runtime; deserialization of untrusted data is typed and bounded; CI changes don't widen secrets.\n- A09 Logging & monitoring failures: security-relevant actions are audited (who, what, tenant) without logging secrets; errors are not swallowed.\n- A10 SSRF: server-side fetches of user-supplied URLs are allow-listed and can't reach metadata (169.254.169.254) or internal hosts.\nAlso: path traversal on file paths, race conditions on check-then-act (TOCTOU), mass assignment of request bodies."
+    },
+    {
+      "path": "**/*",
+      "rule": "Performance:\n- N+1 queries (a query per row in a loop) and queries inside hot loops.\n- Missing index for a new WHERE / JOIN / ORDER BY on a large table; full scans on request paths.\n- Unbounded results: list/group/facet endpoints without LIMIT or pagination; loading whole tables or files into memory.\n- Work repeated per request that could be cached or computed once; cache keys that miss tenant/scope.\n- Blocking calls on async/request paths; missing timeouts on network calls; goroutines/tasks without cancellation.\n- Frontend: re-renders on every poll, fetching in loops, large bundles imported for one function, polling without backoff or pause in background tabs.\nOnly flag what matters at production size; say the expected size (e.g. 'events has ~200M rows')."
+    }
+  ]
+}

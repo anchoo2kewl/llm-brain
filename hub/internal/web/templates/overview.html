@@ -31,13 +31,14 @@
 {{with .Primary}}{{template "quota-window" .}}{{end}}{{with .Secondary}}{{template "quota-window" .}}{{end}}
 {{if not (or .Primary .Secondary)}}<p class="mut">No quota windows reported.</p>{{end}}
 </details>{{else}}<p class="mut">Waiting for a Codex session to report its quota. Existing ingested history is not replayed; new session activity supplies observations.</p>{{end}}
-<div class="notice"><strong>Claude balance: unavailable</strong><p>Claude subscription balances and reset times are not present in the hub's current inputs.</p></div>
+{{template "gateway-accounts" .}}
 </section>
 <section class="panel" id="routing">
 <div class="panel-heading"><h2>Routing</h2><span class="pill">resolved roles</span></div>
 {{with .Status}}
 <ol class="route"><li><span>01 · Implement</span><strong>{{if .Roles.Implementer}}{{.Roles.Implementer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=issue">Issue runs →</a></li><li><span>02 · Internal check</span><strong>{{if .Roles.InternalReviewer}}{{.Roles.InternalReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=pr">PR follow-ups →</a></li><li><span>03 · PR review</span><strong>{{if .Roles.PRReviewer}}{{.Roles.PRReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=review">Review runs →</a></li></ol>
-<details id="routing-details" class="inspect"><summary>How provider routing works</summary><p>The fleet uses the configured implementer when its CLI is available, then falls back to the first available provider. Internal review uses a different available provider when possible; with one provider it uses a fresh session.</p><p class="mut">Roles above come from {{.Host}}'s {{if .Stale}}stale {{end}}snapshot ({{ago .At}}). Account selection, gateway health, quota cooldowns, and per-request routing decisions are not included in this snapshot.</p></details>
+<details id="routing-details" class="inspect"><summary>How provider routing works</summary><p>The fleet uses the configured implementer when its CLI is available, then falls back to the first available provider. Internal review uses a different available provider when possible; with one provider it uses a fresh session.</p><p class="mut">Roles above come from {{.Host}}'s {{if .Stale}}stale {{end}}snapshot ({{ago .At}}). Account choice comes from the gateway below: highest priority first (personal), work only while personal is exhausted.</p></details>
+{{template "gateway-requests" $}}
 {{else}}<p class="mut">Resolved role routing appears when the scheduler writes its first snapshot.</p>{{end}}
 </section>
 </div>

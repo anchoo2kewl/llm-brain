@@ -281,6 +281,15 @@ var funcs = template.FuncMap{
 			return fmt.Sprintf("%d minute", minutes)
 		}
 	},
+	"tokens": func(n int64) string { // 44599 -> "44.6k"
+		switch {
+		case n >= 1_000_000:
+			return fmt.Sprintf("%.1fM", float64(n)/1e6)
+		case n >= 1000:
+			return fmt.Sprintf("%.1fk", float64(n)/1e3)
+		}
+		return fmt.Sprint(n)
+	},
 	"remaining": func(used float64) string { return fmt.Sprintf("%.0f", max(0, min(100, 100-used))) },
 	"resetTime": func(unix int64) string {
 		if unix <= 0 {
