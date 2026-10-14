@@ -29,6 +29,10 @@ Naj's fleet will test what lands (reproduce-first + e2e), so every acceptance cr
 After the PR is pushed, run: `{{BRAIN_DIR}}/bin/fleet review <pr-url>` for each PR. The reviewer is `{{REVIEWER}}` (a different LLM from you, `{{IMPLEMENTER}}`).
 Treat its findings critically: fix every real defect, push, and re-run the review once. Ignore findings you can show are wrong, and say why in a PR comment titled "Internal review".
 
+# Nothing to build
+If the work is already done (PRs merged, only a human/UAT check left): comment ONCE with what you verified and what is left
+for a person, add label `agent:done`, remove `agent:working`, and stop. Don't comment again on later runs.
+
 # When you cannot finish
 If the issue is ambiguous in a way that changes the outcome, needs access you do not have, or would require a prod/staging action:
 comment on the issue with the exact question (tag the author), add label `agent:blocked`, remove `agent:working`, and stop.
