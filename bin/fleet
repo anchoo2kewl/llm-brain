@@ -26,8 +26,11 @@ spawn() { # spawn <key> <provider> <mode> <timeout> <prompt-file>
   log "started $key ($provider/$mode, pid $!, log $logf)"
 }
 
-capacity_left() {
-  echo $(( $(cfg '.limits.max_workers') - $(running_workers) ))
+capacity_left() { # work workers (implement/babysit); reviews have their own pool
+  echo $(( $(cfg '.limits.max_workers') - $(running_workers work) ))
+}
+review_capacity_left() {
+  echo $(( $(cfg '.limits.max_review_workers') - $(running_workers review) ))
 }
 
 # A claim is a marker comment; the earliest claim comment wins, so two machines
@@ -48,32 +51,58 @@ claim_issue() { # claim_issue <repo> <num> -> 0 if we own it
   return 1
 }
 
+in_flight() { # issues the fleet currently owns, across all machines (labels are the source of truth)
+  local repo
+  for repo in $(cfg '.intake.repos[]'); do
+    gh issue list -R "$repo" --state open --assignee "$(cfg '.intake.assignee')" \
+      --label "$(cfg '.labels.claimed')" --json number --jq '.[].number'
+    gh issue list -R "$repo" --state open --assignee "$(cfg '.intake.assignee')" \
+      --label "$(cfg '.labels.pr_open')" --json number --jq '.[].number'
+  done | sort -u
+}
+
+# Candidates in order (oldest first): assigned to me, authored by Naj/Greg, created since the cutoff, not owned yet.
+intake_queue() {
+  local repo
+  for repo in $(cfg '.intake.repos[]'); do
+    gh issue list -R "$repo" --state open --assignee "$(cfg '.intake.assignee')" \
+      --search "created:>=$(cfg '.intake.created_since') sort:created-asc" --limit 100 \
+      --json number,title,author,labels,createdAt \
+      | jq -r --arg repo "$repo" --argjson authors "$(cfg -o=json '.intake.authors')" \
+          --argjson skip "$(cfg -o=json '.intake.skip_labels + [.labels.claimed, .labels.pr_open, .labels.blocked]')" '
+          sort_by(.createdAt) | .[]
+          | select(.author.login as $a | $authors | index($a))
+          | select([.labels[].name] as $l | ($skip | map(. as $s | $l | index($s)) | all(. == null)))
+          | "\($repo) \(.number)"'
+  done
+}
+
+has_my_open_pr() { # has_my_open_pr <num>
+  [[ "$(cfg '.intake.skip_if_my_open_pr')" == "true" ]] || return 1
+  [[ -n "$(gh search prs "$1" --owner "$(cfg '.pr_owners[0]')" --author "@me" --state open --json url --jq '.[0].url' 2>/dev/null)" ]]
+}
+
 cmd_dispatch() {
   paused && { log "paused"; return; }
-  local repo label assignee skip authors_json
-  label="$(cfg '.intake.label')"
-  assignee="$(cfg '.intake.assignee')"
-  authors_json="$(cfg -o=json '.intake.authors')"
-  skip="$(cfg -o=json '.intake.skip_labels + [.labels.claimed, .labels.pr_open]')"
-  for repo in $(cfg '.intake.repos[]'); do
-    gh issue list -R "$repo" --state open --assignee "$assignee" --label "$label" --limit 50 \
-      --json number,title,author,labels \
-      | jq -r --argjson authors "$authors_json" --argjson skip "$skip" '
-          .[] | select(.author.login as $a | $authors | index($a))
-              | select([.labels[].name] as $l | ($skip | map(. as $s | $l | index($s)) | all(. == null)))
-              | .number' \
-      | while read -r num; do
-          (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
-          worker_running "issue-$num" && continue
-          claim_issue "$repo" "$num" || continue
-          local pf="$BRAIN_STATE/runs/issue-$num.prompt"
-          REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
-            BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
-            REVIEWERS="$(cfg '.reviewers | join(",")')" \
-            render "$BRAIN_DIR/prompts/implement.md" >"$pf"
-          spawn "issue-$num" "$(implementer)" write "$(cfg '.limits.implement_timeout')" "$pf"
-        done
-  done
+  local owned slots repo num
+  owned="$(in_flight | grep -c . || true)"
+  slots=$(( $(cfg '.intake.max_in_flight') - owned ))
+  (( slots > 0 )) || { log "in flight: $owned/$(cfg '.intake.max_in_flight') — waiting for a merge"; return; }
+  while read -r repo num; do
+    [[ -n "$num" ]] || continue
+    (( slots > 0 )) || break
+    (( $(capacity_left) > 0 )) || { log "no worker capacity"; break; }
+    worker_running "issue-$num" && continue
+    if has_my_open_pr "$num"; then log "#$num: already being worked by hand (open PR) — skipping"; continue; fi
+    claim_issue "$repo" "$num" || continue
+    local pf="$BRAIN_STATE/runs/issue-$num.prompt"
+    REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
+      BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
+      REVIEWERS="$(cfg '.reviewers | join(",")')" \
+      render "$BRAIN_DIR/prompts/implement.md" >"$pf"
+    spawn "issue-$num" "$(implementer)" write "$(cfg '.limits.implement_timeout')" "$pf"
+    slots=$((slots - 1))
+  done < <(intake_queue)
 }
 
 fleet_prs() { # JSON array of open PRs carrying the marker
@@ -154,7 +183,7 @@ cmd_review_prs() {
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
     [[ "$sha" == "$last" ]] && continue                     # one review per head commit
-    (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
+    (( $(review_capacity_left) > 0 )) || { log "review pool full"; return; }
     dir="$BRAIN_STATE/reviews/$key"; rm -rf "$dir"; mkdir -p "$dir"
     gh pr view "$url" --json headRepository,headRepositoryOwner,headRefName,baseRefName,number >"$dir/pr.json"
     nwo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' "$dir/pr.json")"
@@ -168,6 +197,49 @@ cmd_review_prs() {
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
     SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
   done
+}
+
+# Snapshot for the dashboard: everything it shows, so the web server never calls GitHub.
+cmd_snapshot() {
+  local tmp="$BRAIN_STATE/status.json.tmp" workers=() f k pid lf
+  for f in "$BRAIN_STATE"/runs/*.pid; do
+    [[ -e "$f" ]] || continue
+    k="$(basename "$f" .pid)"; pid="$(cat "$f")"
+    kill -0 "$pid" 2>/dev/null || continue
+    lf="$(ls -t "$BRAIN_STATE/logs/$k".*.log 2>/dev/null | head -1)"
+    workers+=("$(jq -nc --arg k "$k" --arg pid "$pid" --arg log "$(basename "${lf:-}")" \
+      --arg since "$(stat -f %Sm -t '%Y-%m-%dT%H:%M:%S' "$f")" '{key:$k,pid:$pid,log:$log,since:$since}')")
+  done
+  local owned queue prs reviews
+  owned="$(for repo in $(cfg '.intake.repos[]'); do
+      gh issue list -R "$repo" --state open --assignee "$(cfg '.intake.assignee')" \
+        --search "label:\"$(cfg '.labels.claimed')\",\"$(cfg '.labels.pr_open')\",\"$(cfg '.labels.blocked')\"" \
+        --json number,title,url,labels,author,updatedAt; done | jq -s 'add // []')"
+  queue="$(intake_queue | while read -r r n; do
+      gh issue view "$n" -R "$r" --json number,title,url,author,createdAt \
+        | jq -c --argjson hand "$(has_my_open_pr "$n" && echo true || echo false)" '. + {by_hand:$hand}'; done | jq -s '.')"
+  prs="$(fleet_prs | jq -c '.[]' | while read -r row; do
+      gh pr view "$(jq -r .url <<<"$row")" --json url,title,number,headRefName,reviewDecision,mergeStateStatus,statusCheckRollup,updatedAt \
+        | jq -c '{url,title,number,reviewDecision,mergeStateStatus,updatedAt,
+                  ci: ([.statusCheckRollup[]? | (.conclusion // .state // .status)] | if length==0 then "none"
+                       elif any(.=="FAILURE" or .=="ERROR" or .=="TIMED_OUT") then "failing"
+                       elif any(.=="IN_PROGRESS" or .=="QUEUED" or .=="PENDING" or .=="EXPECTED") then "running" else "passing" end)}'
+    done | jq -s '.')"
+  reviews="$(for lf in $(ls -t "$BRAIN_STATE"/logs/review-*.log 2>/dev/null | head -40); do
+      line="$(grep -m1 '^REVIEWED ' "$lf" || true)"
+      jq -nc --arg log "$(basename "$lf")" --arg line "$line" --arg at "$(stat -f %Sm -t '%Y-%m-%dT%H:%M:%S' "$lf")" \
+        '{log:$log, at:$at, url:($line|split(" ")[1] // null), verdict:($line|split(" ")[2] // "running/failed"),
+          detail:($line|split(" ")[3:]|join(" "))}'
+    done | jq -s '.')"
+  jq -n --arg host "$HOST" --arg at "$(date '+%Y-%m-%dT%H:%M:%S')" --argjson paused "$(paused && echo true || echo false)" \
+    --arg impl "$(implementer)" --arg rev "$(reviewer)" --arg prov "$(cfg '.pr_review.provider')" \
+    --argjson max "$(cfg '.intake.max_in_flight')" --argjson owned "$owned" --argjson queue "$queue" \
+    --argjson prs "$prs" --argjson reviews "$reviews" \
+    --argjson workers "$(printf '%s\n' "${workers[@]+"${workers[@]}"}" | jq -s '.')" \
+    --arg tail "$(tail -40 "$BRAIN_STATE/logs/fleet.log" 2>/dev/null)" \
+    '{host:$host, at:$at, paused:$paused, roles:{implementer:$impl, internal_reviewer:$rev, pr_reviewer:$prov},
+      max_in_flight:$max, owned:$owned, queue:$queue, prs:$prs, reviews:$reviews, workers:$workers, log:$tail}' >"$tmp"
+  mv "$tmp" "$BRAIN_STATE/status.json"
 }
 
 cmd_status() {
@@ -195,7 +267,8 @@ cmd_labels() {
 }
 
 case "${1:-}" in
-  tick) cmd_dispatch; cmd_babysit; cmd_review_prs ;;
+  tick) log "tick"; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
+  snapshot) cmd_snapshot ;;
   review-prs) cmd_review_prs ;;
   review-pr) shift; ONLY_PR="$1" cmd_review_prs ;;
   dispatch) cmd_dispatch ;;

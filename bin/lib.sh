@@ -57,10 +57,12 @@ reviewer() {
   echo "$impl"
 }
 
-running_workers() {
-  local n=0 f pid
+running_workers() { # running_workers [work|review|all]
+  local kind="${1:-all}" n=0 f pid k
   for f in "$BRAIN_STATE"/runs/*.pid; do
     [[ -e "$f" ]] || continue
+    k="$(basename "$f" .pid)"
+    case "$kind" in work) [[ "$k" == review-* ]] && continue ;; review) [[ "$k" == review-* ]] || continue ;; esac
     pid="$(cat "$f")"
     if kill -0 "$pid" 2>/dev/null; then n=$((n + 1)); else rm -f "$f"; fi
   done

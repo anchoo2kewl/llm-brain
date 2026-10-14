@@ -30,7 +30,7 @@ fi
 
 echo "== launchd"
 agents=()
-(( FLEET )) && agents+=(com.llm-brain.fleet)
+(( FLEET )) && agents+=(com.llm-brain.fleet com.llm-brain.dashboard)
 for a in "${agents[@]+"${agents[@]}"}"; do
   dst="$HOME/Library/LaunchAgents/$a.plist"
   sed -e "s#__BRAIN__#$BRAIN#g; s#__HOME__#$HOME#g" "$BRAIN/launchd/$a.plist" >"$dst"

@@ -28,13 +28,15 @@ roles:
   implementer: claude
   reviewer: codex
 
-# Intake: what the dispatcher picks up.
+# Intake: every open issue assigned to me whose author is Naj or Greg. No label needed.
 intake:
   repos: [elastio/blue-stack]
   assignee: anchoo2kewl
-  label: agent-ready            # opt-in label; nothing without it is touched
-  authors: [Assurio-n7n, greg-aligiannis, anchoo2kewl]   # Naj, Greg, me
-  skip_labels: [agent:stop, agent:blocked]
+  authors: [Assurio-n7n, greg-aligiannis]   # Naj, Greg
+  created_since: "2026-10-14"   # older backlog is ignored; move the date back to include it
+  skip_labels: [agent:stop]
+  max_in_flight: 2              # issues the fleet owns (working or PR open); the next starts only when one is closed/merged
+  skip_if_my_open_pr: true      # an issue I'm already working by hand (open PR of mine mentions it) is left alone
 
 # Labels the fleet writes (created once by `fleet labels`).
 labels:
@@ -66,7 +68,8 @@ pr_review:
     - greg
 
 limits:
-  max_workers: 3                # concurrent LLM workers per machine
+  max_workers: 3                # concurrent implement/babysit LLM workers on this machine
+  max_review_workers: 3         # PR reviews run separately, in parallel
   implement_timeout: 4h
   babysit_timeout: 2h
   review_timeout: 30m
