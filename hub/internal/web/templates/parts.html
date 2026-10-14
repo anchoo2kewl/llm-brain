@@ -26,7 +26,7 @@
 {{- if eq .Kind "tool_use"}}
 <details class="tool"><summary><span class="tname">{{.ToolName}}</span> <span class="mut small">{{trunc 140 .ToolInput}}</span>{{if .Result}}{{if .Result.IsError}} <span class="bad small">error</span>{{end}}{{else}} <span class="mut small">(no result yet)</span>{{end}}</summary>
 <div class="lbl">input</div><pre>{{.ToolInput}}</pre>
-{{with .Result}}<div class="lbl">{{if .IsError}}error{{else}}output{{end}}</div><pre class="{{if .IsError}}err{{end}}">{{.Text}}</pre>{{end}}
+{{with .Result}}<div class="lbl" id="m{{.ID}}">{{if .IsError}}error{{else}}output{{end}}</div><pre class="{{if .IsError}}err{{end}}">{{.Text}}</pre>{{end}}
 </details>
 {{- else if eq .Kind "tool_result"}}
 <details class="tool"><summary><span class="tname">result</span> <span class="mut small">{{trunc 140 .Text}}</span>{{if .IsError}} <span class="bad small">error</span>{{end}}</summary><pre class="{{if .IsError}}err{{end}}">{{.Text}}</pre></details>

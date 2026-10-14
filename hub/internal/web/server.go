@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
@@ -37,6 +39,7 @@ type Server struct {
 	StateDir string // where status.json lives
 	Host     string
 	Log      *log.Logger
+	Index    *search.Index // nil: search scans the store
 
 	pages map[string]*template.Template
 }
@@ -514,29 +517,71 @@ func (s *Server) messageRaw(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(raw))
 }
 
+const searchPageSize = 30
+
+// search answers from the full-text index, or, until the index is built, from a LIKE scan of the store.
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	host := r.URL.Query().Get("host")
+	qv := r.URL.Query()
+	q := strings.TrimSpace(qv.Get("q"))
+	pg, _ := strconv.Atoi(qv.Get("page"))
+	if pg < 1 {
+		pg = 1
+	}
 	data := struct {
 		page
-		Host  string
-		Hits  []store.Hit
-		Runs  []store.Run
-		Took  time.Duration
-		Hosts []string
-	}{page: page{Title: "Search", Nav: "search", Q: q}, Host: host}
+		Host, Type, Sort string
+		Hits             []search.Hit
+		Total            uint64
+		Took             time.Duration
+		Hosts, Types     []string
+		Building         bool
+		Pct              int
+		PrevURL, NextURL string
+	}{page: page{Title: "Search", Nav: "search", Q: q}, Host: qv.Get("host"), Type: qv.Get("type"), Sort: qv.Get("sort"),
+		Types: []string{"message", "session", "run", "event"}}
 	data.Hosts, _ = s.Store.Distinct(r.Context(), "sessions", "host")
-	if len(q) >= 2 {
+	if q != "" || data.Type != "" {
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		var err error
-		if data.Hits, err = s.Store.Search(ctx, q, host, 200); err != nil {
-			s.fail(w, err)
-			return
+		if s.Index != nil && s.Index.Ready() {
+			res, err := s.Index.Search(ctx, search.Request{Q: q, Host: data.Host, Type: data.Type, Newest: data.Sort == "new",
+				Page: pg, Size: searchPageSize})
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			data.Hits, data.Total = res.Hits, res.Total
+			link := func(p int) string {
+				v := url.Values{"q": {q}, "page": {strconv.Itoa(p)}}
+				for _, k := range []string{"host", "type", "sort"} {
+					if qv.Get(k) != "" {
+						v.Set(k, qv.Get(k))
+					}
+				}
+				return "/search?" + v.Encode()
+			}
+			if pg > 1 {
+				data.PrevURL = link(pg - 1)
+			}
+			if uint64(pg*searchPageSize) < res.Total {
+				data.NextURL = link(pg + 1)
+			}
+		} else if len(q) >= 2 {
+			data.Building = s.Index != nil
+			if s.Index != nil {
+				data.Pct = s.Index.Progress()
+			}
+			hits, err := s.Store.Search(ctx, q, data.Host, 200)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			runs, _ := s.Store.Runs(ctx, store.RunFilter{Q: q, Host: data.Host, Limit: 50})
+			data.Hits = search.FromStore(q, hits, runs)
+			data.Total = uint64(len(data.Hits))
 		}
-		data.Runs, _ = s.Store.Runs(ctx, store.RunFilter{Q: q, Host: host, Limit: 50})
-		data.Took = time.Since(start).Round(time.Millisecond)
+		data.Took = time.Since(start).Round(100 * time.Microsecond)
 	}
 	s.render(w, "search", "layout", data)
 }

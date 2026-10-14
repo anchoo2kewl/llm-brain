@@ -1,17 +1,19 @@
-{{define "content"}}
-<div class="top"><h1>Search</h1><div class="meta">{{if .Q}}{{len .Hits}} messages, {{len .Runs}} runs · {{.Took}}{{end}}</div></div>
+{{define "content"}}<link rel="stylesheet" href="/static/search.css">
+<div class="top"><h1>Search</h1><div class="meta">{{if or .Q .Type}}{{.Total}} results · {{.Took}}{{end}}</div></div>
 <form class="filters" method="get" action="/search">
-<input type="search" name="q" value="{{.Q}}" placeholder="words in any message, tool call or output" autofocus>
+<input type="search" name="q" value="{{.Q}}" placeholder="words, &quot;a phrase&quot;, deploy*, uiv3#835, host:studio type:run after:2026-10-01" autofocus>
 <select name="host"><option value="">any host</option>{{range .Hosts}}<option {{if eq . $.Host}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="type"><option value="">everything</option>{{range $t := .Types}}<option value="{{$t}}" {{if eq $t $.Type}}selected{{end}}>{{$t}}s</option>{{end}}</select>
+<select name="sort"><option value="">best match</option><option value="new" {{if eq .Sort "new"}}selected{{end}}>newest</option></select>
 <button type="submit">Search</button>
 </form>
-{{if .Q}}
-{{if .Runs}}<h2>Runs</h2>{{template "runrows" .Runs}}{{end}}
-<h2>Messages <span class="mut small">newest first, max 200</span></h2>
+{{if .Building}}<p class="mut small sx-note">building index… {{.Pct}}% · until it's done, results come from a slower scan (messages and runs, newest first)</p>{{end}}
+{{if or .Q .Type}}
 {{range .Hits}}<div class="hit">
-<div class="small"><a href="/sessions/{{.SessionID}}?after={{dec .ID}}#m{{.ID}}">{{trunc 90 .Session.DisplayTitle}}</a> <span class="mut">· {{.Session.Host}} · {{.Role}} {{if .ToolName}}{{.ToolName}}{{else}}{{.Kind}}{{end}} · {{ago .TS}}</span>
- · <a class="small" href="/sessions/{{.SessionID}}?before={{inc .ID}}#m{{.ID}}">context before</a></div>
-<div class="snip">{{if .ToolInput}}{{snippet $.Q (printf "%s\n%s" .ToolInput .Text)}}{{else}}{{snippet $.Q .Text}}{{end}}</div>
-</div>{{else}}<div class="empty">No messages match.</div>{{end}}
-{{end}}
+<div class="small"><span class="pill sx-{{.Type}}">{{.Type}}</span> {{if .Link}}<a href="{{.Link}}">{{trunc 90 .Title}}</a>{{else}}{{trunc 90 .Title}}{{end}} <span class="mut">· {{.Host}} · {{.Label}} · {{ago .Time}}</span>{{if .Context}} · <a class="small" href="{{.Context}}">context before</a>{{end}}</div>
+<div class="snip">{{.Snippet}}</div>
+</div>{{else}}<div class="empty">Nothing matches.</div>{{end}}
+{{if or .PrevURL .NextURL}}<p class="pager">{{if .PrevURL}}<a href="{{.PrevURL}}">← previous</a>{{end}}{{if and .PrevURL .NextURL}} · {{end}}{{if .NextURL}}<a href="{{.NextURL}}">next →</a>{{end}}</p>{{end}}
+{{else}}<p class="mut small sx-help">Searches every message (text, thinking, tool calls and output), session (title, directory, branch), run (key, target, prompt, log) and fleet.log event.
+All words must match. <code>"exact phrase"</code> · <code>deploy*</code> · <code>-word</code> · <code>host:</code> <code>type:</code> <code>provider:</code> <code>kind:</code> <code>tool:</code> <code>role:</code> <code>status:</code> <code>session:</code> <code>after:2026-10-01</code> <code>before:</code></p>{{end}}
 {{end}}
