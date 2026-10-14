@@ -96,7 +96,11 @@ func Parse(s string, loc *time.Location) *Parsed {
 			text := strings.TrimSpace(string(rs[i+1 : j]))
 			i = j + 1
 			if text != "" {
-				p.add(neg, Clause{Phrase, text})
+				kind := Phrase
+				if !strings.ContainsFunc(text, unicode.IsSpace) {
+					kind = Word // "blue-stack-api" is one code word: match it as one
+				}
+				p.add(neg, Clause{kind, text})
 			}
 			continue
 		}
@@ -241,7 +245,19 @@ func clauseQuery(c Clause) query.Query {
 			}
 			if a.Whole != "" {
 				alts = append(alts, boosted(termQ(a.Whole, f.name), f.boost*1.5))
+				// The same run of parts anywhere inside a longer word, or with other separators.
+				pairs := make([]string, len(a.Parts)-1)
+				for i := range pairs {
+					pairs[i] = Pair(a.Parts[i], a.Parts[i+1])
+				}
+				if len(pairs) == 1 {
+					alts = append(alts, boosted(termQ(pairs[0], f.name), f.boost))
+				} else {
+					alts = append(alts, boosted(query.NewPhraseQuery(pairs, f.name), f.boost))
+				}
+				continue
 			}
+			// Separate words (a=b): their parts in a row.
 			alts = append(alts, boosted(query.NewPhraseQuery(a.Parts, f.name), f.boost))
 		case Prefix:
 			a := AnalyzeWord(c.Text)

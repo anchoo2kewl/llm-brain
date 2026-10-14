@@ -18,7 +18,7 @@ import (
 func terms(s string) []string {
 	var out []string
 	for _, t := range (codeTokenizer{}).Tokenize([]byte(s)) {
-		out = append(out, fmt.Sprintf("%s@%d", t.Term, t.Position))
+		out = append(out, fmt.Sprintf("%s@%d", strings.ReplaceAll(string(t.Term), "\x1f", "+"), t.Position))
 	}
 	return out
 }
@@ -27,11 +27,13 @@ func TestAnalyzerCodeTokens(t *testing.T) {
 	got := terms(`See uiv3#835 in "blue-stack-api/internal/x.go", tenant_id=3F2A6C1E-0B4D-4E5F-8A9B-0C1D2E3F4A5B; Deploying (done).`)
 	want := []string{
 		"see@1",
-		"uiv3#835@2", "uiv3@2", "835@3",
+		"uiv3#835@2", "uiv3@2", "835@3", "uiv3+835@2",
 		"in@4",
-		"blue-stack-api/internal/x.go@5", "blue@5", "stack@6", "api@7", "internal@8", "x@9", "go@10",
-		"tenant_id@11", "tenant@11", "id@12",
-		"3f2a6c1e-0b4d-4e5f-8a9b-0c1d2e3f4a5b@13", "3f2a6c1e@13", "0b4d@14", "4e5f@15", "8a9b@16", "0c1d2e3f4a5b@17",
+		"blue-stack-api/internal/x.go@5", "blue@5", "stack@6", "blue+stack@5", "api@7", "stack+api@6",
+		"internal@8", "api+internal@7", "x@9", "internal+x@8", "go@10", "x+go@9",
+		"tenant_id@11", "tenant@11", "id@12", "tenant+id@11",
+		"3f2a6c1e-0b4d-4e5f-8a9b-0c1d2e3f4a5b@13", "3f2a6c1e@13", "0b4d@14", "3f2a6c1e+0b4d@13", "4e5f@15", "0b4d+4e5f@14",
+		"8a9b@16", "4e5f+8a9b@15", "0c1d2e3f4a5b@17", "8a9b+0c1d2e3f4a5b@16",
 		"deploying@18", // no stemming
 		"done@19",      // "(done)." is just its word
 	}

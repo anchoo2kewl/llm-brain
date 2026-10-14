@@ -29,7 +29,7 @@ import (
 )
 
 // version names the mapping and analyzer. An index built with another version is rebuilt from scratch.
-const version = "1"
+const version = "2"
 
 var (
 	keyVersion = []byte("version")

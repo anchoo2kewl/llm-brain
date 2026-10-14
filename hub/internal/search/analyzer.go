@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -17,7 +18,10 @@ import (
 // A word is a run of characters between separators (whitespace, quotes, brackets, ',;|=<>'), trimmed of
 // leading and trailing punctuation. Each alphanumeric part of a word is a token at its own position, and a
 // word with more than one part is also indexed whole, at its first part's position, so a phrase over the
-// parts and a term or prefix on the whole word both match. Everything is lowercased; nothing is stemmed.
+// parts and a term or prefix on the whole word both match. Each pair of adjacent parts inside a word is also
+// a token ("blue\x1fstack", "stack\x1fapi"), at the first part's position, so a query for a run of parts
+// (blue-stack, web/server.go) is a term or a phrase of rare pair terms, not a phrase of common words.
+// Everything is lowercased; nothing is stemmed.
 const AnalyzerName = "hubcode"
 
 const (
@@ -40,8 +44,10 @@ func (codeTokenizer) Tokenize(in []byte) analysis.TokenStream {
 	pos := 0
 	eachWord(in, func(w word) {
 		first := true
+		var prev []byte // the previous part of this word, lowercased
 		for _, p := range w.parts {
 			if p.end-p.start > maxPart {
+				prev = nil
 				continue
 			}
 			pos++
@@ -50,12 +56,25 @@ func (codeTokenizer) Tokenize(in []byte) analysis.TokenStream {
 					Position: pos, Type: analysis.AlphaNumeric})
 			}
 			first = false
-			out = append(out, &analysis.Token{Start: p.start, End: p.end, Term: lowerBytes(in[p.start:p.end]),
-				Position: pos, Type: analysis.AlphaNumeric})
+			term := lowerBytes(in[p.start:p.end])
+			out = append(out, &analysis.Token{Start: p.start, End: p.end, Term: term, Position: pos, Type: analysis.AlphaNumeric})
+			if prev != nil {
+				// The pair goes at the previous part's position.
+				pair := make([]byte, 0, len(prev)+1+len(term))
+				pair = append(append(append(pair, prev...), pairSep), term...)
+				out = append(out, &analysis.Token{Start: p.start, End: p.end, Term: pair, Position: pos - 1, Type: analysis.AlphaNumeric})
+			}
+			prev = term
 		}
 	})
 	return out
 }
+
+// pairSep joins the two parts of a pair token. Nobody types it, so pairs never collide with whole words.
+const pairSep = '\x1f'
+
+// Pair is the index term for two adjacent parts of one word.
+func Pair(a, b string) string { return a + string(rune(pairSep)) + b }
 
 type span struct{ start, end int }
 
@@ -168,6 +187,9 @@ func AnalyzeWord(s string) Analyzed {
 func AnalyzePhrase(s string) [][]string {
 	var out [][]string
 	for _, t := range (codeTokenizer{}).Tokenize([]byte(s)) {
+		if bytes.IndexByte(t.Term, pairSep) >= 0 {
+			continue // a phrase is matched on parts; pairs are only for single code words
+		}
 		for len(out) < t.Position {
 			out = append(out, nil)
 		}

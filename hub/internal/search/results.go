@@ -65,7 +65,8 @@ func (x *Index) Search(ctx context.Context, r Request) (*Result, error) {
 	}
 	req := bleve.NewSearchRequestOptions(p.Build(), r.Size, (r.Page-1)*r.Size, false)
 	if r.Newest || !p.HasText() {
-		req.SortBy([]string{"-time", "-_score"})
+		req.SortBy([]string{"-time"})
+		req.Score = "none" // nothing reads the score: don't compute it
 	}
 	sr, err := x.bx.SearchInContext(ctx, req)
 	if err != nil {
