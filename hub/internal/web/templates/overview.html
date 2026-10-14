@@ -1,0 +1,75 @@
+{{define "content"}}<div id="live" data-refresh="/?fragment=1">
+<div class="top"><h1>Fleet</h1><div class="meta">
+{{with .Status}}{{.Host}} · snapshot {{ago .At}}{{if .Stale}} <span class="bad">(stale — scheduler not running?)</span>{{end}}{{if .Paused}} · <span class="bad">PAUSED</span>{{end}}
+{{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>
+
+{{with .Status}}<div class="grid">
+<div class="tile"><b>{{len .Owned}}/{{.MaxInFlight}}</b><span>issues in flight</span></div>
+<div class="tile"><b>{{.Queued}}</b><span>queued</span></div>
+<div class="tile"><b>{{len .PRs}}</b><span>open fleet PRs</span></div>
+<div class="tile"><b>{{.CountVerdict "APPROVE"}}</b><span>reviews approved</span></div>
+<div class="tile"><b>{{.CountVerdict "COMMENT"}}</b><span>reviews with blockers</span></div>
+<div class="tile"><b>{{len .Workers}}</b><span>workers running</span></div>
+<div class="tile"><b>{{.Roles.Implementer}} / {{.Roles.InternalReviewer}}</b><span>implement / check</span></div>
+</div>{{end}}
+
+<h2>Agents running now <span class="mut small">· all hosts</span></h2>
+{{if or .Runs .Live}}<div class="wrap"><table>
+<tr><th>Agent</th><th>Host</th><th>What</th><th>Since</th><th></th></tr>
+{{range .Runs}}<tr>
+<td><span class="dot {{if not .HostLive}}off{{end}}"></span> <a href="/runs/{{.ID}}">{{.Key}}</a> <span class="pill">fleet</span></td>
+<td class="mut">{{.Host}}</td>
+<td>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{short .Target}}</a>{{end}} <span class="mut small">{{.Provider}}{{if not .HostLive}} · host offline{{end}}</span></td>
+<td class="mut nowrap">{{ago .StartedAt}}</td>
+<td>{{if .SessionID}}<a href="/sessions/{{.SessionID}}">conversation</a>{{end}}</td>
+</tr>{{end}}
+{{range .Live}}<tr>
+<td><span class="dot"></span> <a href="/sessions/{{.ID}}">{{trunc 90 .DisplayTitle}}</a> <span class="pill">{{if .AgentName}}{{.AgentName}}{{else}}interactive{{end}}</span></td>
+<td class="mut">{{.Host}}</td>
+<td class="mut small">{{.Provider}} · {{home .Cwd}}{{if .Branch}} · {{.Branch}}{{end}}</td>
+<td class="mut nowrap">{{ago .FirstAt}}</td>
+<td class="mut small">active {{ago .FileMtime}}</td>
+</tr>{{end}}
+</table></div>{{else}}<div class="empty">Nothing running.</div>{{end}}
+
+{{with .Status}}
+<h2>Issues in flight</h2>
+{{if .Owned}}<div class="wrap"><table><tr><th>Issue</th><th>From</th><th>State</th><th>Updated</th></tr>
+{{range .Owned}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td>
+<td>{{range agentLabels .}}<span class="pill {{labelClass .}}">{{.}}</span> {{end}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None.</div>{{end}}
+
+<h2>Queue (next up)</h2>
+{{if .Queue}}<div class="wrap"><table><tr><th>Issue</th><th>From</th><th>Filed</th><th>Note</th></tr>
+{{range .Queue}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td><td class="mut">{{ago .CreatedAt}}</td>
+<td class="mut">{{if .ByHand}}being worked by hand (open PR){{else}}waits for a free slot{{end}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None.</div>{{end}}
+
+<h2>Fleet PRs</h2>
+{{if .PRs}}<div class="wrap"><table><tr><th>PR</th><th>CI</th><th>Review</th><th>Merge</th><th>Updated</th></tr>
+{{range .PRs}}<tr><td><a href="{{.URL}}" rel="noreferrer">{{.Title}}</a></td><td class="{{statusClass .CI}}">{{.CI}}</td>
+<td>{{if .ReviewDecision}}{{.ReviewDecision}}{{else}}—{{end}}</td><td class="mut">{{.MergeStateStatus}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None.</div>{{end}}
+
+<h2>PR reviews posted</h2>
+{{if .Reviews}}<div class="wrap"><table><tr><th>PR</th><th>Verdict</th><th>Detail</th><th>When</th><th></th></tr>
+{{range .Reviews}}<tr><td>{{with deref .URL}}<a href="{{.}}" rel="noreferrer">{{short .}}</a>{{else}}—{{end}}</td>
+<td class="{{if eq .Verdict "APPROVE"}}ok{{else if eq .Verdict "COMMENT"}}warn{{else}}bad{{end}}">{{.Verdict}}</td>
+<td class="mut">{{.Detail}}</td><td class="mut">{{ago .At}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None.</div>{{end}}
+
+<h2>Running workers <span class="mut small">· {{.Host}} snapshot</span></h2>
+{{if .Workers}}<div class="wrap"><table><tr><th>Worker</th><th>Started</th><th></th></tr>
+{{range .Workers}}<tr><td>{{.Key}}</td><td class="mut">{{ago .Since}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None.</div>{{end}}
+{{end}}
+
+<h2>Recent runs <a class="small" href="/runs">all runs →</a></h2>
+{{template "runrows" .RecentRuns}}
+
+<h2>Scheduler log <span class="mut small">· fleet.log, all hosts</span></h2>
+{{if .Events}}<pre class="log">{{range .Events}}<span class="mut">{{clock .TS}} {{.Host}}</span> <span class="{{if eq .Level "error"}}bad{{else if eq .Level "notice"}}ok{{end}}">{{.Text}}</span>
+{{end}}</pre>{{else if .Status}}<pre class="log">{{.Status.Log}}</pre>{{else}}<div class="empty">No scheduler log yet.</div>{{end}}
+
+<p class="mut small foot">{{range .Hosts}}{{.Host}}: {{.Sessions}} sessions, {{.Runs}} runs, seen {{ago .LastSeen}} · {{end}}refreshes every 15 s</p>
+</div>{{end}}

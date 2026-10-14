@@ -1,0 +1,16 @@
+{{define "content"}}{{with .Run}}
+<div class="top"><h1>{{.Key}}</h1><div class="meta"><span class="{{statusClass .Status}}">{{.Status}}</span>{{if and (eq .Status "running") (not .HostLive)}} <span class="warn">(host offline)</span>{{end}} · {{.Host}}</div></div>
+<dl class="kv">
+<dt>Kind</dt><dd>{{.Kind}}</dd>
+<dt>Target</dt><dd>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{.Target}}</a>{{else}}—{{end}}</dd>
+<dt>Provider</dt><dd>{{if .Provider}}{{.Provider}}{{else}}—{{end}}</dd>
+<dt>Started</dt><dd>{{clock .StartedAt}} <span class="mut">({{ago .StartedAt}})</span></dd>
+<dt>Ended</dt><dd>{{if .EndedAt}}{{clock .EndedAt}} <span class="mut">after {{duration .StartedAt .EndedAt}}</span>{{else}}—{{end}}</dd>
+<dt>Summary</dt><dd>{{if .Summary}}{{.Summary}}{{else}}—{{end}}</dd>
+<dt>Conversation</dt><dd>{{with $.Session}}<a href="/sessions/{{.ID}}">{{trunc 100 .DisplayTitle}}</a> <span class="mut">{{.MessageCount}} blocks</span>{{else}}<span class="mut">not linked{{if eq .Provider "claude"}} (no session named fleet-{{.Key}} found){{end}}</span>{{end}}</dd>
+<dt>Log file</dt><dd class="mut small">{{home .Path}}</dd>
+</dl>
+{{if .Prompt}}<details class="block"><summary>Prompt <span class="mut small">{{lines .Prompt}} lines</span></summary><pre>{{.Prompt}}</pre></details>{{else}}<p class="mut small">No prompt captured.</p>{{end}}
+<h2>Log <span class="mut small" id="logstate">{{bytes .LogBytes}}{{if not .EndedAt}} · live{{end}}</span></h2>
+<pre class="log tall" id="runlog" data-run="{{.ID}}" data-next="{{len .Log}}" data-live="{{if .EndedAt}}0{{else}}1{{end}}">{{.Log}}</pre>
+{{end}}{{end}}

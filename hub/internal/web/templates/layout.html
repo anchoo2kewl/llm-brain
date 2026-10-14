@@ -1,0 +1,19 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} · llm-brain hub</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head><body>
+<header class="bar"><div class="wrapw">
+  <a class="brand" href="/">llm-brain hub</a>
+  <nav>
+    <a href="/" {{if eq .Nav "overview"}}class="on"{{end}}>Overview</a>
+    <a href="/runs" {{if eq .Nav "runs"}}class="on"{{end}}>Runs</a>
+    <a href="/sessions" {{if eq .Nav "sessions"}}class="on"{{end}}>Sessions</a>
+    <a href="/hosts" {{if eq .Nav "hosts"}}class="on"{{end}}>Hosts</a>
+  </nav>
+  <form class="gsearch" action="/search" method="get"><input type="search" name="q" value="{{if eq .Nav "search"}}{{.Q}}{{end}}" placeholder="Search conversations…" aria-label="Search conversations"></form>
+</div></header>
+<main class="wrapw">{{template "content" .}}</main>
+</body></html>{{end}}

@@ -1,0 +1,15 @@
+{{define "content"}}
+<div class="top"><h1>Sessions</h1><div class="meta">{{.Count}} shown</div></div>
+<form class="filters" method="get" action="/sessions">
+<input type="search" name="q" value="{{.F.Q}}" placeholder="title, directory, branch…">
+<select name="host"><option value="">any host</option>{{range .Hosts}}<option {{if eq . $.F.Host}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="provider"><option value="">any provider</option>{{range .Providers}}<option {{if eq . $.F.Provider}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="fleet"><option value="">interactive + fleet</option><option value="hide" {{if eq .F.Fleet "hide"}}selected{{end}}>interactive only</option><option value="only" {{if eq .F.Fleet "only"}}selected{{end}}>fleet workers only</option></select>
+{{if .F.Project}}<input type="hidden" name="project" value="{{.F.Project}}"><span class="pill">{{home .F.Project}}</span>{{end}}
+<button type="submit">Filter</button> <a class="small" href="/sessions">clear</a>
+</form>
+{{range .Groups}}
+<h2>{{.Host}} · <a href="/sessions?host={{.Host}}&amp;project={{.Project}}">{{home .Project}}</a> <span class="mut small">{{len .Sessions}}</span></h2>
+{{template "sessrows" .Sessions}}
+{{else}}<div class="empty">No sessions.</div>{{end}}
+{{end}}

@@ -1,0 +1,41 @@
+{{define "runrows"}}{{if .}}<div class="wrap"><table>
+<tr><th>Run</th><th>Host</th><th>Status</th><th>Target</th><th>Started</th><th>Took</th><th>Summary</th></tr>
+{{range .}}<tr>
+<td><a href="/runs/{{.ID}}">{{.Key}}</a> <span class="pill">{{.Kind}}</span>{{if .Provider}} <span class="mut small">{{.Provider}}</span>{{end}}</td>
+<td class="mut">{{.Host}}</td>
+<td class="{{statusClass .Status}}">{{.Status}}{{if and (eq .Status "running") (not .HostLive)}} <span class="warn small">(host offline)</span>{{end}}</td>
+<td>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{short .Target}}</a>{{end}}</td>
+<td class="mut nowrap" title="{{.StartedAt}}">{{ago .StartedAt}}</td>
+<td class="mut nowrap">{{duration .StartedAt .EndedAt}}</td>
+<td class="mut">{{trunc 120 .Summary}}</td>
+</tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
+
+{{define "sessrows"}}{{if .}}<div class="wrap"><table>
+<tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th></tr>
+{{range .}}<tr>
+<td>{{if .Live}}<span class="dot" title="live"></span> {{end}}<a href="/sessions/{{.ID}}">{{trunc 110 .DisplayTitle}}</a> <span class="mut small">{{.Provider}}</span></td>
+<td class="mut">{{.Host}}</td>
+<td class="mut small">{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</td>
+<td class="mut">{{.MessageCount}}</td>
+<td class="mut nowrap" title="{{.FileMtime}}">{{ago .FileMtime}}</td>
+</tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
+
+{{define "items"}}{{range .}}{{template "item" .}}{{end}}{{end}}
+
+{{define "item"}}<div class="msg {{.Role}} k-{{.Kind}}{{if .Meta}} meta{{end}}" id="m{{.ID}}">
+{{- if eq .Kind "tool_use"}}
+<details class="tool"><summary><span class="tname">{{.ToolName}}</span> <span class="mut small">{{trunc 140 .ToolInput}}</span>{{if .Result}}{{if .Result.IsError}} <span class="bad small">error</span>{{end}}{{else}} <span class="mut small">(no result yet)</span>{{end}}</summary>
+<div class="lbl">input</div><pre>{{.ToolInput}}</pre>
+{{with .Result}}<div class="lbl">{{if .IsError}}error{{else}}output{{end}}</div><pre class="{{if .IsError}}err{{end}}">{{.Text}}</pre>{{end}}
+</details>
+{{- else if eq .Kind "tool_result"}}
+<details class="tool"><summary><span class="tname">result</span> <span class="mut small">{{trunc 140 .Text}}</span>{{if .IsError}} <span class="bad small">error</span>{{end}}</summary><pre class="{{if .IsError}}err{{end}}">{{.Text}}</pre></details>
+{{- else if eq .Kind "thinking"}}
+<details class="think"><summary>thinking <span class="mut small">{{trunc 120 .Text}}</span></summary><div class="txt">{{.Text}}</div></details>
+{{- else if .Meta}}
+<details class="metab"><summary>{{.Role}} context <span class="mut small">{{trunc 120 .Text}}</span></summary><div class="txt">{{.Text}}</div></details>
+{{- else}}
+<div class="who">{{.Role}} <a class="mut small ts" href="#m{{.ID}}" title="{{.TS}}">{{clock .TS}}</a> <a class="mut small" href="/messages/{{.ID}}/raw">raw</a></div>
+{{if isLong .Text}}<div class="txt clamp">{{.Text}}</div><button type="button" class="more">show all</button>{{else}}<div class="txt">{{.Text}}</div>{{end}}
+{{- end}}
+</div>{{end}}

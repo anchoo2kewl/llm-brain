@@ -1,0 +1,22 @@
+{{define "content"}}{{with .S}}
+<div class="top"><h1 class="title">{{if .Live}}<span class="dot" title="live"></span> {{end}}{{trunc 160 .DisplayTitle}}</h1>
+<div class="meta">{{.Provider}} · {{.Host}}{{if .Live}} · <span class="ok">live</span>{{end}}</div></div>
+<dl class="kv">
+<dt>Directory</dt><dd>{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</dd>
+<dt>When</dt><dd>{{clock .FirstAt}} → {{clock .LastAt}} <span class="mut">({{duration .FirstAt .LastAt}}, active {{ago .FileMtime}})</span></dd>
+{{if .Model}}<dt>Model</dt><dd>{{.Model}}</dd>{{end}}
+{{if .AgentName}}<dt>Agent</dt><dd>{{.AgentName}}{{if $.S.RunID}} · <a href="/runs/{{$.S.RunID}}">fleet run</a>{{end}}</dd>{{end}}
+{{if $.ParentID}}<dt>Parent</dt><dd><a href="/sessions/{{$.ParentID}}">parent session</a> <span class="mut">(this is a subagent transcript)</span></dd>{{end}}
+<dt>Session</dt><dd class="mut small">{{.UUID}} · {{.MessageCount}} blocks · {{home .Path}}</dd>
+</dl>
+{{end}}
+{{if .Subagents}}<details class="block"><summary>Subagents <span class="mut small">{{len .Subagents}}</span></summary>{{template "sessrows" .Subagents}}</details>{{end}}
+<div class="tools-toggle small"><label><input type="checkbox" id="hidetools"> hide tool calls</label> <label><input type="checkbox" id="hidemeta" checked> hide injected context</label></div>
+{{if .HasEarlier}}<p class="pager"><a href="/sessions/{{.S.ID}}?before={{.FirstID}}">← earlier messages</a></p>{{end}}
+<div id="transcript" class="transcript hidemeta" data-session="{{.S.ID}}" data-after="{{.LastID}}" data-live="{{if and .S.Live (not .HasLater)}}1{{else}}0{{end}}">
+{{template "items" .Items}}
+</div>
+{{if .HasLater}}<p class="pager"><a href="/sessions/{{.S.ID}}?after={{.LastID}}">later messages →</a> · <a href="/sessions/{{.S.ID}}">latest</a></p>{{end}}
+{{if not .Items}}<div class="empty">No messages.</div>{{end}}
+<p class="mut small" id="livestate">{{if and .S.Live (not .HasLater)}}live — updating{{end}}</p>
+{{end}}
