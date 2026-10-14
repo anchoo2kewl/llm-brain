@@ -186,6 +186,8 @@ cmd_review_prs() {
   for url in ${ONLY_PR:-$(review_queue)}; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
+    # never review my own PRs (the queue filters them too; this covers `review-pr <url>`)
+    [[ "$(gh pr view "$url" --json author --jq .author.login)" == "$(cfg '.intake.assignee')" ]] && { log "$url is mine — not reviewing"; continue; }
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
     if [[ "$sha" == "$last" ]]; then                        # one review per head commit…
