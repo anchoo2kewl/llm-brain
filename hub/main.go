@@ -89,12 +89,18 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	dbPath := fs.String("db", "", "database file (default <state>/hub.db)")
 	indexPath := fs.String("index", "", "full-text index directory (default <state>/hub.bleve; 'off' to search the database instead)")
 	listen := fs.String("listen", "", "comma-separated addresses to bind (default: 127.0.0.1 + this machine's Tailscale IPv4)")
-	org := fs.String("org", "elastio", "GitHub org of pr-/review- worker keys")
-	issueRepo := fs.String("issue-repo", "elastio/blue-stack", "owner/repo of issue- worker keys")
+	org := fs.String("org", "", "GitHub org of pr-/review- worker keys (for links)")
+	issueRepo := fs.String("issue-repo", "", "owner/repo of issue- worker keys (for links)")
+	people := fs.String("people", "", "GitHub login=display name pairs, comma-separated")
 	noScan := fs.Bool("no-scan", false, "serve only; don't ingest this machine's files")
 	gwURL := fs.String("gateway", "http://127.0.0.1:8317", "account gateway (CLIProxyAPI) base URL; '' disables")
 	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY")
 	_ = fs.Parse(args)
+	for _, kv := range strings.Split(*people, ",") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok {
+			web.People[k] = v
+		}
+	}
 	if *dbPath == "" {
 		*dbPath = filepath.Join(c.state, "hub.db")
 	}
@@ -209,7 +215,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 func ship(ctx context.Context, lg *log.Logger, args []string) error {
 	fs := flag.NewFlagSet("ship", flag.ExitOnError)
 	c := commonFlags(fs)
-	to := fs.String("to", "", "hub base URL, e.g. http://100.74.108.114:8787")
+	to := fs.String("to", "", "hub base URL, e.g. http://hub-host:8787")
 	once := fs.Bool("once", false, "ship once and exit")
 	_ = fs.Parse(args)
 	if *to == "" {

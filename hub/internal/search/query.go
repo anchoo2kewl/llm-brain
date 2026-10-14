@@ -16,7 +16,7 @@ import (
 //	"kubectl get pods"     an exact phrase
 //	deploy*                a prefix
 //	-flaky                 must not match
-//	uiv3#835 blue-stack-api a/b.go 3f2a…-uuid snake_case   code tokens, matched whole or as a run of parts
+//	app2#835 web-app-api a/b.go 3f2a…-uuid snake_case   code tokens, matched whole or as a run of parts
 //	host:studio type:run provider:codex kind:tool_use tool:bash role:user status:failed
 //	session:<id or uuid>  after:2026-10-01 before:2026-10-14
 //
@@ -98,7 +98,7 @@ func Parse(s string, loc *time.Location) *Parsed {
 			if text != "" {
 				kind := Phrase
 				if !strings.ContainsFunc(text, unicode.IsSpace) {
-					kind = Word // "blue-stack-api" is one code word: match it as one
+					kind = Word // "web-app-api" is one code word: match it as one
 				}
 				p.add(neg, Clause{kind, text})
 			}

@@ -12,15 +12,15 @@ import (
 
 // AnalyzerName is the analyzer for every full-text field. It keeps code tokens searchable:
 //
-//	"see uiv3#835 in blue-stack-api/internal/x.go"
-//	  → see | uiv3#835 uiv3 | 835 | in | blue-stack-api/internal/x.go blue | stack | api | internal | x | go
+//	"see app2#835 in web-app-api/internal/x.go"
+//	  → see | app2#835 app2 | 835 | in | web-app-api/internal/x.go blue | stack | api | internal | x | go
 //
 // A word is a run of characters between separators (whitespace, quotes, brackets, ',;|=<>'), trimmed of
 // leading and trailing punctuation. Each alphanumeric part of a word is a token at its own position, and a
 // word with more than one part is also indexed whole, at its first part's position, so a phrase over the
 // parts and a term or prefix on the whole word both match. Each pair of adjacent parts inside a word is also
 // a token ("blue\x1fstack", "stack\x1fapi"), at the first part's position, so a query for a run of parts
-// (blue-stack, web/server.go) is a term or a phrase of rare pair terms, not a phrase of common words.
+// (web-app, web/server.go) is a term or a phrase of rare pair terms, not a phrase of common words.
 // Everything is lowercased; nothing is stemmed.
 const AnalyzerName = "hubcode"
 
@@ -81,7 +81,7 @@ type span struct{ start, end int }
 type word struct {
 	span
 	parts []span
-	whole bool // the word is more than its single part (uiv3#835, snake_case, a/b.go)
+	whole bool // the word is more than its single part (app2#835, snake_case, a/b.go)
 }
 
 func isSep(r rune) bool {
@@ -160,7 +160,7 @@ func lowerBytes(b []byte) []byte {
 
 // Analyzed is a query word as the index sees it.
 type Analyzed struct {
-	Whole string   // the whole word, when it has more than one part ("blue-stack-api")
+	Whole string   // the whole word, when it has more than one part ("web-app-api")
 	Parts []string // its alphanumeric parts ("blue", "stack", "api")
 }
 

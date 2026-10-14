@@ -12,15 +12,34 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 log() { printf '%s [%s] %s\n' "$(date '+%F %T')" "$HOST" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
-# cfg '.roles.implementer' — reads the shared config with local overrides on top.
-cfg() {
-  local local_cfg="$BRAIN_LOCAL/local.yaml"
-  if [[ -f "$local_cfg" ]]; then
-    yq eval-all '. as $i ireduce ({}; . * $i)' "$BRAIN_DIR/config/fleet.yaml" "$local_cfg" | yq "$@"
-  else
-    yq "$@" "$BRAIN_DIR/config/fleet.yaml"
-  fi
+# Config layers, later wins: config/fleet.yaml (public defaults) → <overlay>/config.yaml
+# (private: people, repos, house rules) → ~/.config/llm-brain/local.yaml (this machine).
+# The overlay dir comes from $BRAIN_OVERLAY, else local.yaml's `overlay:`, else ~/projects/llm-brain-overlay.
+overlay_dir() {
+  local d="${BRAIN_OVERLAY:-}"
+  [[ -z "$d" && -f "$BRAIN_LOCAL/local.yaml" ]] && d="$(yq '.overlay // ""' "$BRAIN_LOCAL/local.yaml")"
+  d="${d:-$HOME/projects/llm-brain-overlay}"; d="${d/#\~/$HOME}"
+  [[ -d "$d" ]] && echo "$d"
 }
+
+# cfg '.roles.implementer'  (any yq args)
+cfg() {
+  local files=("$BRAIN_DIR/config/fleet.yaml") ov
+  ov="$(overlay_dir)"
+  [[ -n "$ov" && -f "$ov/config.yaml" ]] && files+=("$ov/config.yaml")
+  [[ -f "$BRAIN_LOCAL/local.yaml" ]] && files+=("$BRAIN_LOCAL/local.yaml")
+  yq eval-all '. as $i ireduce ({}; . * $i)' "${files[@]}" | yq "$@"
+}
+
+# house <prompt>: the overlay's extra instructions for a prompt (house/<prompt>.md), or nothing.
+house() {
+  local ov; ov="$(overlay_dir)"
+  [[ -n "$ov" && -f "$ov/house/$1.md" ]] && cat "$ov/house/$1.md"
+  return 0
+}
+
+# Expand ~ in a config path.
+cfg_path() { local p; p="$(cfg "$1")"; echo "${p/#\~/$HOME}"; }
 
 paused() {
   [[ -f "$BRAIN_LOCAL/PAUSE" ]] || [[ "$(cfg '.paused')" == "true" ]]

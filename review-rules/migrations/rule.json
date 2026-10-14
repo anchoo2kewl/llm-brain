@@ -1,0 +1,8 @@
+{
+  "name": "migrations",
+  "description": "Schema changes that must survive production-sized tables.",
+  "when": { "files": ["**/migrations/**", "**/*.sql", "**/schema*"], "keywords": ["ALTER TABLE", "CREATE INDEX", "ADD COLUMN", "backfill"], "min": 1 },
+  "rules": [
+    { "path": "**/*", "rule": "- No data backfill or full-table rewrite inside a deploy-time migration; run it as a separate job.\n- New indexes on big tables are built concurrently where the database allows; no long locks.\n- Deploy order works: the migration lands before code that reads the new column, and old code still runs against the new schema.\n- A new column used in a hot WHERE/JOIN/ORDER BY has an index or a stated reason." }
+  ]
+}

@@ -24,12 +24,12 @@ func terms(s string) []string {
 }
 
 func TestAnalyzerCodeTokens(t *testing.T) {
-	got := terms(`See uiv3#835 in "blue-stack-api/internal/x.go", tenant_id=3F2A6C1E-0B4D-4E5F-8A9B-0C1D2E3F4A5B; Deploying (done).`)
+	got := terms(`See app2#835 in "web-app-api/internal/x.go", tenant_id=3F2A6C1E-0B4D-4E5F-8A9B-0C1D2E3F4A5B; Deploying (done).`)
 	want := []string{
 		"see@1",
-		"uiv3#835@2", "uiv3@2", "835@3", "uiv3+835@2",
+		"app2#835@2", "app2@2", "835@3", "app2+835@2",
 		"in@4",
-		"blue-stack-api/internal/x.go@5", "blue@5", "stack@6", "blue+stack@5", "api@7", "stack+api@6",
+		"web-app-api/internal/x.go@5", "web@5", "app@6", "web+app@5", "api@7", "app+api@6",
 		"internal@8", "api+internal@7", "x@9", "internal+x@8", "go@10", "x+go@9",
 		"tenant_id@11", "tenant@11", "id@12", "tenant+id@11",
 		"3f2a6c1e-0b4d-4e5f-8a9b-0c1d2e3f4a5b@13", "3f2a6c1e@13", "0b4d@14", "3f2a6c1e+0b4d@13", "4e5f@15", "0b4d+4e5f@14",
@@ -45,14 +45,14 @@ func TestAnalyzerCodeTokens(t *testing.T) {
 	if got := terms("x " + blob + " y"); !slices.Equal(got, []string{"x@1", "y@2"}) {
 		t.Fatalf("blob: %v", got)
 	}
-	a := AnalyzeWord("Blue-Stack-API")
-	if a.Whole != "blue-stack-api" || !slices.Equal(a.Parts, []string{"blue", "stack", "api"}) {
+	a := AnalyzeWord("Web-App-API")
+	if a.Whole != "web-app-api" || !slices.Equal(a.Parts, []string{"web", "app", "api"}) {
 		t.Fatalf("AnalyzeWord: %+v", a)
 	}
 	if a := AnalyzeWord("deploy"); a.Whole != "" || !slices.Equal(a.Parts, []string{"deploy"}) {
 		t.Fatalf("AnalyzeWord plain: %+v", a)
 	}
-	if p := AnalyzePhrase("fix blue-stack now"); fmt.Sprint(p) != "[[fix] [blue-stack blue] [stack] [now]]" {
+	if p := AnalyzePhrase("fix web-app now"); fmt.Sprint(p) != "[[fix] [web-app web] [app] [now]]" {
 		t.Fatalf("AnalyzePhrase: %v", p)
 	}
 }
@@ -60,12 +60,12 @@ func TestAnalyzerCodeTokens(t *testing.T) {
 func TestParse(t *testing.T) {
 	loc := time.UTC
 	p := Parse(`deploy "kubectl get pods" roll* -flaky host:Studio type:runs provider:codex kind:tool_use tool:Bash `+
-		`session:42 after:2026-10-01 before:2026-10-14 https://x.y/z uiv3#835 host:"lap top" status:failed bogus:thing`, loc)
+		`session:42 after:2026-10-01 before:2026-10-14 https://x.y/z app2#835 host:"lap top" status:failed bogus:thing`, loc)
 	var must []string
 	for _, c := range p.Must {
 		must = append(must, fmt.Sprintf("%d:%s", c.Kind, c.Text))
 	}
-	wantMust := []string{"0:deploy", "1:kubectl get pods", "2:roll", "0:https://x.y/z", "0:uiv3#835", "0:bogus:thing"}
+	wantMust := []string{"0:deploy", "1:kubectl get pods", "2:roll", "0:https://x.y/z", "0:app2#835", "0:bogus:thing"}
 	if !slices.Equal(must, wantMust) {
 		t.Fatalf("must: %v", must)
 	}
@@ -92,12 +92,12 @@ func TestParse(t *testing.T) {
 }
 
 func TestSnippet(t *testing.T) {
-	text := strings.Repeat("filler ", 100) + "we merged <uiv3#835> after the Deploy finished" + strings.Repeat(" tail", 100)
-	s := string(Snippet(text, Parse("deploy uiv3#835", nil).HighlightTerms()))
-	if !strings.Contains(s, "<mark>uiv3#835</mark>") || !strings.Contains(s, "<mark>Deploy</mark>") {
+	text := strings.Repeat("filler ", 100) + "we merged <app2#835> after the Deploy finished" + strings.Repeat(" tail", 100)
+	s := string(Snippet(text, Parse("deploy app2#835", nil).HighlightTerms()))
+	if !strings.Contains(s, "<mark>app2#835</mark>") || !strings.Contains(s, "<mark>Deploy</mark>") {
 		t.Fatalf("snippet: %s", s)
 	}
-	if !strings.Contains(s, "&lt;") || strings.Contains(s, "<uiv3") {
+	if !strings.Contains(s, "&lt;") || strings.Contains(s, "<app2") {
 		t.Fatalf("snippet not escaped: %s", s)
 	}
 	if !strings.HasPrefix(s, "…") || !strings.HasSuffix(s, "…") {
@@ -126,7 +126,7 @@ func newFixture(t *testing.T, indexPath string) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	f := &fixture{st: st, eng: ingest.NewEngine(st, "elastio", "elastio/blue-stack"), ctx: context.Background()}
+	f := &fixture{st: st, eng: ingest.NewEngine(st, "acme", "acme/web-app"), ctx: context.Background()}
 	f.open(t, indexPath)
 	return f
 }
@@ -158,7 +158,7 @@ func (f *fixture) chunk(t *testing.T, host, kind, path string, data string) {
 }
 
 func user(sess, ts, text string) string {
-	return fmt.Sprintf(`{"type":"user","sessionId":%q,"cwd":"/w/blue-stack","gitBranch":"feat/x","timestamp":%q,"message":{"role":"user","content":%q}}`+"\n", sess, ts, text)
+	return fmt.Sprintf(`{"type":"user","sessionId":%q,"cwd":"/w/web-app","gitBranch":"feat/x","timestamp":%q,"message":{"role":"user","content":%q}}`+"\n", sess, ts, text)
 }
 
 func toolUse(sess, ts, id, cmd string) string {
@@ -176,16 +176,16 @@ const (
 
 func (f *fixture) seed(t *testing.T) {
 	f.chunk(t, "studio", ingest.KindClaude, "/p/-w/"+uuidA+".jsonl",
-		user(uuidA, "2026-10-14T20:00:01Z", "please deploy blue-stack-api and check uiv3#835")+
+		user(uuidA, "2026-10-14T20:00:01Z", "please deploy web-app-api and check app2#835")+
 			toolUse(uuidA, "2026-10-14T20:00:02Z", "t1", "cd ~/w\nkubectl get pods -n blues")+
 			toolResult(uuidA, "2026-10-14T20:00:03Z", "t1", "tenant_id missing in internal/web/server.go"))
 	f.chunk(t, "laptop", ingest.KindCodex, "/c/2026/09/01/rollout-2026-09-01T10-00-00-"+uuidB+".jsonl",
 		`{"timestamp":"2026-09-01T10:00:00Z","type":"session_meta","payload":{"id":"`+uuidB+`","cwd":"/w/other","originator":"codex_cli_rs"}}`+"\n"+
 			`{"timestamp":"2026-09-01T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"redeploy the deployment of other-thing"}]}}`+"\n")
-	f.chunk(t, "studio", ingest.KindRunLog, "/s/logs/review-blue-stack-uiv3-839.20261014-160000.log",
-		"working on it\nREVIEWED https://github.com/elastio/blue-stack-uiv3/pull/839 APPROVE looks fine\n")
+	f.chunk(t, "studio", ingest.KindRunLog, "/s/logs/review-web-app-app2-839.20261014-160000.log",
+		"working on it\nREVIEWED https://github.com/acme/web-app-app2/pull/839 APPROVE looks fine\n")
 	f.chunk(t, "studio", ingest.KindFleetLog, "/s/logs/fleet.log",
-		"2026-10-14 16:00:00 [studio] started review-blue-stack-uiv3-839 (claude/read, pid 1, log /s/logs/review-blue-stack-uiv3-839.20261014-160000.log)\n")
+		"2026-10-14 16:00:00 [studio] started review-web-app-app2-839 (claude/read, pid 1, log /s/logs/review-web-app-app2-839.20261014-160000.log)\n")
 }
 
 func (f *fixture) search(t *testing.T, q string) []string {
@@ -218,19 +218,19 @@ func TestSearch(t *testing.T) {
 	// Message ids: 1 user prompt, 2 tool_use, 3 tool_result (session 1); 4 codex prompt (session 2).
 	cases := map[string][]string{
 		"deploy":                    {"m1", "s1"}, // the session's title is its first prompt
-		"deploy blue-stack-api":     {"m1", "s1"},
+		"deploy web-app-api":     {"m1", "s1"},
 		"deploy nothere":            nil,
 		`"kubectl get pods"`:        {"m2"},
 		`"get kubectl"`:             nil,
 		"deploy*":                   {"m1", "m4", "s1", "s2"},
-		"uiv3#835":                  {"m1", "s1"},
-		"blue-stack":                {"e1", "m1", "r1", "s1"}, // a run of parts inside longer tokens
+		"app2#835":                  {"m1", "s1"},
+		"web-app":                {"e1", "m1", "r1", "s1"}, // a run of parts inside longer tokens
 		"internal/web/server.go":    {"m3"},
 		"web/server":                {"m3"},
 		"tenant_id":                 {"m3"},
 		uuidA:                       {"s1"},
 		"kubectl -pods":             nil,
-		"deploy -uiv3#835":          nil,
+		"deploy -app2#835":          nil,
 		"tool:bash":                 {"m2"},
 		"kubectl tool:bash":         {"m2"},
 		"type:session":              {"s1", "s2"},
@@ -276,7 +276,7 @@ func TestSearch(t *testing.T) {
 	}
 	// An event that names a worker log links to its run.
 	res, _ = f.idx.Search(f.ctx, Request{Q: "type:event"})
-	if h := res.Hits[0]; h.Link != "/log/review-blue-stack-uiv3-839.20261014-160000.log?host=studio" {
+	if h := res.Hits[0]; h.Link != "/log/review-web-app-app2-839.20261014-160000.log?host=studio" {
 		t.Fatalf("event link: %+v", h)
 	}
 }
@@ -315,7 +315,7 @@ func TestIncrementalAndIdempotent(t *testing.T) {
 	}
 	// New rows and changed rows are picked up.
 	f.chunk(t, "studio", ingest.KindClaude, "/p/-w/"+uuidA+".jsonl", user(uuidA, "2026-10-14T20:01:00Z", "now rollback the canary"))
-	f.chunk(t, "studio", ingest.KindRunLog, "/s/logs/review-blue-stack-uiv3-839.20261014-160000.log", "posted a nitpick about zanzibar\n")
+	f.chunk(t, "studio", ingest.KindRunLog, "/s/logs/review-web-app-app2-839.20261014-160000.log", "posted a nitpick about zanzibar\n")
 	if got := f.search(t, "canary"); !slices.Equal(got, []string{"m5"}) {
 		t.Fatalf("new message: %v", got)
 	}

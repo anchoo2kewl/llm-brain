@@ -1,0 +1,2 @@
+- PR titles follow Conventional Commits with a scope.
+- Run `make preflight` before every push.

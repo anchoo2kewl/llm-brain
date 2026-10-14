@@ -1,0 +1,18 @@
+# Copy this folder to your overlay dir (default ~/projects/llm-brain-overlay) and fill it in.
+owner: {name: Sam, github: sam-dev, notify: ""}
+people: {mona-l: Mona, octo-b: Octo}
+work_root: ~/work
+hub_url: http://127.0.0.1:8787          # other machines: the always-on Mac's Tailscale IP
+intake:
+  repos: [acme/platform]
+  assignee: sam-dev
+  authors: [mona-l, octo-b]
+  created_since: "2026-01-01"
+pr_owners: [acme]
+reviewers: [octo-b]
+pr_review:
+  owners: [acme]
+  repo_regex: ".*"
+  updated_since: "2026-01-01"
+  extra_rule_modules: [acme-house]
+# config_sync: {repo: git@github.com:you/agent-config.git, dir: ~/agent-config, restore: bin/restore.sh}

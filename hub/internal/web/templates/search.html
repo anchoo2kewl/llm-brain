@@ -1,7 +1,7 @@
 {{define "content"}}<link rel="stylesheet" href="/static/search.css">
 <div class="top"><h1>Search</h1><div class="meta">{{if or .Q .Type}}{{.Total}} results · {{.Took}}{{end}}</div></div>
 <form class="filters" method="get" action="/search">
-<input type="search" name="q" value="{{.Q}}" placeholder="words, &quot;a phrase&quot;, deploy*, uiv3#835, host:studio type:run after:2026-10-01" autofocus>
+<input type="search" name="q" value="{{.Q}}" placeholder="words, &quot;a phrase&quot;, deploy*, app2#835, host:studio type:run after:2026-10-01" autofocus>
 <select name="host"><option value="">any host</option>{{range .Hosts}}<option {{if eq . $.Host}}selected{{end}}>{{.}}</option>{{end}}</select>
 <select name="type"><option value="">everything</option>{{range $t := .Types}}<option value="{{$t}}" {{if eq $t $.Type}}selected{{end}}>{{$t}}s</option>{{end}}</select>
 <select name="sort"><option value="">best match</option><option value="new" {{if eq .Sort "new"}}selected{{end}}>newest</option></select>

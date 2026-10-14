@@ -28,7 +28,7 @@ providers:
 # (a live rewrite can resurrect a spent refresh token).
 gateway:
   enabled: true
-  url: http://127.0.0.1:8317            # other machines: http://100.74.108.114:8317
+  url: http://127.0.0.1:8317            # other machines: http://<gateway-host>:8317
   env_file: ~/.config/llm-brain/cpa.env # CPA_API_KEY (client key), CPA_MGMT_KEY — not in git
 
 # Roles. The reviewer is ALWAYS a different provider from the implementer when
@@ -38,15 +38,25 @@ roles:
   implementer: claude
   reviewer: codex
 
-# Intake: every open issue assigned to me whose author is Naj or Greg. No label needed.
+# Who this fleet works for. Real values go in your overlay (see README); these are placeholders.
+owner:
+  name: ""
+  github: ""                    # your GitHub login
+  notify: ""                    # e.g. slack-self-dm; empty = macOS notification only
+
+people: {}                      # GitHub handle -> display name, e.g. {octocat: Mona}
+work_root: ~/work               # where your repos live; workers make worktrees here
+hub_url: http://127.0.0.1:8787  # where shippers send data
+
+# Intake: every open issue assigned to the owner whose author is in `authors`. No label needed.
 intake:
-  repos: [elastio/blue-stack]
-  assignee: anchoo2kewl
-  authors: [Assurio-n7n, greg-aligiannis]   # Naj, Greg
-  created_since: "2026-10-14"   # older backlog is ignored; move the date back to include it
+  repos: []                     # e.g. [acme/platform]
+  assignee: ""                  # usually owner.github
+  authors: []                   # who may hand you work, e.g. [teammate-a, teammate-b]
+  created_since: "1970-01-01"   # ignore older backlog
   skip_labels: [agent:stop, agent:done]
-  max_in_flight: 2              # issues the fleet owns (working or PR open); the next starts only when one is closed/merged
-  skip_if_my_open_pr: true      # an issue I'm already working by hand (open PR of mine mentions it) is left alone
+  max_in_flight: 2              # issues the fleet owns at once; the next starts when one is closed/merged
+  skip_if_my_open_pr: true      # an issue you're already working by hand is left alone
 
 # Labels the fleet writes (created once by `fleet labels`).
 labels:
@@ -58,26 +68,24 @@ labels:
 
 # PRs the babysitter owns carry this marker in their body.
 pr_marker: "llm-brain:issue="
-pr_owners: [elastio]            # orgs to search for marker PRs
-reviewers: [greg-aligiannis]    # always requested on every PR
+pr_owners: []                   # orgs to search for fleet PRs, e.g. [acme]
+reviewers: []                   # always requested on every PR
 
-# Component 3: review PRs that request me (or @-mention me), like Greg's review agent.
+# Component 3: review every PR that requests (or @-mentions) the owner.
 pr_review:
   enabled: true
-  provider: claude              # external reviews post as Anshuman; use the main LLM
-  owners: [elastio]
-  repo_regex: "^(blue-stack|elastio-command|database-monitoring-agent|infraworld|elastio-stack|helm-chart-museum)"
-  updated_since: "2026-10-14"    # ignore the stale backlog of old review requests
-  post: true                    # false = dry run (write review to a file); true = post on GitHub as me
-  # Review rules = UNION of every module (unlike OCR's first-match). Plug-and-play:
-  #   - ocr                       open-code-review system rules + the repo's .opencodereview/rule.json
-  #   - <dir>                     llm-brain/review-rules/<dir>/rule.json (OCR rule format)
-  #   - {name, git, path}         any git repo holding an OCR-format rule.json
-  rule_modules:
-    - security                  # OWASP Top 10 + performance — reviews weigh these first
-    - ocr
-    - elastio
-    - greg
+  provider: claude
+  owners: []                    # orgs to watch, e.g. [acme]
+  repo_regex: ".*"              # narrow to some repos
+  updated_since: "1970-01-01"   # skip stale review requests
+  post: true                    # false = dry run (write the review to a file)
+  # Rules are a UNION over modules; each module decides by itself whether it applies
+  # (fuzzy "when": repo globs, file globs, keywords in the diff). Plug-and-play:
+  #   - ocr                       open-code-review language rules + the repo's .opencodereview/rule.json
+  #   - <name>                    review-rules/<name>/ here, or <overlay>/rules/<name>/
+  #   - {name, git, path}         any git repo with an OCR-format rule.json
+  rule_modules: [security, ocr, multitenant, migrations, contracts]
+  extra_rule_modules: []        # your overlay's private modules
 
 limits:
   max_workers: 3                # concurrent implement/babysit LLM workers on this machine
@@ -91,9 +99,9 @@ limits:
 merge:
   auto: true
   require_approval: true
-  require_full_ci: true         # blue-stack: acc tests too, then `bors r+`
+  require_full_ci: true         # every required check, including slow/merge-queue ones
   require_internal_review_clean: true
 
 notify:
-  slack_self_dm: true           # DM Anshuman on merge / block
+  slack_self_dm: false          # DM the owner on merge / block (needs a Slack tool in the worker)
   macos: true

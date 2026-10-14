@@ -1,78 +1,111 @@
 # llm-brain
 
-Anshuman's agent fleet: it takes issues Naj and Greg assign, ships them to merged PRs, and reviews the PRs that request Anshuman.
-Skills, memory and settings live in [claude-backup](https://github.com/anchoo2kewl/claude-backup) (two-way synced across machines). This repo is only the fleet.
+A small fleet of coding agents that works for one person:
 
-## Components
+- **Picks up issues** your teammates assign you, builds them, opens PRs, answers review comments, and merges when CI and a reviewer say yes.
+- **Reviews PRs** that request you, every 5 minutes, with short notes that lead with security (OWASP Top 10) and performance. It approves when nothing is blocking and re-reviews after every new commit.
+- **Shares your LLM subscriptions** through one gateway: personal accounts first, work accounts only when personal runs out.
+- **Shows everything in one place**: a web hub with every agent running now, every run, and every Claude/Codex conversation on every machine, with fast search.
 
-| | What | Where |
-|---|---|---|
-| 1 | **LLM management.** Which LLM implements and which reviews; multiple accounts per provider, personal first | `config/fleet.yaml` `providers` / `roles`, `bin/llm-run` (gateway TBD) |
-| 2 | **Issue → PR → merge.** Opt-in label `agent-ready` on issues assigned to me by Naj, Greg or me | `fleet dispatch` → `prompts/implement.md`; `fleet babysit` → `prompts/babysit.md` |
-| 3 | **PR reviewer.** Every PR in the elastio blue-stack family that requests or mentions me; re-reviews on every new head commit until it approves | `fleet review-prs` → `prompts/pr-review.md` + `bin/review-rules` |
-| 4 | **Hub.** One UI for every agent running now, every fleet run, and every Claude/Codex conversation on every machine, with full history | `hub/` → `bin/hub serve` (Studio, port 8787), `bin/hub ship` (laptops) |
+It runs on a Mac you leave on (launchd), with other machines shipping their sessions to it. There is no login; it's meant to be reached over Tailscale only.
 
-`launchd/com.llm-brain.fleet.plist` runs `fleet tick` (all three loops) every 5 minutes on each machine.
+```
+issue assigned ──► fleet dispatch ──► worker (claude/codex) ──► PR ──► internal review (other LLM)
+                                                                 │
+review comments / CI ──► fleet babysit ──► fix, reply ──► merge ◄─┘
+PR requests you ──► fleet review-prs ──► rule modules (OWASP, perf, OCR, yours) ──► review
+every LLM call ──► account gateway (personal → work) ──► hub (quota, model, account per call)
+```
 
-## LLM roles
-`roles.implementer` does the work. `roles.reviewer` does the internal cross-check, and is always a **different** provider when one is available; only with a single provider does it review itself, in a fresh session. `bin/llm-run` is the only vendor-specific code (claude, codex, gemini).
+## Quick start
 
-## Two machines, no collisions
-- An issue is claimed with an `llm-brain:claim host=<host>` comment; the earliest claim wins.
-- Fleet PRs carry `<!-- llm-brain:issue=N -->` in the body; the babysitter finds them by that marker.
-- Reviews are tracked per head commit in `~/.local/state/llm-brain/prs/*.reviewed`.
+```
+git clone https://github.com/anchoo2kewl/llm-brain ~/projects/llm-brain
+mkdir -p ~/projects/llm-brain-overlay && cp -R ~/projects/llm-brain/examples/overlay/. ~/projects/llm-brain-overlay/
+$EDITOR ~/projects/llm-brain-overlay/config.yaml      # who you are, who hands you work, which repos
+~/projects/llm-brain/bootstrap.sh                     # tools, hub, fleet loop (launchd)
+```
+Then open `http://<this-mac>:8787`. A laptop that should only send its sessions to the hub: `bootstrap.sh --shipper`.
 
-## Review rules: plug-and-play modules, union semantics
-`pr_review.rule_modules` lists the modules. Every matching rule from **every** module applies; this differs from open-code-review's first-match behaviour.
-- `ocr`: [alibaba/open-code-review](https://github.com/alibaba/open-code-review) system rules per language, plus the reviewed repo's own `.opencodereview/rule.json`. Used in delegation mode: OCR picks the files and rules, our LLM does the review.
-- `review-rules/<name>/rule.json`: local modules in OCR rule format (`elastio` house rules, `greg` Greg's recurring checks).
-- `{name, git, path}`: any git repo with an OCR-format `rule.json`.
+## Overlay: your private settings
 
-`bin/review-rules <files…>` prints the union for each file group.
+The repo holds only general defaults. Everything about *you* goes in an overlay directory, which you keep private:
 
-Reviews are short (CodeRabbit/Greptile style). The agent approves when there are zero red (critical/high) items; otherwise it posts COMMENT, and it re-reviews after new commits.
+```
+llm-brain-overlay/
+  config.yaml              # owner, people, repos, orgs to watch, extra rule modules (merged over config/fleet.yaml)
+  repos.txt                # repos to clone into work_root:  <name> <git-url>
+  house/<prompt>.md        # extra instructions added to prompts/implement.md, babysit.md, pr-review.md
+  rules/<name>/rule.json   # private review rule modules
+```
+It's found at `$BRAIN_OVERLAY`, or `overlay:` in `~/.config/llm-brain/local.yaml`, or `~/projects/llm-brain-overlay`.
+Config layers, later wins: `config/fleet.yaml` → overlay `config.yaml` → `~/.config/llm-brain/local.yaml` (one machine). See `examples/overlay/`.
+
+## Review rules: modules, union, fuzzy
+
+`pr_review.rule_modules` + `extra_rule_modules` list the modules. **Every** matching rule of **every** applicable module is used (unlike open-code-review's first match). Built in:
+
+| Module | What |
+|---|---|
+| `security` | OWASP Top 10 (A01–A10) + performance. Reviews weigh these first. |
+| `ocr` | [alibaba/open-code-review](https://github.com/alibaba/open-code-review) language rules + the reviewed repo's own `.opencodereview/rule.json` |
+| `multitenant` | tenant/role scoping, cache keys, feature flags |
+| `migrations` | schema changes safe at production size |
+| `contracts` | API ↔ UI ↔ mock agreement, description vs code, limits, lifecycle edges |
+
+A module is a folder with an OCR-format `rule.json` (in `review-rules/`, your overlay's `rules/`, or `{name, git, path}` for any git repo). It can say **when** it applies, loosely:
+
+```json
+{ "name": "migrations",
+  "when": { "repos": ["*api*"], "files": ["**/migrations/**"], "keywords": ["ALTER TABLE", "backfill"], "min": 1 },
+  "rules": [ { "path": "**/*", "rule": "No data backfill inside a deploy-time migration…" } ] }
+```
+Each matching repo glob, file glob or keyword is one hit; the module applies with at least `min` hits. Keywords are fuzzy: case, `_` and `-` are ignored and they match inside words, so `tenant` hits `tenant_id`, `TenantName` and `multi-tenant`. A single rule entry can carry its own `when`.
+
+Try it: `bin/review-rules --repo acme/api --base origin/main <files…>` prints which modules applied and their rules.
+
+## LLM roles and accounts
+
+`roles.implementer` builds; `roles.reviewer` cross-checks, and is always a **different** provider when one is available (one provider → it reviews itself in a fresh session). `bin/llm-run` is the only vendor-specific code (claude, codex, gemini).
+
+With `gateway.enabled`, workers go through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), which holds every subscription login. Give personal accounts a higher `priority` than work ones and use `fill-first` routing: work is used only while personal is cooling down, and personal takes over again after its reset. The hub polls the gateway and shows each account's 5h/weekly quota left, which one is serving now, and the account, model, tokens and latency of every call. Stop the gateway before editing a credential file; a live edit can invalidate its refresh token.
+
+## The fleet
+
+- **Intake:** open issues assigned to `intake.assignee`, written by someone in `intake.authors`, newer than `created_since`. At most `max_in_flight` at once (default 2); the next starts when one is merged or closed. An issue you're already working by hand (an open PR of yours mentions it) is skipped. Each issue is picked up once; if there's nothing to build it gets `agent:done`.
+- **Claims:** an `llm-brain:claim host=<host>` comment; the earliest wins, so two machines never collide.
+- **PRs:** carry `<!-- llm-brain:issue=N -->`; `fleet babysit` finds them by it, fixes review comments and CI, and merges to the default branch when approved + green + internal review clean. It never touches staging/production promotion.
+- **Reviews:** once per head commit; a review that dies without posting is retried up to 3 times. It never reviews your own PRs.
+- **Kill switches:** `paused: true` (all machines), `fleet pause` (this machine), label `agent:stop` (one issue).
+
+```
+fleet tick | dispatch | babysit | review-prs | review-pr <url> | review <url> | status | labels | pause | resume | providers
+```
 
 ## Hub (`hub/`)
-A Go service with a server-rendered UI, storing everything in Turso (the Rust SQLite) at `~/.local/state/llm-brain/hub.db`. It replaced the Python `bin/dashboard`, on the same port. There is no login: it binds only to 127.0.0.1 and the machine's Tailscale IP.
-- **Overview** shows everything the old dashboard showed, read from `status.json`. It also shows the agents running now on every host: fleet workers, plus interactive Claude/Codex sessions whose transcript changed in the last 2 minutes.
-- **Runs**: every `logs/<key>.<ts>.log` with its prompt, live-tailing log, status, PR/issue link, and the worker's own conversation (Claude sessions named `fleet-<key>`).
-- **Sessions**: every `~/.claude/projects/*/*.jsonl` (subagents too) and `~/.codex/sessions/**/*.jsonl` as a readable transcript. Thinking and tool calls are collapsible, and the page updates live.
-- **Search**: a full-text index (bleve, at `~/.local/state/llm-brain/hub.bleve`) over every message (text, thinking, tool name, input and output), session (title, directory, branch, uuid), run (key, target, prompt, log) and `fleet.log` event. Ranked by relevance or newest first. Syntax: `words` (all must match), `"exact phrase"`, `deploy*`, `-word`, code tokens as typed (`uiv3#835`, `blue-stack-api`, `a/b.go`, uuids, `snake_case`), and filters `host:` `type:` `provider:` `kind:` `tool:` `role:` `status:` `session:` `after:` `before:`. Rows are indexed in the pass that ingests them; on first start the index is built in the background (search scans the database until it's done), and a restart resumes where it stopped. Delete the directory to rebuild it.
 
-Ingestion is incremental and idempotent. Each file has a byte offset that advances in the same transaction as the rows it produced, and the hub re-scans every 10 s. Other machines run `hub ship --to http://100.74.108.114:8787` (`./bootstrap.sh --shipper`). It POSTs new bytes of the same files, and the hub stores them under that machine's `host`. Ship requests are accepted only from loopback and 100.64.0.0/10.
+Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite), server-rendered, no build step. Binds only to 127.0.0.1 and the machine's Tailscale IP; ship requests are accepted only from loopback and 100.64.0.0/10.
+
+- **Overview:** issues in flight, queue, fleet PRs, reviews, agents running now on every host, gateway accounts and quota, recent calls.
+- **Runs:** every worker with its prompt, live log, status, PR/issue link and its own conversation.
+- **Sessions:** every `~/.claude/projects/**.jsonl` and `~/.codex/sessions/**.jsonl` as a readable, live transcript.
+- **Search:** a bleve full-text index over messages, thinking, tool calls and output, sessions, run logs and events — a few ms per query. Syntax: `words`, `"phrase"`, `deploy*`, `-word`, code tokens as typed (`app#835`, `a/b.go`, uuids, `snake_case`), filters `host:` `type:` `provider:` `kind:` `tool:` `role:` `status:` `session:` `after:` `before:` (also `7d`, `today`).
+
+Ingestion is incremental and idempotent: a byte offset per file advances in the same transaction as its rows; the hub re-scans every 10 s.
+
 ```
 make -C hub build     # -> bin/hub (darwin/arm64, no CGO)
 make -C hub check     # go vet + go test
-bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--listen 127.0.0.1,...]
-bin/hub ship --to http://100.74.108.114:8787 [--once]
+bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--people login=Name,...] [--gateway URL]
+bin/hub ship --to http://<hub-host>:8787 [--once]
 ```
 
-## Commands
-```
-fleet tick | dispatch | babysit | review-prs | review-pr <url> | review <url> (internal) | status | labels | pause | resume | providers
-```
-Kill switches: `paused: true` in config (all machines), `fleet pause` (this machine), label `agent:stop` (one issue).
+## Caveats
 
-## New machine
-```
-git clone git@github.com:anchoo2kewl/llm-brain.git ~/projects/llm-brain && ~/projects/llm-brain/bootstrap.sh
-```
-A machine that should only feed the hub (the laptop): `~/projects/llm-brain/bootstrap.sh --shipper`. It loads `com.llm-brain.hub-ship` and nothing else.
+- Routing subscription OAuth logins through a proxy may not be covered by your provider's terms. Read them, and keep work data on work accounts if your employer requires it.
+- No auth on the hub: anyone on your tailnet can read every transcript. Keep it on a tailnet you control.
+- `hub.db` grows with your transcripts; there is no retention yet.
 
-## Hub inspection
+## License
 
-The overview shows fleet issue capacity, resolved implement/check/review roles, and
-expandable activity for every recorded provider/model across hosts. Model session
-links filter to that model. Expanded panels survive the 15-second refresh.
-
-Codex `token_count` quota observations are ingested from new rollout lines and
-shipped through the existing transcript pipeline. The UI shows remaining percent,
-window length, reset time, reporting host, and observation age. Readings older than
-15 minutes are marked stale; a passed reset is shown as awaiting an update rather
-than an assumed replenishment. Host readings may refer to the same account and
-are never added together. Previously ingested lines are not replayed by this change.
-Claude subscription balances and gateway account/request routing are not present
-in the current inputs and are explicitly marked unavailable.
-
-Run `make -C hub check` before committing hub changes. Push the change for deployment
-to the Studio; deployment is performed separately.
+MIT — see [LICENSE](LICENSE).

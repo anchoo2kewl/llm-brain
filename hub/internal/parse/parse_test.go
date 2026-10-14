@@ -173,23 +173,23 @@ func TestRunLogName(t *testing.T) {
 	cases := []struct {
 		name, key, kind, target string
 	}{
-		{"issue-17442.20261014-161328.log", "issue-17442", "issue", "https://github.com/elastio/blue-stack/issues/17442"},
-		{"pr-blue-stack-uiv3-839.20261014-160917.log", "pr-blue-stack-uiv3-839", "pr", "https://github.com/elastio/blue-stack-uiv3/pull/839"},
-		{"review-blue-stack-mock-api-server-140.20261014-161328.log", "review-blue-stack-mock-api-server-140", "review", "https://github.com/elastio/blue-stack-mock-api-server/pull/140"},
+		{"issue-17442.20261014-161328.log", "issue-17442", "issue", "https://github.com/acme/web-app/issues/17442"},
+		{"pr-web-app-app2-839.20261014-160917.log", "pr-web-app-app2-839", "pr", "https://github.com/acme/web-app-app2/pull/839"},
+		{"review-web-app-mock-api-server-140.20261014-161328.log", "review-web-app-mock-api-server-140", "review", "https://github.com/acme/web-app-mock-api-server/pull/140"},
 		{"misc.20261014-161328.log", "misc", "other", ""},
 	}
 	for _, c := range cases {
-		r, ok := ParseRunLogName(c.name, loc, "elastio", "elastio/blue-stack")
+		r, ok := ParseRunLogName(c.name, loc, "acme", "acme/web-app")
 		if !ok || r.Key != c.key || r.Kind != c.kind || r.Target != c.target {
 			t.Fatalf("%s: %+v", c.name, r)
 		}
 	}
-	r, _ := ParseRunLogName("issue-1.20261014-161328.log", loc, "elastio", "elastio/blue-stack")
+	r, _ := ParseRunLogName("issue-1.20261014-161328.log", loc, "acme", "acme/web-app")
 	if got := FormatTime(r.Started); got != "2026-10-14T20:13:28.000Z" { // EDT is UTC-4
 		t.Fatalf("started %s", got)
 	}
 	for _, bad := range []string{"fleet.log", "hub.log", "dashboard.log", "issue-1.2026-10-14.log", "issue-1.20261014-161328.log.bak"} {
-		if _, ok := ParseRunLogName(bad, loc, "elastio", "x/y"); ok {
+		if _, ok := ParseRunLogName(bad, loc, "acme", "x/y"); ok {
 			t.Fatalf("%s should not parse", bad)
 		}
 	}
@@ -201,12 +201,12 @@ func TestFleetLineAndReviewed(t *testing.T) {
 	if fl.Host != "AnshumaacStudio" || fl.Level != "notice" || FormatTime(fl.At) != "2026-10-14T20:20:06.000Z" {
 		t.Fatalf("%+v", fl)
 	}
-	fl = ParseFleetLine(`Invalid search query "( org:elastio )".`, loc)
+	fl = ParseFleetLine(`Invalid search query "( org:acme )".`, loc)
 	if !fl.At.IsZero() || fl.Level != "error" {
 		t.Fatalf("%+v", fl)
 	}
-	r, ok := FindReviewed("Files are in x\n\nREVIEWED https://github.com/elastio/blue-stack-uiv3/pull/839 APPROVE 1 inline\n")
-	if !ok || r.URL != "https://github.com/elastio/blue-stack-uiv3/pull/839" || r.Verdict != "APPROVE" || r.Detail != "1 inline" {
+	r, ok := FindReviewed("Files are in x\n\nREVIEWED https://github.com/acme/web-app-app2/pull/839 APPROVE 1 inline\n")
+	if !ok || r.URL != "https://github.com/acme/web-app-app2/pull/839" || r.Verdict != "APPROVE" || r.Detail != "1 inline" {
 		t.Fatalf("%+v", r)
 	}
 	if _, ok := FindReviewed("NOT REVIEWED x"); ok {

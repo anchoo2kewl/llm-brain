@@ -22,7 +22,7 @@ func newEngine(t *testing.T) *Engine {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return NewEngine(s, "elastio", "elastio/blue-stack")
+	return NewEngine(s, "acme", "acme/web-app")
 }
 
 func count(t *testing.T, e *Engine, q string, args ...any) int {
@@ -61,18 +61,18 @@ func fixture(t *testing.T) (home string, claudeFile string) {
 	appendFile(t, claudeFile, userLine("s1", "first prompt", 1)+
 		`{"type":"assistant","sessionId":"s1","timestamp":"2026-10-14T20:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`+"\n"+
 		`{"type":"user","sessionId":"s1","timestamp":"2026-10-14T20:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt"}]}}`+"\n"+
-		`{"type":"agent-name","agentName":"fleet-review-blue-stack-uiv3-839","sessionId":"s1"}`+"\n")
+		`{"type":"agent-name","agentName":"fleet-review-web-app-app2-839","sessionId":"s1"}`+"\n")
 	appendFile(t, filepath.Join(proj, "s1", "subagents", "agent-x.jsonl"), userLine("s1", "sub task", 4))
 	appendFile(t, filepath.Join(proj, "memory", "notes.jsonl"), userLine("m", "skip me", 5))
 	state := filepath.Join(home, "state")
 	must(t, os.MkdirAll(filepath.Join(state, "logs"), 0o755))
 	must(t, os.MkdirAll(filepath.Join(state, "runs"), 0o755))
-	appendFile(t, filepath.Join(state, "logs", "review-blue-stack-uiv3-839.20261014-160000.log"), "working\nREVIEWED https://github.com/elastio/blue-stack-uiv3/pull/839 APPROVE 1 inline\n")
+	appendFile(t, filepath.Join(state, "logs", "review-web-app-app2-839.20261014-160000.log"), "working\nREVIEWED https://github.com/acme/web-app-app2/pull/839 APPROVE 1 inline\n")
 	appendFile(t, filepath.Join(state, "logs", "fleet.log"), "2026-10-14 16:00:00 [h] tick\nstray stderr line\n")
 	appendFile(t, filepath.Join(state, "logs", "hub.log"), "not a worker log\n")
 	appendFile(t, filepath.Join(state, "logs", "issue-5.20261014-160500.log"), "") // a claude -p worker prints nothing until it ends
 	appendFile(t, filepath.Join(state, "runs", "issue-5.pid"), fmt.Sprint(os.Getpid()))
-	appendFile(t, filepath.Join(state, "runs", "review-blue-stack-uiv3-839.prompt"), "Review the PR")
+	appendFile(t, filepath.Join(state, "runs", "review-web-app-app2-839.prompt"), "Review the PR")
 	return home, claudeFile
 }
 
@@ -105,7 +105,7 @@ func TestCollectorIdempotentAndIncremental(t *testing.T) {
 		t.Fatalf("events = %d", n)
 	}
 	if n := count(t, e, `SELECT count(*) FROM runs WHERE status = 'succeeded' AND prompt = 'Review the PR' AND session_id IS NOT NULL
-		AND target = 'https://github.com/elastio/blue-stack-uiv3/pull/839'`); n != 1 {
+		AND target = 'https://github.com/acme/web-app-app2/pull/839'`); n != 1 {
 		var st, pr, tg string
 		var sid any
 		_ = e.S.DB.QueryRow(`SELECT status, prompt, target, session_id FROM runs`).Scan(&st, &pr, &tg, &sid)
@@ -192,7 +192,7 @@ func TestRunLifecycle(t *testing.T) {
 	must(t, e.Heartbeat(ctx, Heartbeat{Host: "h", Running: []string{"issue-17442"}}))
 	var status, ended, target, kind string
 	must(t, e.S.DB.QueryRow(`SELECT status, ended_at, target, kind FROM runs`).Scan(&status, &ended, &target, &kind))
-	if status != "running" || ended != "" || target != "https://github.com/elastio/blue-stack/issues/17442" || kind != "issue" {
+	if status != "running" || ended != "" || target != "https://github.com/acme/web-app/issues/17442" || kind != "issue" {
 		t.Fatalf("%s %s %s %s", status, ended, target, kind)
 	}
 	if _, err := e.Chunk(ctx, Chunk{Host: "h", Kind: KindRunLog, Path: p, Offset: 7, Mtime: time.Now(), Data: []byte("opened PR, done\n")}); err != nil {

@@ -1,0 +1,6 @@
+{
+  "name": "acme-house",
+  "description": "Example private module: only applies to Acme repos.",
+  "when": { "repos": ["acme/*", "*platform*"], "min": 1 },
+  "rules": [ { "path": "**/*.go", "rule": "- Handlers take the tenant from the request context, never from the body." } ]
+}

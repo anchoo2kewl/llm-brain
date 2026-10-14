@@ -4,7 +4,7 @@
 #   fleet tick              dispatch + babysit once (what launchd runs)
 #   fleet dispatch          claim agent-ready issues and start implement workers
 #   fleet babysit           start a babysit worker for every marker PR with new activity
-#   fleet review-prs        post a Greg-style review on every PR that requests me (once per head commit)
+#   fleet review-prs        review every PR that requests me (once per head commit, until it approves)
 #   fleet review-pr <url>   the same for one PR
 #   fleet review <pr-url>   cross-LLM internal review of a PR; prints findings
 #   fleet status            claims, running workers, open fleet PRs
@@ -14,7 +14,15 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-WORK_ROOT="${FLEET_WORK_ROOT:-$HOME/elastio}"
+WORK_ROOT="${FLEET_WORK_ROOT:-$(cfg_path '.work_root')}"
+
+# Variables every prompt can use: who we work for, who the people are, and the overlay's house notes.
+prompt_env() { # prompt_env <prompt-name>
+  export OWNER="$(cfg '.owner.name')" OWNER_GH="$(cfg '.owner.github')" WORK_ROOT
+  export PEOPLE="$(cfg -o=json '.people' | jq -r 'to_entries | map("\(.value) (@\(.key))") | join(", ") | if . == "" then "your teammates" else . end')"
+  export HOUSE="$(house "$1")"
+  [[ -n "$HOUSE" ]] || HOUSE="(none)"
+}
 
 spawn() { # spawn <key> <provider> <mode> <timeout> <prompt-file>
   local key="$1" provider="$2" mode="$3" timeout="$4" prompt_file="$5"
@@ -61,7 +69,7 @@ in_flight() { # issues the fleet currently owns, across all machines (labels are
   done | sort -u
 }
 
-# Candidates in order (oldest first): assigned to me, authored by Naj/Greg, created since the cutoff, not owned yet.
+# Candidates in order (oldest first): assigned to me, authored by an allowed author, created since the cutoff, not owned yet.
 intake_queue() {
   local repo
   for repo in $(cfg '.intake.repos[]'); do
@@ -101,6 +109,7 @@ cmd_dispatch() {
     if claimed_before "$repo" "$num"; then continue; fi        # one pickup per issue, ever
     claim_issue "$repo" "$num" || continue
     local pf="$BRAIN_STATE/runs/issue-$num.prompt"
+    prompt_env implement
     REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
       BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" \
@@ -136,6 +145,7 @@ cmd_babysit() {
     (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
     echo "$new_fp" >"$fp_file"
     local pf="$BRAIN_STATE/runs/$key.prompt"
+    prompt_env babysit
     PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
       render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
@@ -211,6 +221,7 @@ cmd_review_prs() {
       && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
     prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
     pf="$dir/prompt.md"
+    prompt_env pr-review
     PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" POST_MODE="$(post_mode "$dir")" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"

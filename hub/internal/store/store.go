@@ -1,5 +1,5 @@
 // Package store is the hub's database: Turso (the Rust rewrite of SQLite) through its pure-Go database/sql
-// driver. One file, one connection; the pattern is elastio-command's internal/store/turso.go.
+// driver. One file, one connection; the usual Turso single-connection pattern.
 package store
 
 import (

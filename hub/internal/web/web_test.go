@@ -21,7 +21,7 @@ func TestAllowedPeer(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1:5000":        true,
 		"[::1]:5000":            true,
-		"100.74.108.114:1":      true,
+		"100.64.1.2:1":      true,
 		"100.127.255.255:1":     true,
 		"100.128.0.1:1":         false,
 		"192.168.1.10:1":        false,
@@ -41,7 +41,7 @@ func TestPagesEscapeTranscripts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	eng := ingest.NewEngine(st, "elastio", "elastio/blue-stack")
+	eng := ingest.NewEngine(st, "acme", "acme/web-app")
 	evil := `<script>alert(1)</script>`
 	line := `{"type":"user","sessionId":"s","timestamp":"2026-10-14T20:00:00Z","cwd":"/w","message":{"role":"user","content":"` + strings.ReplaceAll(evil, `"`, `\"`) + `"}}` + "\n"
 	if _, err := eng.Chunk(context.Background(), ingest.Chunk{Host: "h", Kind: ingest.KindClaude, Path: "/p/x/s.jsonl", Mtime: time.Now(), Data: []byte(line)}); err != nil {
@@ -78,7 +78,7 @@ func TestOverviewInspectionData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	eng := ingest.NewEngine(st, "elastio", "elastio/blue-stack")
+	eng := ingest.NewEngine(st, "acme", "acme/web-app")
 	state := t.TempDir()
 	snapshot := `{"host":"studio","at":"2026-10-14T20:00:00Z","max_in_flight":2,"owned":[{"number":1}],"roles":{"implementer":"claude","internal_reviewer":"codex","pr_reviewer":"claude"}}`
 	if err := os.WriteFile(filepath.Join(state, "status.json"), []byte(snapshot), 0600); err != nil {
@@ -124,7 +124,7 @@ func TestSearchPageUsesIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer idx.Close()
-	eng := ingest.NewEngine(st, "elastio", "elastio/blue-stack")
+	eng := ingest.NewEngine(st, "acme", "acme/web-app")
 	srv, err := New(st, eng, t.TempDir(), "h", log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
@@ -145,18 +145,18 @@ func TestSearchPageUsesIndex(t *testing.T) {
 		return string(b)
 	}
 	// Before the first build finishes, search scans the store and says so.
-	line := `{"type":"user","sessionId":"s","timestamp":"2026-10-14T20:00:00Z","cwd":"/w","message":{"role":"user","content":"ship <b>uiv3#835</b> today"}}` + "\n"
+	line := `{"type":"user","sessionId":"s","timestamp":"2026-10-14T20:00:00Z","cwd":"/w","message":{"role":"user","content":"ship <b>app2#835</b> today"}}` + "\n"
 	if _, err := eng.Chunk(context.Background(), ingest.Chunk{Host: "h", Kind: ingest.KindClaude, Path: "/p/x/s.jsonl", Mtime: time.Now(), Data: []byte(line)}); err != nil {
 		t.Fatal(err)
 	}
-	if b := get("/search?q=uiv3%23835"); !strings.Contains(b, "building index") || !strings.Contains(b, "<mark>uiv3#835</mark>") {
+	if b := get("/search?q=app2%23835"); !strings.Contains(b, "building index") || !strings.Contains(b, "<mark>app2#835</mark>") {
 		t.Fatalf("fallback page: %s", b)
 	}
 	if err := idx.Sync(context.Background()); err != nil || !idx.Ready() {
 		t.Fatalf("build: %v", err)
 	}
-	b := get("/search?q=uiv3%23835")
-	if strings.Contains(b, "building index") || !strings.Contains(b, "<mark>uiv3#835</mark>") || strings.Contains(b, "<b>uiv3") ||
+	b := get("/search?q=app2%23835")
+	if strings.Contains(b, "building index") || !strings.Contains(b, "<mark>app2#835</mark>") || strings.Contains(b, "<b>app2") ||
 		!strings.Contains(b, `href="/sessions/1?after=0#m1"`) {
 		t.Fatalf("indexed page: %s", b)
 	}
