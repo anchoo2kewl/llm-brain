@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""review-rules <file>...   (run inside the repo under review)
+
+Prints the UNION of review rules for each file, grouped by identical rule set:
+  - open-code-review (`ocr delegate rule`): Alibaba's system ruleset per language,
+    plus the repo's own .opencodereview/rule.json and ~/.opencodereview/rule.json;
+  - every module listed in config pr_review.rule_modules (a dir with rule.json in
+    OCR format). Unlike OCR's first-match, ALL matching entries of ALL modules apply.
+A module is either a dir under llm-brain/review-rules/ or {name, git, path} — a git
+repo cloned/pulled into ~/.local/state/llm-brain/rule-modules/<name>.
+"""
+import json, os, subprocess, sys
+from pathlib import Path, PurePosixPath
+
+BRAIN = Path(__file__).resolve().parent.parent
+STATE = Path.home() / ".local/state/llm-brain/rule-modules"
+
+
+def cfg(expr):
+    out = subprocess.run(["bash", "-c", f'source "{BRAIN}/bin/lib.sh"; cfg -o=json \'{expr}\''],
+                         capture_output=True, text=True, env=dict(os.environ, BRAIN_DIR=str(BRAIN)))
+    return json.loads(out.stdout or "null")
+
+
+def expand_braces(pat):
+    if "{" not in pat:
+        return [pat]
+    pre, rest = pat.split("{", 1)
+    body, post = rest.split("}", 1)
+    return [p for alt in body.split(",") for p in expand_braces(pre + alt + post)]
+
+
+def matches(path, pat):
+    p = PurePosixPath(path)
+    for g in expand_braces(pat):
+        if p.full_match(g) or (g.startswith("**/") and p.full_match(g[3:])):
+            return True
+    return False
+
+
+def module_dir(m):
+    if isinstance(m, str):
+        return BRAIN / "review-rules" / m, m
+    dst = STATE / m["name"]
+    if dst.exists():
+        subprocess.run(["git", "-C", str(dst), "pull", "-q", "--ff-only"], capture_output=True)
+    else:
+        STATE.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "-q", "--depth", "1", m["git"], str(dst)], check=True)
+    return dst / m.get("path", ""), m["name"]
+
+
+def main(files):
+    if not files:
+        sys.exit(__doc__)
+    per_file = {f: [] for f in files}
+    mods = cfg(".pr_review.rule_modules") or []
+    if "ocr" in mods:
+        r = subprocess.run(["ocr", "delegate", "rule", "--format", "json", *files], capture_output=True, text=True)
+        if r.returncode == 0:
+            for g in json.loads(r.stdout).get("groups", []):
+                for f in g["files"]:
+                    per_file.setdefault(f, []).append((f"ocr:{g['source']}", g["rule"]))
+        else:
+            print(f"(ocr rules unavailable: {r.stderr.strip()[:200]})", file=sys.stderr)
+    for m in mods:
+        if m == "ocr":
+            continue
+        d, name = module_dir(m)
+        rf = d / "rule.json"
+        if not rf.exists():
+            print(f"(module {name}: no rule.json at {rf})", file=sys.stderr)
+            continue
+        spec = json.loads(rf.read_text())
+        excl = spec.get("exclude", [])
+        for f in files:
+            if any(matches(f, e) for e in excl):
+                continue
+            for r in spec.get("rules", []):
+                if matches(f, r["path"]):
+                    per_file[f].append((name, r["rule"]))
+    groups = {}
+    for f, rules in per_file.items():
+        key = json.dumps(rules)
+        groups.setdefault(key, ([], rules))[0].append(f)
+    for i, (fs, rules) in enumerate(groups.values(), 1):
+        print(f"## Rule group {i}\nFiles: " + ", ".join(fs) + "\n")
+        for src, text in rules:
+            print(f"### [{src}]\n{text.strip()}\n")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

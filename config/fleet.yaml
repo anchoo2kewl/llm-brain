@@ -1,0 +1,84 @@
+# llm-brain fleet config. Shared by every machine; per-machine overrides go in
+# ~/.config/llm-brain/local.yaml (same keys, merged on top).
+
+# Kill switch for every machine. A single machine can also pause itself with
+# `touch ~/.config/llm-brain/PAUSE`.
+paused: false
+
+# Which LLM CLIs this machine can use. A provider is "available" when it is
+# enabled here AND its CLI is on PATH.
+providers:
+  claude:
+    enabled: true
+    cli: claude
+    model: ""          # empty = the CLI's default (settings.json)
+  codex:
+    enabled: true
+    cli: codex
+    model: ""          # empty = ~/.codex/config.toml default
+  gemini:
+    enabled: false
+    cli: gemini
+    model: ""
+
+# Roles. The reviewer is ALWAYS a different provider from the implementer when
+# a second one is available; only when exactly one provider is available does
+# the implementer review its own work (in a fresh session, with no shared context).
+roles:
+  implementer: claude
+  reviewer: codex
+
+# Intake: what the dispatcher picks up.
+intake:
+  repos: [elastio/blue-stack]
+  assignee: anchoo2kewl
+  label: agent-ready            # opt-in label; nothing without it is touched
+  authors: [Assurio-n7n, greg-aligiannis, anchoo2kewl]   # Naj, Greg, me
+  skip_labels: [agent:stop, agent:blocked]
+
+# Labels the fleet writes (created once by `fleet labels`).
+labels:
+  claimed: agent:working
+  pr_open: agent:pr-open
+  blocked: agent:blocked
+  stop: agent:stop
+
+# PRs the babysitter owns carry this marker in their body.
+pr_marker: "llm-brain:issue="
+pr_owners: [elastio]            # orgs to search for marker PRs
+reviewers: [greg-aligiannis]    # always requested on every PR
+
+# Component 3: review PRs that request me (or @-mention me), like Greg's review agent.
+pr_review:
+  enabled: true
+  provider: claude              # external reviews post as Anshuman; use the main LLM
+  owners: [elastio]
+  repo_regex: "^(blue-stack|elastio-command|database-monitoring-agent|infraworld|elastio-stack|helm-chart-museum)"
+  updated_since: "2026-10-14"    # ignore the stale backlog of old review requests
+  post: true                    # false = dry run (write review to a file); true = post on GitHub as me
+  # Review rules = UNION of every module (unlike OCR's first-match). Plug-and-play:
+  #   - ocr                       open-code-review system rules + the repo's .opencodereview/rule.json
+  #   - <dir>                     llm-brain/review-rules/<dir>/rule.json (OCR rule format)
+  #   - {name, git, path}         any git repo holding an OCR-format rule.json
+  rule_modules:
+    - ocr
+    - elastio
+    - greg
+
+limits:
+  max_workers: 3                # concurrent LLM workers per machine
+  implement_timeout: 4h
+  babysit_timeout: 2h
+  review_timeout: 30m
+
+# Merge policy. dev-only: merging to the default branch deploys to dev; the
+# fleet never opens or merges staging/production promotion PRs.
+merge:
+  auto: true
+  require_approval: true
+  require_full_ci: true         # blue-stack: acc tests too, then `bors r+`
+  require_internal_review_clean: true
+
+notify:
+  slack_self_dm: true           # DM Anshuman on merge / block
+  macos: true

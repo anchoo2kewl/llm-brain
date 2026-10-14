@@ -1,0 +1,20 @@
+# Elastio repos cloned into ~/elastio on every fleet machine (name  remote). Workers make worktrees from these.
+blue-stack git@github.com:elastio/blue-stack.git
+blue-stack-api git@github.com:elastio/blue-stack-api.git
+blue-stack-ingestion git@github.com:elastio/blue-stack-ingestion.git
+blue-stack-shared-services git@github.com:elastio/blue-stack-shared-services.git
+blue-stack-gateway git@github.com:elastio/blue-stack-gateway.git
+blue-stack-reporting git@github.com:elastio/blue-stack-reporting.git
+blue-stack-mcp git@github.com:elastio/blue-stack-mcp.git
+blue-stack-uiv3 git@github.com:elastio/blue-stack-uiv3.git
+blue-stack-ui-sdk git@github.com:elastio/blue-stack-ui-sdk.git
+blue-stack-ui-help-content git@github.com:elastio/blue-stack-ui-help-content.git
+blue-stack-mock-api-server git@github.com:elastio/blue-stack-mock-api-server.git
+blue-stack-testing git@github.com:elastio/blue-stack-testing.git
+blue-stack-ami git@github.com:elastio/blue-stack-ami.git
+blue-stack-client-libs git@github.com:elastio/blue-stack-client-libs.git
+database-monitoring-agent git@github.com:elastio/database-monitoring-agent.git
+elastio-command git@github.com:elastio/elastio-command.git
+elastio-stack git@github.com:elastio/elastio-stack.git
+helm-chart-museum git@github.com:elastio/helm-chart-museum.git
+infraworld git@github.com:elastio/infraworld.git

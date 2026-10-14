@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# llm-run <provider> <mode> <cwd> <prompt-file> [session-name]
+#
+# One adapter for every LLM CLI so the fleet never hard-codes a vendor.
+#   mode=write   full tool access (implementation, PR babysitting)
+#   mode=review  read-only (internal review); prints findings to stdout
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+provider="$1" mode="$2" cwd="$3" prompt_file="$4" name="${5:-llm-brain}"
+prompt="$(cat "$prompt_file")"
+model="$(cfg ".providers.$provider.model")"
+cd "$cwd"
+
+case "$provider" in
+  claude)
+    args=(-p "$prompt" --name "$name" --output-format text)
+    [[ -n "$model" ]] && args+=(--model "$model")
+    if [[ "$mode" == "write" ]]; then
+      args+=(--dangerously-skip-permissions)
+    else
+      args+=(--permission-mode plan --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)")
+    fi
+    exec claude "${args[@]}"
+    ;;
+  codex)
+    args=(exec -C "$cwd" --skip-git-repo-check)
+    [[ -n "$model" ]] && args+=(-m "$model")
+    if [[ "$mode" == "write" ]]; then
+      args+=(--dangerously-bypass-approvals-and-sandbox)
+    else
+      args+=(--sandbox read-only)
+    fi
+    exec codex "${args[@]}" "$prompt"
+    ;;
+  gemini)
+    args=(-p "$prompt")
+    [[ -n "$model" ]] && args+=(-m "$model")
+    [[ "$mode" == "write" ]] && args+=(--yolo)
+    exec gemini "${args[@]}"
+    ;;
+  *) die "unknown provider: $provider" ;;
+esac

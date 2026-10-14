@@ -1,0 +1,30 @@
+{
+  "name": "elastio",
+  "description": "Elastio blue-stack house rules, distilled from incidents and team conventions.",
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "- Every query/read/write is bound to the tenant (tenant_name / tenant id) and the caller's RBAC scope. A cross-tenant read or an unscoped id lookup is a blocker.\n- Every user value reaches SQL as a bind parameter; sort/group/column names come from fixed maps.\n- Rollout or enforcement switches are flagtgl flags, never env vars or helm values.\n- Never adds a staging/production promotion or touches prod data.\n- Secrets never appear in code, logs, fixtures or PR text."
+    },
+    {
+      "path": "**/migrations/**",
+      "rule": "- Migrations must be safe at production size: no data backfills, no full-table rewrites, no long locks in a sqlx/helm-hook migration (the 2026-09-28 OVA migration stalled prod). Backfills go in a separate job.\n- New FKs/columns must not break the deploy order (migration before the API that reads it). Indexes on large tables: CONCURRENTLY where the runner allows.\n- Any new column read by a filter/OR/JOIN on a hot path needs an index or a stated reason."
+    },
+    {
+      "path": "**/*.{sql,rs}",
+      "rule": "- sqlx-data.json / offline query data updated when queries change.\n- Rust: no unwrap/expect on request or DB data paths; errors map to the right HTTP status (400 vs 404 vs 409 vs 500)."
+    },
+    {
+      "path": "**/*.{ts,tsx}",
+      "rule": "- API schemas: enums and formats validated (unknown value -> 400, not empty 200); responses set additionalProperties:false where siblings do; list endpoints are paginated or capped and report truncation.\n- uiv3: UI copy must state what the API actually does (no claims about data the endpoint does not pin/sort/filter). New surfaces reuse Findings/Incidents chrome and chip-row filters. Drawers go through the single-owner URL-param registry.\n- uiv3: a new doc/ file needs front matter and a regenerated INDEX.md."
+    },
+    {
+      "path": "**/*.go",
+      "rule": "- Context and tenant are threaded through; no goroutine without cancellation; DB errors are not swallowed.\n- Optimistic concurrency (If-Match / FOR UPDATE) preserved on mutation paths."
+    },
+    {
+      "path": "**/{helm,charts,deploy}/**",
+      "rule": "- Chart changes must not depend on a manual kubectl override; ConfigMaps that helm never re-renders are called out.\n- No container runs as root on shared runners."
+    }
+  ]
+}

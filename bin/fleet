@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# fleet — the issue → PR → merge loop.
+#
+#   fleet tick              dispatch + babysit once (what launchd runs)
+#   fleet dispatch          claim agent-ready issues and start implement workers
+#   fleet babysit           start a babysit worker for every marker PR with new activity
+#   fleet review-prs        post a Greg-style review on every PR that requests me (once per head commit)
+#   fleet review-pr <url>   the same for one PR
+#   fleet review <pr-url>   cross-LLM internal review of a PR; prints findings
+#   fleet status            claims, running workers, open fleet PRs
+#   fleet labels            create the fleet labels in the intake repos (once)
+#   fleet pause|resume      this machine only
+#   fleet providers         show implementer / reviewer resolution
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+WORK_ROOT="${FLEET_WORK_ROOT:-$HOME/elastio}"
+
+spawn() { # spawn <key> <provider> <mode> <timeout> <prompt-file>
+  local key="$1" provider="$2" mode="$3" timeout="$4" prompt_file="$5"
+  local logf="$BRAIN_STATE/logs/$key.$(date +%Y%m%d-%H%M%S).log"
+  nohup gtimeout --kill-after=5m "$timeout" \
+    "$BRAIN_DIR/bin/llm-run" "$provider" "$mode" "${SPAWN_CWD:-$WORK_ROOT}" "$prompt_file" "fleet-$key" \
+    >"$logf" 2>&1 </dev/null &
+  echo $! >"$BRAIN_STATE/runs/$key.pid"
+  log "started $key ($provider/$mode, pid $!, log $logf)"
+}
+
+capacity_left() {
+  echo $(( $(cfg '.limits.max_workers') - $(running_workers) ))
+}
+
+# A claim is a marker comment; the earliest claim comment wins, so two machines
+# racing on the same issue resolve deterministically.
+claim_issue() { # claim_issue <repo> <num> -> 0 if we own it
+  local repo="$1" num="$2" owner
+  gh issue comment "$num" -R "$repo" --body "<!-- llm-brain:claim host=$HOST -->
+🤖 Picked up by the llm-brain fleet on \`$HOST\` (implementer: $(implementer), reviewer: $(reviewer))." >/dev/null
+  sleep 5
+  owner="$(gh api "repos/$repo/issues/$num/comments" --paginate \
+    --jq '[.[] | select(.body | contains("<!-- llm-brain:claim host="))] | first | .body' \
+    | sed -nE 's/.*host=([^ ]+) -->.*/\1/p' | head -1)"
+  if [[ "$owner" == "$HOST" ]]; then
+    gh issue edit "$num" -R "$repo" --add-label "$(cfg '.labels.claimed')" >/dev/null
+    return 0
+  fi
+  log "#$num already claimed by $owner"
+  return 1
+}
+
+cmd_dispatch() {
+  paused && { log "paused"; return; }
+  local repo label assignee skip authors_json
+  label="$(cfg '.intake.label')"
+  assignee="$(cfg '.intake.assignee')"
+  authors_json="$(cfg -o=json '.intake.authors')"
+  skip="$(cfg -o=json '.intake.skip_labels + [.labels.claimed, .labels.pr_open]')"
+  for repo in $(cfg '.intake.repos[]'); do
+    gh issue list -R "$repo" --state open --assignee "$assignee" --label "$label" --limit 50 \
+      --json number,title,author,labels \
+      | jq -r --argjson authors "$authors_json" --argjson skip "$skip" '
+          .[] | select(.author.login as $a | $authors | index($a))
+              | select([.labels[].name] as $l | ($skip | map(. as $s | $l | index($s)) | all(. == null)))
+              | .number' \
+      | while read -r num; do
+          (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
+          worker_running "issue-$num" && continue
+          claim_issue "$repo" "$num" || continue
+          local pf="$BRAIN_STATE/runs/issue-$num.prompt"
+          REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
+            BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
+            REVIEWERS="$(cfg '.reviewers | join(",")')" \
+            render "$BRAIN_DIR/prompts/implement.md" >"$pf"
+          spawn "issue-$num" "$(implementer)" write "$(cfg '.limits.implement_timeout')" "$pf"
+        done
+  done
+}
+
+fleet_prs() { # JSON array of open PRs carrying the marker
+  local marker owners q
+  marker="$(cfg '.pr_marker')"
+  owners="$(cfg '.pr_owners | map("org:" + .) | join(" ")')"
+  gh search prs --author "@me" --state open $owners "\"$marker\" in:body" \
+    --json url,number,repository,updatedAt --limit 100
+}
+
+cmd_babysit() {
+  paused && { log "paused"; return; }
+  local row url key fp_file new_fp
+  fleet_prs | jq -c '.[]' | while read -r row; do
+    url="$(jq -r .url <<<"$row")"
+    key="pr-$(jq -r '.repository.name + "-" + (.number|tostring)' <<<"$row")"
+    worker_running "$key" && continue
+    # Fingerprint = head sha + review/comment/check state. Unchanged -> nothing to do.
+    new_fp="$(gh pr view "$url" --json headRefOid,reviews,comments,statusCheckRollup,mergeStateStatus,reviewDecision \
+      | jq -c '{h:.headRefOid, r:(.reviews|length), c:(.comments|length), d:.reviewDecision, m:.mergeStateStatus,
+                ci:[.statusCheckRollup[]? | (.conclusion // .state // .status)] | sort}')"
+    fp_file="$BRAIN_STATE/prs/$key.fp"
+    [[ -f "$fp_file" && "$(cat "$fp_file")" == "$new_fp" ]] && continue
+    # Wait while CI is still running unless there is human/bot feedback to act on.
+    (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
+    echo "$new_fp" >"$fp_file"
+    local pf="$BRAIN_STATE/runs/$key.prompt"
+    PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
+      REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
+      render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
+    spawn "$key" "$(implementer)" write "$(cfg '.limits.babysit_timeout')" "$pf"
+  done
+}
+
+cmd_review() {
+  local url="$1" rev dir pf
+  rev="$(reviewer)"
+  dir="$(mktemp -d "$BRAIN_STATE/review.XXXXXX")"
+  gh pr view "$url" --json headRepository,headRepositoryOwner,headRefName,baseRefName >"$dir/pr.json"
+  local nwo head base
+  nwo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' "$dir/pr.json")"
+  head="$(jq -r .headRefName "$dir/pr.json")"; base="$(jq -r .baseRefName "$dir/pr.json")"
+  git clone -q --filter=blob:none --branch "$head" "git@github.com:$nwo.git" "$dir/src"
+  git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base"
+  pf="$dir/prompt.md"
+  PR_URL="$url" BASE="origin/$base" render "$BRAIN_DIR/prompts/review.md" >"$pf"
+  log "internal review of $url by $rev"
+  gtimeout "$(cfg '.limits.review_timeout')" "$BRAIN_DIR/bin/llm-run" "$rev" review "$dir/src" "$pf" "fleet-review" \
+    | tee "$dir/findings.md"
+  rm -rf "$dir/src"
+}
+
+# PRs where I'm a requested reviewer (or @-mentioned) in the review orgs, not my own.
+review_queue() {
+  local owner
+  for owner in $(cfg '.pr_review.owners[]'); do
+    gh search prs --owner "$owner" --state open --review-requested "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
+    gh search prs --owner "$owner" --state open --mentions "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
+  done | jq -s --arg me "$(cfg '.intake.assignee')" --arg re "$(cfg '.pr_review.repo_regex')" '
+    add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
+}
+
+post_mode() {
+  if [[ "$(cfg '.pr_review.post')" == "true" ]]; then
+    echo "POST the review to GitHub as described below."
+  else
+    echo "DRY RUN: do NOT post anything to GitHub. Write the exact JSON body you would send to the reviews API to $1/review.json, and the rendered review (body + each inline comment with path:line) as markdown to $1/review.md."
+  fi
+}
+
+cmd_review_prs() {
+  paused && { log "paused"; return; }
+  [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
+  local url key sha last dir pf nwo base num prior
+  for url in ${ONLY_PR:-$(review_queue)}; do
+    key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
+    worker_running "$key" && continue
+    sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
+    last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
+    [[ "$sha" == "$last" ]] && continue                     # one review per head commit
+    (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
+    dir="$BRAIN_STATE/reviews/$key"; rm -rf "$dir"; mkdir -p "$dir"
+    gh pr view "$url" --json headRepository,headRepositoryOwner,headRefName,baseRefName,number >"$dir/pr.json"
+    nwo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' "$dir/pr.json")"
+    base="$(jq -r .baseRefName "$dir/pr.json")"; num="$(jq -r .number "$dir/pr.json")"
+    git clone -q --filter=blob:none --branch "$(jq -r .headRefName "$dir/pr.json")" "git@github.com:$nwo.git" "$dir/src" \
+      && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
+    prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
+    pf="$dir/prompt.md"
+    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" POST_MODE="$(post_mode "$dir")" \
+      render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
+    echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
+    SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
+  done
+}
+
+cmd_status() {
+  echo "host: $HOST   paused: $(paused && echo yes || echo no)   implementer: $(implementer)   reviewer: $(reviewer)"
+  echo "workers: $(running_workers)/$(cfg '.limits.max_workers')"
+  for f in "$BRAIN_STATE"/runs/*.pid; do [[ -e "$f" ]] && echo "  - $(basename "$f" .pid) (pid $(cat "$f"))"; done
+  echo; echo "claimed issues:"
+  for repo in $(cfg '.intake.repos[]'); do
+    gh issue list -R "$repo" --state open --label "$(cfg '.labels.claimed')" --json number,title,labels \
+      --jq '.[] | "  #\(.number) \(.title)  [\([.labels[].name | select(startswith("agent"))] | join(","))]"'
+  done
+  echo; echo "fleet PRs:"
+  fleet_prs | jq -r '.[] | "  \(.url)  (updated \(.updatedAt))"'
+}
+
+cmd_labels() {
+  local repo
+  for repo in $(cfg '.intake.repos[]'); do
+    gh label create "$(cfg '.intake.label')" -R "$repo" --color 0E8A16 --description "Opt-in: the llm-brain agent fleet may implement this issue" --force
+    gh label create "$(cfg '.labels.claimed')" -R "$repo" --color FBCA04 --description "llm-brain fleet is implementing this" --force
+    gh label create "$(cfg '.labels.pr_open')" -R "$repo" --color 1D76DB --description "llm-brain fleet has a PR open for this" --force
+    gh label create "$(cfg '.labels.blocked')" -R "$repo" --color D93F0B --description "llm-brain fleet needs a human decision" --force
+    gh label create "$(cfg '.labels.stop')" -R "$repo" --color 000000 --description "llm-brain fleet must not touch this" --force
+  done
+}
+
+case "${1:-}" in
+  tick) cmd_dispatch; cmd_babysit; cmd_review_prs ;;
+  review-prs) cmd_review_prs ;;
+  review-pr) shift; ONLY_PR="$1" cmd_review_prs ;;
+  dispatch) cmd_dispatch ;;
+  babysit) cmd_babysit ;;
+  review) shift; cmd_review "$@" ;;
+  status) cmd_status ;;
+  labels) cmd_labels ;;
+  pause) touch "$BRAIN_LOCAL/PAUSE"; log "paused $HOST" ;;
+  resume) rm -f "$BRAIN_LOCAL/PAUSE"; log "resumed $HOST" ;;
+  providers) echo "available: $(available_providers | tr '\n' ' ')"; echo "implementer: $(implementer)"; echo "reviewer: $(reviewer)" ;;
+  *) sed -n '2,14p' "$0"; exit 1 ;;
+esac
