@@ -1,5 +1,5 @@
 {{define "content"}}{{with .S}}
-<div class="top"><h1 class="title">{{if .Live}}<span class="dot" title="live"></span> {{end}}{{trunc 160 .DisplayTitle}}</h1>
+<div class="top"><h1 class="title">{{if .Live}}<span class="dot" title="live"></span> {{end}}{{.DisplayTitle}}</h1>
 <div class="meta">{{.Provider}} · {{.Host}}{{if .Live}} · <span class="ok">live</span>{{end}}</div></div>
 <dl class="kv">
 <dt>Directory</dt><dd>{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</dd>

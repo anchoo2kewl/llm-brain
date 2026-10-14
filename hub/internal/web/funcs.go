@@ -70,6 +70,8 @@ type Worker struct {
 	Since string `json:"since"`
 }
 
+func (s *Status) SlotsLeft() int { return max(0, s.MaxInFlight-len(s.Owned)) }
+
 func (s *Status) Queued() int {
 	n := 0
 	for _, q := range s.Queue {
@@ -267,7 +269,27 @@ func bytesH(n int64) string {
 }
 
 var funcs = template.FuncMap{
-	"ago": ago, "clock": clock, "duration": duration, "trunc": trunc, "snippet": snippet, "who": who,
+	"quotaWindow": func(minutes int64) string {
+		switch {
+		case minutes <= 0:
+			return "Unspecified"
+		case minutes%1440 == 0:
+			return fmt.Sprintf("%d day", minutes/1440)
+		case minutes%60 == 0:
+			return fmt.Sprintf("%d hour", minutes/60)
+		default:
+			return fmt.Sprintf("%d minute", minutes)
+		}
+	},
+	"remaining": func(used float64) string { return fmt.Sprintf("%.0f", max(0, min(100, 100-used))) },
+	"resetTime": func(unix int64) string {
+		if unix <= 0 {
+			return "Not reported"
+		}
+		return time.Unix(unix, 0).UTC().Format("Jan 2, 15:04 UTC")
+	},
+	"expired": func(unix int64) bool { return unix > 0 && time.Now().Unix() >= unix },
+	"ago":     ago, "clock": clock, "duration": duration, "trunc": trunc, "snippet": snippet, "who": who,
 	"statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
 	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
 	"agentLabels": func(i Issue) []string {

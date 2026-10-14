@@ -47,6 +47,7 @@ type Event struct {
 	Originator  string
 	Blocks      []Block
 	Raw         string
+	Quota       *Quota
 }
 
 // Time is the hub's one time format: UTC, fixed width, so text comparison is time comparison.
@@ -174,4 +175,17 @@ func TitleFrom(s string) string {
 	s = pastedTag.ReplaceAllString(s, " ")
 	s = strings.Join(strings.Fields(s), " ")
 	return Truncate(s, 160)
+}
+
+// Quota is the allowlisted portion of a Codex account-limit observation.
+type Quota struct {
+	LimitID   string       `json:"limit_id"`
+	Plan      string       `json:"plan_type"`
+	Primary   *QuotaWindow `json:"primary"`
+	Secondary *QuotaWindow `json:"secondary"`
+}
+type QuotaWindow struct {
+	Used    float64 `json:"used_percent"`
+	Minutes int64   `json:"window_minutes"`
+	Reset   int64   `json:"resets_at"`
 }

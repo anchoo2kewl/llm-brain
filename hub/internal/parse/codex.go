@@ -103,6 +103,15 @@ func Codex(line []byte) (Event, error) {
 				}
 			}
 			return ev, nil
+		case "event_msg":
+			var msg struct {
+				Type   string `json:"type"`
+				Limits *Quota `json:"rate_limits"`
+			}
+			if json.Unmarshal(l.Payload, &msg) == nil && msg.Type == "token_count" && msg.Limits != nil {
+				ev.Quota = msg.Limits
+			}
+			return ev, nil
 		case "turn_context":
 			var it codexItem
 			if json.Unmarshal(l.Payload, &it) == nil {

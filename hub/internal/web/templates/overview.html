@@ -1,8 +1,9 @@
 {{define "content"}}<div id="live" data-refresh="/?fragment=1">
-<div class="top"><h1>Fleet</h1><div class="meta">
+<div class="top"><div><p class="eyebrow">Fleet control room</p><h1>Fleet overview</h1><p class="mut">Activity across your machines, models, and review pipeline.</p></div><div class="meta">
 {{with .Status}}{{.Host}} · snapshot {{ago .At}}{{if .Stale}} <span class="bad">(stale — scheduler not running?)</span>{{end}}{{if .Paused}} · <span class="bad">PAUSED</span>{{end}}
 {{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>
 
+<nav class="section-nav" aria-label="Overview sections"><a href="#capacity">Usage &amp; capacity</a><a href="#models">LLMs</a><a href="#routing">Routing</a><a href="#agents">Live agents</a><a href="#pipeline">Issue pipeline</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a></nav>
 {{with .Status}}<div class="grid">
 <div class="tile"><b>{{len .Owned}}/{{.MaxInFlight}}</b><span>issues in flight</span></div>
 <div class="tile"><b>{{.Queued}}</b><span>queued</span></div>
@@ -10,10 +11,46 @@
 <div class="tile"><b>{{.CountVerdict "APPROVE"}}</b><span>reviews approved</span></div>
 <div class="tile"><b>{{.CountVerdict "COMMENT"}}</b><span>reviews with blockers</span></div>
 <div class="tile"><b>{{len .Workers}}</b><span>workers running</span></div>
-<div class="tile"><b>{{.Roles.Implementer}} / {{.Roles.InternalReviewer}}</b><span>implement / check</span></div>
+
 </div>{{end}}
 
-<h2>Agents running now <span class="mut small">· all hosts</span></h2>
+<div class="inspect-grid">
+<section class="panel" id="capacity">
+<div class="panel-heading"><h2>Usage &amp; capacity</h2><span class="pill">{{if .Status}}fleet snapshot{{else}}no snapshot{{end}}</span></div>
+{{with .Status}}
+<div class="capacity-number">{{.SlotsLeft}} <span>of {{.MaxInFlight}} issue slots available</span></div>
+{{if gt .MaxInFlight 0}}<meter min="0" max="{{.MaxInFlight}}" value="{{len .Owned}}" aria-label="Issue slots in use">{{len .Owned}} / {{.MaxInFlight}}</meter>{{end}}
+<details id="capacity-details" class="inspect"><summary>See capacity breakdown</summary>
+<dl class="kv"><dt>In flight</dt><dd>{{len .Owned}} issues (working or PR open)</dd><dt>Waiting for a slot</dt><dd>{{.Queued}} issues</dd><dt>Workers</dt><dd>{{len .Workers}} on {{.Host}}</dd><dt>Scheduler</dt><dd>{{if .Paused}}Paused{{else if .Stale}}Snapshot stale{{else}}Active{{end}}</dd><dt>Snapshot</dt><dd>{{.At}}</dd></dl>
+<a href="#pipeline">Inspect the issue queue →</a>
+</details>
+{{else}}<p class="mut">Waiting for a fleet snapshot to report available issue slots.</p>{{end}}
+<h3>Subscription usage left</h3>
+{{range .Quotas}}<details class="quota-card" id="quota-{{.Provider}}-{{.Host}}-{{.LimitID}}"><summary><strong>{{.Provider}} · {{.Host}}</strong> <span class="pill {{if .Stale}}warn{{end}}">{{if .Stale}}stale observation{{else}}observed {{ago .ObservedAt}}{{end}}</span><span class="model-name">{{.LimitID}}{{if .Plan}} · {{.Plan}}{{end}}</span>{{with .Primary}}<span class="quota-summary">{{if expired .Reset}}Awaiting quota update{{else}}{{remaining .Used}}% left · {{quotaWindow .Minutes}} window{{end}}</span>{{end}}{{with .Secondary}}<span class="mut small"> · {{if expired .Reset}}Awaiting quota update{{else}}{{remaining .Used}}% left · {{quotaWindow .Minutes}} window{{end}}</span>{{end}}</summary>
+<p class="mut small">Observed {{ago .ObservedAt}}. This host's active account was reported by the source session; account identity is unavailable. Hosts may share an allowance.</p>
+{{with .Primary}}{{template "quota-window" .}}{{end}}{{with .Secondary}}{{template "quota-window" .}}{{end}}
+{{if not (or .Primary .Secondary)}}<p class="mut">No quota windows reported.</p>{{end}}
+</details>{{else}}<p class="mut">Waiting for a Codex session to report its quota. Existing ingested history is not replayed; new session activity supplies observations.</p>{{end}}
+<div class="notice"><strong>Claude balance: unavailable</strong><p>Claude subscription balances and reset times are not present in the hub's current inputs.</p></div>
+</section>
+<section class="panel" id="routing">
+<div class="panel-heading"><h2>Routing</h2><span class="pill">resolved roles</span></div>
+{{with .Status}}
+<ol class="route"><li><span>01 · Implement</span><strong>{{if .Roles.Implementer}}{{.Roles.Implementer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=issue">Issue runs →</a></li><li><span>02 · Internal check</span><strong>{{if .Roles.InternalReviewer}}{{.Roles.InternalReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=pr">PR follow-ups →</a></li><li><span>03 · PR review</span><strong>{{if .Roles.PRReviewer}}{{.Roles.PRReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=review">Review runs →</a></li></ol>
+<details id="routing-details" class="inspect"><summary>How provider routing works</summary><p>The fleet uses the configured implementer when its CLI is available, then falls back to the first available provider. Internal review uses a different available provider when possible; with one provider it uses a fresh session.</p><p class="mut">Roles above come from {{.Host}}'s {{if .Stale}}stale {{end}}snapshot ({{ago .At}}). Account selection, gateway health, quota cooldowns, and per-request routing decisions are not included in this snapshot.</p></details>
+{{else}}<p class="mut">Resolved role routing appears when the scheduler writes its first snapshot.</p>{{end}}
+</section>
+</div>
+<section class="panel" id="models">
+<div class="panel-heading"><h2>LLMs &amp; models</h2><a href="/sessions">Explore all sessions →</a></div>
+<p class="mut small">Recorded activity across all hosts, including subagents. Session counts are history, not remaining subscription quota. Expand a model to see its activity.</p>
+<div class="model-grid">{{range .Models}}
+<details class="model-card" id="model-{{.Provider}}-{{.Model}}"><summary><span class="model-heading"><strong>{{.Provider}}</strong><span class="pill {{if .Live}}ok{{end}}">{{.Live}} active</span></span><span class="model-name">{{if .Model}}{{.Model}}{{else}}Model not reported{{end}}</span><span class="mut small">{{.Sessions}} sessions · {{.Messages}} message blocks</span></summary>
+<dl class="kv"><dt>Provider</dt><dd>{{.Provider}}</dd><dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}Not present in source transcript{{end}}</dd><dt>Recorded sessions</dt><dd>{{.Sessions}} (including subagents)</dd><dt>Message blocks</dt><dd>{{.Messages}}</dd><dt>Active sessions</dt><dd>{{.Live}} top-level transcripts updated in the last 2 minutes</dd><dt>Last activity</dt><dd title="{{.LastAt}}">{{ago .LastAt}}</dd></dl><a href="/sessions?provider={{.Provider}}{{if .Model}}&amp;model={{.Model}}{{end}}">Browse model sessions →</a> <a href="/runs?provider={{.Provider}}">Runs →</a>
+</details>{{else}}<div class="empty">No model activity recorded yet. Models appear as conversations are ingested.</div>{{end}}</div>
+</section>
+
+<h2 id="agents">Agents running now <span class="mut small">· all hosts</span></h2>
 {{if or .Runs .Live}}<div class="wrap"><table>
 <tr><th>Agent</th><th>Host</th><th>What</th><th>Since</th><th></th></tr>
 {{range .Runs}}<tr>
@@ -33,7 +70,7 @@
 </table></div>{{else}}<div class="empty">Nothing running.</div>{{end}}
 
 {{with .Status}}
-<h2>Issues in flight</h2>
+<h2 id="pipeline">Issues in flight</h2>
 {{if .Owned}}<div class="wrap"><table><tr><th>Issue</th><th>From</th><th>State</th><th>Updated</th></tr>
 {{range .Owned}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td>
 <td>{{range agentLabels .}}<span class="pill {{labelClass .}}">{{.}}</span> {{end}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
@@ -64,12 +101,14 @@
 </table></div>{{else}}<div class="empty">None.</div>{{end}}
 {{end}}
 
-<h2>Recent runs <a class="small" href="/runs">all runs →</a></h2>
+<h2 id="recent">Recent runs <a class="small" href="/runs">all runs →</a></h2>
 {{template "runrows" .RecentRuns}}
 
-<h2>Scheduler log <span class="mut small">· fleet.log, all hosts</span></h2>
+<h2 id="scheduler">Scheduler log <span class="mut small">· fleet.log, all hosts</span></h2>
 {{if .Events}}<pre class="log">{{range .Events}}<span class="mut">{{clock .TS}} {{.Host}}</span> <span class="{{if eq .Level "error"}}bad{{else if eq .Level "notice"}}ok{{end}}">{{.Text}}</span>
 {{end}}</pre>{{else if .Status}}<pre class="log">{{.Status.Log}}</pre>{{else}}<div class="empty">No scheduler log yet.</div>{{end}}
 
 <p class="mut small foot">{{range .Hosts}}{{.Host}}: {{.Sessions}} sessions, {{.Runs}} runs, seen {{ago .LastSeen}} · {{end}}refreshes every 15 s</p>
 </div>{{end}}
+
+{{define "quota-window"}}<div class="quota-window"><div class="model-heading"><strong>{{if expired .Reset}}Reset passed · awaiting update{{else}}{{remaining .Used}}% left{{end}}</strong><span class="mut small">{{quotaWindow .Minutes}} window</span></div>{{if not (expired .Reset)}}<meter min="0" max="100" value="{{.Used}}" aria-label="Quota percentage used">{{.Used}}% used</meter>{{end}}<p class="mut small">Reported used: {{.Used}}% · Resets {{resetTime .Reset}}</p></div>{{end}}
