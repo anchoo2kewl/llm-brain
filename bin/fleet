@@ -176,13 +176,24 @@ post_mode() {
 cmd_review_prs() {
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
-  local url key sha last dir pf nwo base num prior
+  local url key sha last dir pf nwo base num prior lf fails
   for url in ${ONLY_PR:-$(review_queue)}; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
-    [[ "$sha" == "$last" ]] && continue                     # one review per head commit
+    if [[ "$sha" == "$last" ]]; then                        # one review per head commit…
+      lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1)"
+      fails="$(cat "$BRAIN_STATE/prs/$key.fails" 2>/dev/null || echo 0)"
+      if [[ -n "$lf" ]] && ! grep -q '^REVIEWED ' "$lf" && (( fails < 3 )); then
+        echo $((fails + 1)) >"$BRAIN_STATE/prs/$key.fails"  # …unless that review died without posting
+        log "$key: last review produced no result — retry $((fails + 1))/3"
+      else
+        continue
+      fi
+    else
+      rm -f "$BRAIN_STATE/prs/$key.fails"
+    fi
     (( $(review_capacity_left) > 0 )) || { log "review pool full"; return; }
     dir="$BRAIN_STATE/reviews/$key"; rm -rf "$dir"; mkdir -p "$dir"
     gh pr view "$url" --json headRepository,headRepositoryOwner,headRefName,baseRefName,number >"$dir/pr.json"
