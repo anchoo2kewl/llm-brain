@@ -44,7 +44,7 @@ intake:
   assignee: anchoo2kewl
   authors: [Assurio-n7n, greg-aligiannis]   # Naj, Greg
   created_since: "2026-10-14"   # older backlog is ignored; move the date back to include it
-  skip_labels: [agent:stop]
+  skip_labels: [agent:stop, agent:done]
   max_in_flight: 2              # issues the fleet owns (working or PR open); the next starts only when one is closed/merged
   skip_if_my_open_pr: true      # an issue I'm already working by hand (open PR of mine mentions it) is left alone
 
@@ -54,6 +54,7 @@ labels:
   pr_open: agent:pr-open
   blocked: agent:blocked
   stop: agent:stop
+  done: agent:done          # worker found nothing to build (e.g. only a UAT check left)
 
 # PRs the babysitter owns carry this marker in their body.
 pr_marker: "llm-brain:issue="

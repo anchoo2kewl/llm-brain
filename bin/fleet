@@ -77,6 +77,10 @@ intake_queue() {
   done
 }
 
+claimed_before() { # an earlier fleet claim exists (e.g. worker found nothing to build)
+  gh api "repos/$1/issues/$2/comments" --paginate --jq '.[].body' 2>/dev/null | grep -q '<!-- llm-brain:claim host='
+}
+
 has_my_open_pr() { # has_my_open_pr <num>
   [[ "$(cfg '.intake.skip_if_my_open_pr')" == "true" ]] || return 1
   [[ -n "$(gh search prs "$1" --owner "$(cfg '.pr_owners[0]')" --author "@me" --state open --json url --jq '.[0].url' 2>/dev/null)" ]]
@@ -94,6 +98,7 @@ cmd_dispatch() {
     (( $(capacity_left) > 0 )) || { log "no worker capacity"; break; }
     worker_running "issue-$num" && continue
     if has_my_open_pr "$num"; then log "#$num: already being worked by hand (open PR) — skipping"; continue; fi
+    if claimed_before "$repo" "$num"; then continue; fi        # one pickup per issue, ever
     claim_issue "$repo" "$num" || continue
     local pf="$BRAIN_STATE/runs/issue-$num.prompt"
     REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
@@ -275,6 +280,7 @@ cmd_labels() {
     gh label create "$(cfg '.labels.pr_open')" -R "$repo" --color 1D76DB --description "llm-brain fleet has a PR open for this" --force
     gh label create "$(cfg '.labels.blocked')" -R "$repo" --color D93F0B --description "llm-brain fleet needs a human decision" --force
     gh label create "$(cfg '.labels.stop')" -R "$repo" --color 000000 --description "llm-brain fleet must not touch this" --force
+    gh label create "$(cfg '.labels.done')" -R "$repo" --color C5DEF5 --description "llm-brain fleet: nothing left to build; needs a human/UAT check" --force
   done
 }
 
