@@ -21,6 +21,16 @@ providers:
     cli: gemini
     model: ""
 
+# Account gateway (CLIProxyAPI on the Mac Studio). Holds every subscription login;
+# personal accounts carry priority 10, work priority 0, routing is fill-first, so work
+# is used only while personal is exhausted (429/quota cooldown) and personal resumes
+# automatically after its reset. Edit credential priority ONLY with the gateway stopped
+# (a live rewrite can resurrect a spent refresh token).
+gateway:
+  enabled: true
+  url: http://127.0.0.1:8317            # other machines: http://100.74.108.114:8317
+  env_file: ~/.config/llm-brain/cpa.env # CPA_API_KEY (client key), CPA_MGMT_KEY — not in git
+
 # Roles. The reviewer is ALWAYS a different provider from the implementer when
 # a second one is available; only when exactly one provider is available does
 # the implementer review its own work (in a fresh session, with no shared context).

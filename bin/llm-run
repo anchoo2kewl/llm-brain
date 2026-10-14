@@ -12,8 +12,22 @@ prompt="$(cat "$prompt_file")"
 model="$(cfg ".providers.$provider.model")"
 cd "$cwd"
 
+# Route through the account gateway when it is enabled and reachable.
+GW=""
+if [[ "$(cfg '.gateway.enabled')" == "true" ]]; then
+  envf="$(cfg '.gateway.env_file')"; envf="${envf/#\~/$HOME}"
+  [[ -f "$envf" ]] && source "$envf"
+  url="$(cfg '.gateway.url')"
+  if [[ -n "${CPA_API_KEY:-}" ]] && curl -fsS -m 3 -o /dev/null -H "Authorization: Bearer $CPA_API_KEY" "$url/v1/models"; then
+    GW="$url"; export CPA_API_KEY
+  else
+    log "gateway $url unreachable — using this machine's own CLI login"
+  fi
+fi
+
 case "$provider" in
   claude)
+    [[ -n "$GW" ]] && export ANTHROPIC_BASE_URL="$GW" ANTHROPIC_AUTH_TOKEN="$CPA_API_KEY"
     args=(-p "$prompt" --name "$name" --output-format text)
     [[ -n "$model" ]] && args+=(--model "$model")
     if [[ "$mode" == "write" ]]; then
@@ -25,6 +39,8 @@ case "$provider" in
     ;;
   codex)
     args=(exec -C "$cwd" --skip-git-repo-check)
+    [[ -n "$GW" ]] && args+=(-c model_provider=cpa
+      -c "model_providers.cpa={name=\"CPA\",base_url=\"$GW/v1\",env_key=\"CPA_API_KEY\",wire_api=\"responses\",requires_openai_auth=false}")
     [[ -n "$model" ]] && args+=(-m "$model")
     if [[ "$mode" == "write" ]]; then
       args+=(--dangerously-bypass-approvals-and-sandbox)
