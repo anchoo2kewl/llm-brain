@@ -58,3 +58,21 @@ Kill switches: `paused: true` in config (all machines), `fleet pause` (this mach
 git clone git@github.com:anchoo2kewl/llm-brain.git ~/projects/llm-brain && ~/projects/llm-brain/bootstrap.sh
 ```
 A machine that should only feed the hub (the laptop): `~/projects/llm-brain/bootstrap.sh --shipper`. It loads `com.llm-brain.hub-ship` and nothing else.
+
+## Hub inspection
+
+The overview shows fleet issue capacity, resolved implement/check/review roles, and
+expandable activity for every recorded provider/model across hosts. Model session
+links filter to that model. Expanded panels survive the 15-second refresh.
+
+Codex `token_count` quota observations are ingested from new rollout lines and
+shipped through the existing transcript pipeline. The UI shows remaining percent,
+window length, reset time, reporting host, and observation age. Readings older than
+15 minutes are marked stale; a passed reset is shown as awaiting an update rather
+than an assumed replenishment. Host readings may refer to the same account and
+are never added together. Previously ingested lines are not replayed by this change.
+Claude subscription balances and gateway account/request routing are not present
+in the current inputs and are explicitly marked unavailable.
+
+Run `make -C hub check` before committing hub changes. Push the change for deployment
+to the Studio; deployment is performed separately.

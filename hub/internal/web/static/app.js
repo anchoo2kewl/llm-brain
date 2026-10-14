@@ -15,7 +15,23 @@
         const tpl = document.createElement("template");
         tpl.innerHTML = html;
         const fresh = tpl.content.getElementById("live");
-        if (fresh) document.getElementById("live").replaceWith(fresh);
+        if (fresh) {
+          const current = document.getElementById("live");
+          // Keep the user's inspection state while updating live counts.
+          // Avoid replacing content while they are selecting text or using a control.
+          const selection = window.getSelection();
+          if ((selection && !selection.isCollapsed && current.contains(selection.anchorNode)) ||
+              (current.contains(document.activeElement) && document.activeElement.matches("input, select, button"))) return;
+          const open = new Set(Array.from(current.querySelectorAll("details[id][open]"), d => d.id));
+          fresh.querySelectorAll("details[id]").forEach(d => { d.open = open.has(d.id); });
+          const focusedID = document.activeElement.closest("details[id]")?.id;
+          const scrolls = Array.from(current.querySelectorAll(".wrap, pre"), el => [el.scrollLeft, el.scrollTop]);
+          current.replaceWith(fresh);
+          fresh.querySelectorAll(".wrap, pre").forEach((el, i) => {
+            if (scrolls[i]) { el.scrollLeft = scrolls[i][0]; el.scrollTop = scrolls[i][1]; }
+          });
+          if (focusedID) document.getElementById(focusedID)?.querySelector("summary")?.focus({ preventScroll: true });
+        }
       } catch (e) { /* hub restarting */ }
     }, 15000);
   }

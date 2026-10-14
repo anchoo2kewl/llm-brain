@@ -5,6 +5,7 @@
 <select name="host"><option value="">any host</option>{{range .Hosts}}<option {{if eq . $.F.Host}}selected{{end}}>{{.}}</option>{{end}}</select>
 <select name="provider"><option value="">any provider</option>{{range .Providers}}<option {{if eq . $.F.Provider}}selected{{end}}>{{.}}</option>{{end}}</select>
 <select name="fleet"><option value="">interactive + fleet</option><option value="hide" {{if eq .F.Fleet "hide"}}selected{{end}}>interactive only</option><option value="only" {{if eq .F.Fleet "only"}}selected{{end}}>fleet workers only</option></select>
+{{if .F.Model}}<input type="hidden" name="model" value="{{.F.Model}}"><span class="pill">Model: {{.F.Model}}</span>{{end}}
 {{if .F.Project}}<input type="hidden" name="project" value="{{.F.Project}}"><span class="pill">{{home .F.Project}}</span>{{end}}
 <button type="submit">Filter</button> <a class="small" href="/sessions">clear</a>
 </form>

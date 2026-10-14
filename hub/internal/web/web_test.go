@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,6 +67,47 @@ func TestPagesEscapeTranscripts(t *testing.T) {
 		}
 		if p != "/" && p != "/runs" && p != "/hosts" && !strings.Contains(string(body), "&lt;script&gt;") {
 			t.Fatalf("%s: transcript text missing", p)
+		}
+	}
+}
+
+func TestOverviewInspectionData(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	eng := ingest.NewEngine(st, "elastio", "elastio/blue-stack")
+	state := t.TempDir()
+	snapshot := `{"host":"studio","at":"2026-10-14T20:00:00Z","max_in_flight":2,"owned":[{"number":1}],"roles":{"implementer":"claude","internal_reviewer":"codex","pr_reviewer":"claude"}}`
+	if err := os.WriteFile(filepath.Join(state, "status.json"), []byte(snapshot), 0600); err != nil {
+		t.Fatal(err)
+	}
+	quota := `{"timestamp":"2026-10-14T20:00:00Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":42,"window_minutes":300,"resets_at":4102444800}}}}` + "\n"
+	if _, err := eng.Chunk(context.Background(), ingest.Chunk{Host: "studio", Kind: ingest.KindCodex, Path: "/s/test.jsonl", Mtime: time.Now(), Data: []byte(quota)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO sessions (host,path,provider,model,message_count) VALUES ('studio','/test','claude','<script>bad</script>',3)`); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(st, eng, state, "studio", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/", "/?fragment=1"} {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		body := w.Body.String()
+		if w.Code != 200 {
+			t.Fatalf("%d: %s", w.Code, body)
+		}
+		for _, want := range []string{"of 2 issue slots available", "58% left", "Routing", "LLMs &amp; models", "Claude balance: unavailable", "&lt;script&gt;bad&lt;/script&gt;"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %q", path, want)
+			}
+		}
+		if strings.Contains(body, "<script>bad</script>") {
+			t.Fatal("unescaped model")
 		}
 	}
 }

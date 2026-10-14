@@ -286,3 +286,44 @@ func TestShipOverHTTP(t *testing.T) {
 		t.Fatalf("shipped messages = %d, want 5", n)
 	}
 }
+
+func TestQuotaObservations(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	for i, sample := range []struct {
+		ts   string
+		used int
+		host string
+	}{
+		{"2026-10-14T20:00:02Z", 42, "studio"},
+		{"2026-10-14T20:00:01Z", 5, "studio"}, // late arrival must not replace newer quota
+		{"2026-10-14T20:00:03Z", 9, "laptop"},
+	} {
+		line := fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","plan_type":"pro","primary":{"used_percent":%d,"window_minutes":300,"resets_at":1792595789},"secondary":null,"private":"do-not-store"}}}`+"\n", sample.ts, sample.used)
+		if _, err := e.Chunk(ctx, Chunk{Host: sample.host, Kind: KindCodex, Path: fmt.Sprintf("/s/%d.jsonl", i), Mtime: time.Now(), Data: []byte(line)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qs, err := e.S.Quotas(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 2 {
+		t.Fatalf("observations: %+v", qs)
+	}
+	for _, q := range qs {
+		want := float64(42)
+		if q.Host == "laptop" {
+			want = 9
+		}
+		if q.Primary == nil || q.Primary.Used != want || q.Secondary != nil {
+			t.Fatalf("quota: %+v", q)
+		}
+	}
+	if count(t, e, `SELECT count(*) FROM quota_observations WHERE payload LIKE '%do-not-store%'`) != 0 {
+		t.Fatal("unexpected fields persisted")
+	}
+	if count(t, e, `SELECT count(*) FROM messages`) != 0 {
+		t.Fatal("quota should not add transcript blocks")
+	}
+}

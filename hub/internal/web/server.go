@@ -217,6 +217,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Events     []store.Event
 		Hosts      []store.Host
 		RecentRuns []store.Run
+		Models     []store.ModelUsage
+		Quotas     []store.QuotaObservation
 		Now        time.Time
 	}{page: page{Title: "Overview", Nav: "overview"}, Now: time.Now()}
 	st, err := readStatus(filepath.Join(s.StateDir, "status.json"))
@@ -233,6 +235,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	data.Events, e = s.Store.Events(ctx, 40)
 	errs = append(errs, e)
 	data.Hosts, e = s.Store.Hosts(ctx)
+	errs = append(errs, e)
+	data.Quotas, e = s.Store.Quotas(ctx)
+	errs = append(errs, e)
+	data.Models, e = s.Store.ModelUsage(ctx)
 	errs = append(errs, e)
 	data.RecentRuns, e = s.Store.Runs(ctx, store.RunFilter{Limit: 10})
 	errs = append(errs, e)
@@ -343,7 +349,7 @@ func (s *Server) logByName(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.SessionFilter{Host: q.Get("host"), Project: q.Get("project"), Provider: q.Get("provider"), Q: strings.TrimSpace(q.Get("q")), Fleet: q.Get("fleet")}
+	f := store.SessionFilter{Host: q.Get("host"), Project: q.Get("project"), Provider: q.Get("provider"), Model: q.Get("model"), Q: strings.TrimSpace(q.Get("q")), Fleet: q.Get("fleet")}
 	list, err := s.Store.Sessions(r.Context(), f)
 	if err != nil {
 		s.fail(w, err)

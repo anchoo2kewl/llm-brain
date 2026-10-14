@@ -288,6 +288,18 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 		} else {
 			ts = m.lastAt // 2025 Codex items carry no timestamp
 		}
+		if ev.Quota != nil && ts != "" {
+			payload, err := json.Marshal(ev.Quota)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO quota_observations (host, provider, limit_id, observed_at, payload)
+                VALUES (?, 'codex', ?, ?, ?) ON CONFLICT (host, provider, limit_id) DO UPDATE
+                SET observed_at = excluded.observed_at, payload = excluded.payload
+                WHERE excluded.observed_at > quota_observations.observed_at`, c.Host, ev.Quota.LimitID, ts, string(payload)); err != nil {
+				return err
+			}
+		}
 		setIf(&m.cwd, ev.Cwd)
 		setIf(&m.branch, ev.Branch)
 		setIf(&m.model, ev.Model)

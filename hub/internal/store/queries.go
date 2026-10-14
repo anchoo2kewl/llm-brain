@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/anchoo2kewl/llm-brain/hub/internal/parse"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -211,9 +214,9 @@ func scanSession(sc interface{ Scan(...any) error }) (Session, error) {
 }
 
 type SessionFilter struct {
-	Host, Project, Provider, Q string
-	Fleet                      string // "" all, "only", "hide"
-	Limit                      int
+	Host, Project, Provider, Model, Q string
+	Fleet                             string // "" all, "only", "hide"
+	Limit                             int
 }
 
 func (s *Store) Sessions(ctx context.Context, f SessionFilter) ([]Session, error) {
@@ -226,6 +229,10 @@ func (s *Store) Sessions(ctx context.Context, f SessionFilter) ([]Session, error
 	if f.Provider != "" {
 		q += ` AND s.provider = ?`
 		args = append(args, f.Provider)
+	}
+	if f.Model != "" {
+		q += ` AND s.model = ?`
+		args = append(args, f.Model)
 	}
 	if f.Project != "" {
 		q += ` AND (s.project = ? OR s.cwd = ?)`
@@ -462,4 +469,57 @@ func Like(q string) string { return "%" + escapeLike(q) + "%" }
 func escapeLike(q string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(q)
+}
+
+// ModelUsage describes recorded activity, not a provider's subscription allowance.
+type ModelUsage struct {
+	Provider, Model          string
+	Sessions, Messages, Live int64
+	LastAt                   string
+}
+
+func (s *Store) ModelUsage(ctx context.Context) ([]ModelUsage, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT provider, model, count(*), sum(message_count),
+ sum(CASE WHEN parent_uuid = '' AND file_mtime >= ? THEN 1 ELSE 0 END), max(file_mtime)
+ FROM sessions WHERE message_count > 0 GROUP BY provider, model ORDER BY provider, model`, ago(LiveWindow))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ModelUsage
+	for rows.Next() {
+		var m ModelUsage
+		if err := rows.Scan(&m.Provider, &m.Model, &m.Sessions, &m.Messages, &m.Live, &m.LastAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+type QuotaObservation struct {
+	Host, Provider, ObservedAt string
+	parse.Quota
+}
+
+func (q QuotaObservation) Stale() bool { return time.Since(ParseT(q.ObservedAt)) > 15*time.Minute }
+func (s *Store) Quotas(ctx context.Context) ([]QuotaObservation, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT host, provider, observed_at, payload FROM quota_observations ORDER BY provider, host, limit_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []QuotaObservation
+	for rows.Next() {
+		var q QuotaObservation
+		var payload string
+		if err := rows.Scan(&q.Host, &q.Provider, &q.ObservedAt, &payload); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(payload), &q.Quota); err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
 }

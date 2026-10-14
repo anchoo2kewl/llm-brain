@@ -7,13 +7,13 @@
 <td>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{short .Target}}</a>{{end}}</td>
 <td class="mut nowrap" title="{{.StartedAt}}">{{ago .StartedAt}}</td>
 <td class="mut nowrap">{{duration .StartedAt .EndedAt}}</td>
-<td class="mut">{{trunc 120 .Summary}}</td>
+<td class="mut">{{.Summary}}</td>
 </tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
 
 {{define "sessrows"}}{{if .}}<div class="wrap"><table>
 <tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th></tr>
 {{range .}}<tr>
-<td>{{if .Live}}<span class="dot" title="live"></span> {{end}}<a href="/sessions/{{.ID}}">{{trunc 110 .DisplayTitle}}</a> <span class="mut small">{{.Provider}}</span></td>
+<td>{{if .Live}}<span class="dot" title="live"></span> {{end}}<a href="/sessions/{{.ID}}">{{trunc 110 .DisplayTitle}}</a> <span class="mut small">{{.Provider}}{{if .Model}} · {{.Model}}{{end}}</span></td>
 <td class="mut">{{.Host}}</td>
 <td class="mut small">{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</td>
 <td class="mut">{{.MessageCount}}</td>
