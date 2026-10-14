@@ -101,7 +101,7 @@ func TestOverviewInspectionData(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("%d: %s", w.Code, body)
 		}
-		for _, want := range []string{"of 2 issue slots available", "58% left", "Routing", "LLMs &amp; models", "Claude balance: unavailable", "&lt;script&gt;bad&lt;/script&gt;"} {
+		for _, want := range []string{"of 2 issue slots available", "58% left", "Routing", "LLMs &amp; models", "Accounts (gateway)", "Gateway not reachable", "&lt;script&gt;bad&lt;/script&gt;"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing %q", path, want)
 			}

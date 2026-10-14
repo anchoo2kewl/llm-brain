@@ -15,12 +15,20 @@ PR head `{{HEAD_SHA}}` is checked out in the current directory; base is `{{BASE}
    PR/mock at its head when there's a cross-repo contract. Mark every file reviewed or skipped (with reason).
 5. Keep only findings you verified with a concrete failing scenario and exact `path:line`. Drop speculation, style nits and anything a linter catches.
 
+# Focus
+Security first (the OWASP Top 10 rules from the `security` module), then performance, then correctness.
+Spend your time where a mistake would leak data, let a user act outside their tenant/role, or slow production down.
+
 # Classify
 - **Red (blocks approval):** severity critical/high — bugs, security/tenant/RBAC leaks, data loss, unsafe-at-prod-size migrations,
   a stated issue outcome not delivered, UI copy contradicting the API, real CI failure.
 - **Optional:** medium/low — everything else worth saying. At most 3; drop the rest.
 
-# Output — SHORT and crisp (CodeRabbit/Greptile style)
+# Output — short, plain, human
+Write like a senior engineer leaving a quick note to a teammate. Plain words, no jargon pile-ups, no filler, no praise.
+Each item: what breaks + a concrete example + the fix. For example:
+`api/users.ts:42` — `org_id` comes from the request body, so user A can read org B's users by changing it. Use the org from the session instead.
+Tag security items with their OWASP id, e.g. "(A01)".
 Review body, max ~120 words:
 ```
 <1–2 sentences: what the PR does + what you verified. For a re-review: "Re-review of <sha8>: <which earlier items are fixed>.">

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/gateway"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/web"
 )
@@ -89,6 +90,8 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	org := fs.String("org", "elastio", "GitHub org of pr-/review- worker keys")
 	issueRepo := fs.String("issue-repo", "elastio/blue-stack", "owner/repo of issue- worker keys")
 	noScan := fs.Bool("no-scan", false, "serve only; don't ingest this machine's files")
+	gwURL := fs.String("gateway", "http://127.0.0.1:8317", "account gateway (CLIProxyAPI) base URL; '' disables")
+	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY")
 	_ = fs.Parse(args)
 	if *dbPath == "" {
 		*dbPath = filepath.Join(c.state, "hub.db")
@@ -163,6 +166,14 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	if !*noScan {
 		col := c.collector("serve", eng, lg)
 		go col.Run(ctx, c.interval)
+	}
+	if *gwURL != "" {
+		if key := gateway.KeyFromEnvFile(*gwEnv); key != "" {
+			gp := &gateway.Poller{Store: st, URL: *gwURL, Key: key, Log: lg}
+			go gp.Run(ctx, 20*time.Second)
+		} else {
+			lg.Printf("gateway: no CPA_MGMT_KEY in %s; account quota/routing disabled", *gwEnv)
+		}
 	}
 	<-ctx.Done()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

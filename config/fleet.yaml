@@ -74,6 +74,7 @@ pr_review:
   #   - <dir>                     llm-brain/review-rules/<dir>/rule.json (OCR rule format)
   #   - {name, git, path}         any git repo holding an OCR-format rule.json
   rule_modules:
+    - security                  # OWASP Top 10 + performance — reviews weigh these first
     - ocr
     - elastio
     - greg

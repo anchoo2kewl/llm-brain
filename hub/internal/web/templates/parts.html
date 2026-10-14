@@ -39,3 +39,19 @@
 {{if isLong .Text}}<div class="txt clamp">{{.Text}}</div><button type="button" class="more">show all</button>{{else}}<div class="txt">{{.Text}}</div>{{end}}
 {{- end}}
 </div>{{end}}
+
+{{define "gateway-accounts"}}
+<h3 id="accounts">Accounts (gateway)</h3>
+{{range .Gateway}}<div class="quota-card" id="acct-{{.Provider}}-{{.Priority}}">
+<div class="model-heading"><strong>{{.Provider}} · {{if .Label}}{{.Label}}{{else}}{{.Email}}{{end}}</strong>
+<span class="pill {{if .Serving}}ok{{else if .Exhausted}}bad{{end}}">{{if .Serving}}serving now{{else if .Exhausted}}exhausted{{else if .Disabled}}disabled{{else}}standby{{end}}</span></div>
+<p class="mut small">{{.Email}} · priority {{.Priority}} · {{.Requests24h}} requests / {{tokens .Tokens24h}} tokens in 24h{{if .LastModel}} · last model {{.LastModel}} {{ago .LastRequestAt}}{{end}}</p>
+{{range .Windows}}<div class="quota-window"><div class="model-heading"><strong>{{remaining .UsedPct}}% left</strong><span class="mut small">{{.Name}} window{{if .ResetAt}} · resets {{resetTime .ResetAt}}{{end}}</span></div><meter min="0" max="100" value="{{.UsedPct}}" aria-label="{{.Name}} used">{{printf "%.0f" .UsedPct}}% used</meter></div>
+{{else}}<p class="mut small">No quota seen yet — it shows after this account serves a request.</p>{{end}}
+</div>{{else}}<p class="mut">Gateway not reachable from this hub.</p>{{end}}
+{{end}}
+{{define "gateway-requests"}}{{if .GwRequests}}
+<h3>Recent calls</h3>
+<table class="small"><tr><th>When</th><th>Account</th><th>Model</th><th>Tokens</th><th>Latency</th></tr>
+{{range .GwRequests}}<tr><td class="mut">{{ago .TS}}</td><td>{{.Account}}</td><td>{{.Model}}</td><td>{{tokens .Total}}</td><td class="{{if .Failed}}bad{{end}}">{{if .Failed}}failed {{.StatusCode}}{{else}}{{.LatencyMS}} ms{{end}}</td></tr>{{end}}
+</table>{{end}}{{end}}
