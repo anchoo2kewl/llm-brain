@@ -1,0 +1,300 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
+)
+
+// Status is bin/fleet's status.json snapshot (written by `fleet snapshot` every tick).
+type Status struct {
+	Host   string `json:"host"`
+	At     string `json:"at"`
+	Paused bool   `json:"paused"`
+	Roles  struct {
+		Implementer      string `json:"implementer"`
+		InternalReviewer string `json:"internal_reviewer"`
+		PRReviewer       string `json:"pr_reviewer"`
+	} `json:"roles"`
+	MaxInFlight int      `json:"max_in_flight"`
+	Owned       []Issue  `json:"owned"`
+	Queue       []Issue  `json:"queue"`
+	PRs         []PR     `json:"prs"`
+	Reviews     []Review `json:"reviews"`
+	Workers     []Worker `json:"workers"`
+	Log         string   `json:"log"`
+}
+
+type Issue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	UpdatedAt string `json:"updatedAt"`
+	CreatedAt string `json:"createdAt"`
+	ByHand    bool   `json:"by_hand"`
+}
+
+type PR struct {
+	URL              string `json:"url"`
+	Title            string `json:"title"`
+	Number           int    `json:"number"`
+	ReviewDecision   string `json:"reviewDecision"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	UpdatedAt        string `json:"updatedAt"`
+	CI               string `json:"ci"`
+}
+
+type Review struct {
+	Log     string  `json:"log"`
+	At      string  `json:"at"`
+	URL     *string `json:"url"`
+	Verdict string  `json:"verdict"`
+	Detail  string  `json:"detail"`
+}
+
+type Worker struct {
+	Key   string `json:"key"`
+	PID   string `json:"pid"`
+	Log   string `json:"log"`
+	Since string `json:"since"`
+}
+
+func (s *Status) Queued() int {
+	n := 0
+	for _, q := range s.Queue {
+		if !q.ByHand {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *Status) CountVerdict(v string) int {
+	n := 0
+	for _, r := range s.Reviews {
+		if r.Verdict == v {
+			n++
+		}
+	}
+	return n
+}
+
+// Stale: the snapshot is older than two ticks, so the scheduler is probably not running.
+func (s *Status) Stale() bool { return time.Since(parseAny(s.At)) > 11*time.Minute }
+
+func readStatus(path string) (*Status, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var s Status
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// parseAny reads the times the hub sees: its own UTC format, GitHub's RFC 3339, and the fleet's local
+// "2006-01-02T15:04:05".
+func parseAny(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	for _, f := range []string{store.TimeFormat, time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(f, s); err == nil {
+			return t
+		}
+	}
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, time.Local); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
+func ago(v any) string {
+	var t time.Time
+	switch x := v.(type) {
+	case string:
+		t = parseAny(x)
+	case time.Time:
+		t = x
+	}
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < 0:
+		return "just now"
+	case d < 90*time.Second:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < 90*time.Minute:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+func clock(v string) string {
+	t := parseAny(v)
+	if t.IsZero() {
+		return ""
+	}
+	t = t.Local()
+	if time.Since(t) < 20*time.Hour {
+		return t.Format("15:04:05")
+	}
+	return t.Format("Jan 2 15:04")
+}
+
+func duration(from, to string) string {
+	a, b := parseAny(from), parseAny(to)
+	if a.IsZero() {
+		return ""
+	}
+	if b.IsZero() {
+		b = time.Now()
+	}
+	d := b.Sub(a).Round(time.Second)
+	if d >= time.Hour {
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	if d >= time.Minute {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return d.String()
+}
+
+func trunc(n int, s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// snippet is the part of s around the first match of q.
+func snippet(q, s string) string {
+	ls, lq := strings.ToLower(s), strings.ToLower(q)
+	i := strings.Index(ls, lq)
+	if i < 0 {
+		return trunc(240, s)
+	}
+	start := max(0, i-100)
+	end := min(len(s), i+len(q)+140)
+	for start > 0 && start < len(s) && (s[start]&0xC0) == 0x80 {
+		start--
+	}
+	for end < len(s) && (s[end]&0xC0) == 0x80 {
+		end++
+	}
+	out := strings.Join(strings.Fields(s[start:end]), " ")
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(s) {
+		out += "…"
+	}
+	return out
+}
+
+func who(login string) string {
+	switch login {
+	case "Assurio-n7n":
+		return "Naj"
+	case "greg-aligiannis":
+		return "Greg"
+	}
+	return login
+}
+
+func statusClass(s string) string {
+	switch strings.ToLower(s) {
+	case "running", "passing", "approve", "succeeded", "live":
+		return "ok"
+	case "failed", "failing", "error":
+		return "bad"
+	case "exited":
+		return "mut"
+	}
+	return "warn"
+}
+
+func short(s string) string {
+	s = strings.TrimPrefix(s, "https://github.com/")
+	return s
+}
+
+func homeShort(p string) string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		if strings.HasPrefix(p, h) {
+			return "~" + p[len(h):]
+		}
+	}
+	for _, pre := range []string{"/Users/", "/home/"} {
+		if strings.HasPrefix(p, pre) {
+			rest := p[len(pre):]
+			if i := strings.IndexByte(rest, '/'); i >= 0 {
+				return "~" + rest[i:]
+			}
+			return "~"
+		}
+	}
+	return p
+}
+
+func bytesH(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
+var funcs = template.FuncMap{
+	"ago": ago, "clock": clock, "duration": duration, "trunc": trunc, "snippet": snippet, "who": who,
+	"statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
+	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
+	"agentLabels": func(i Issue) []string {
+		var out []string
+		for _, l := range i.Labels {
+			if strings.HasPrefix(l.Name, "agent") {
+				out = append(out, l.Name)
+			}
+		}
+		return out
+	},
+	"labelClass": func(n string) string {
+		switch {
+		case strings.Contains(n, "blocked"):
+			return "bad"
+		case strings.Contains(n, "pr-open"):
+			return "ok"
+		}
+		return "warn"
+	},
+	"deref": func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	},
+	"inc":    func(i int64) int64 { return i + 1 },
+	"dec":    func(i int64) int64 { return i - 1 },
+	"isLong": func(s string) bool { return len(s) > 1200 || strings.Count(s, "\n") > 24 },
+}

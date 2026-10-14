@@ -1,0 +1,12 @@
+{{define "content"}}
+<div class="top"><h1>Runs</h1><div class="meta">{{len .Runs}} shown</div></div>
+<form class="filters" method="get" action="/runs">
+<input type="search" name="q" value="{{.F.Q}}" placeholder="key, PR, summary, log text…">
+<select name="kind"><option value="">any kind</option>{{range .Opts.kind}}<option {{if eq . $.F.Kind}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="status"><option value="">any status</option>{{range .Opts.status}}<option {{if eq . $.F.Status}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="host"><option value="">any host</option>{{range .Opts.host}}<option {{if eq . $.F.Host}}selected{{end}}>{{.}}</option>{{end}}</select>
+<select name="provider"><option value="">any provider</option>{{range .Opts.provider}}<option {{if eq . $.F.Provider}}selected{{end}}>{{.}}</option>{{end}}</select>
+<button type="submit">Filter</button> <a class="small" href="/runs">clear</a>
+</form>
+{{template "runrows" .Runs}}
+{{end}}

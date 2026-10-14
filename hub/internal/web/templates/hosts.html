@@ -1,0 +1,7 @@
+{{define "content"}}
+<div class="top"><h1>Hosts</h1></div>
+<div class="wrap"><table><tr><th>Host</th><th>Role</th><th>Last seen</th><th>Sessions</th><th>Messages</th><th>Runs</th><th>Workers alive</th><th>TZ</th></tr>
+{{range .Hosts}}<tr><td><a href="/sessions?host={{.Host}}">{{.Host}}</a></td><td class="mut">{{.Role}}</td><td class="mut">{{if .LastSeen}}{{ago .LastSeen}}{{else}}never{{end}}</td>
+<td>{{.Sessions}}</td><td>{{.Messages}}</td><td><a href="/runs?host={{.Host}}">{{.Runs}}</a></td><td class="mut small">{{.Running}}</td><td class="mut small">{{.TZ}}</td></tr>{{end}}
+</table></div>
+{{end}}
