@@ -1,0 +1,8 @@
+{
+  "name": "multitenant",
+  "description": "Multi-tenant SaaS basics. Applies when the change smells like tenant/account/role data.",
+  "when": { "keywords": ["tenant", "org_id", "organization", "account_id", "workspace", "rbac", "role", "scope", "permission"], "min": 1 },
+  "rules": [
+    { "path": "**/*", "rule": "- Every read and write is bound to the caller's tenant and role; an id from the request is re-checked against that scope.\n- Cache keys include the tenant and anything else that changes the answer.\n- Rollout switches are runtime feature flags, not env vars or deploy-time settings.\n- Background jobs carry the tenant explicitly; nothing runs 'for all tenants' by accident." }
+  ]
+}

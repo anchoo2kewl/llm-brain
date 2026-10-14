@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.llm-brain.hub</string>
-  <key>ProgramArguments</key><array><string>__BRAIN__/bin/hub</string><string>serve</string><string>--port</string><string>8787</string></array>
+  <key>ProgramArguments</key><array><string>__BRAIN__/bin/hub</string><string>serve</string><string>--port</string><string>8787</string><string>--org</string><string>__ORG__</string><string>--issue-repo</string><string>__ISSUE_REPO__</string><string>--people</string><string>__PEOPLE__</string></array>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>

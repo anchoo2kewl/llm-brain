@@ -1,0 +1,7 @@
+{
+  "name": "contracts",
+  "description": "Checks that keep paired changes honest: API vs client, description vs code, limits vs claims.",
+  "rules": [
+    { "path": "**/*", "rule": "- Paired changes (API ↔ UI ↔ mock/SDK): field names, enums, status codes and error codes match the other side's latest commit; say which commit you checked.\n- What the PR description and user-facing text claim matches what the code does (e.g. a note says 'newest shown' while the query keeps the oldest).\n- The linked issue's outcomes are delivered; a PR that quietly covers several issues gets an optional 'split it' note.\n- Under a LIMIT, the rows that survive are the right ones (ORDER BY direction); lists, groups and facets are bounded.\n- Lifecycle edges: expiry fields honoured when read, transitions the server will refuse handled, deleted/detached things in history views.\n- Tests pin the risky guard (the check that stops a foreign id) and the error/truncated branches." }
+  ]
+}

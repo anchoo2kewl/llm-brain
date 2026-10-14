@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""review-rules <file>...   (run inside the repo under review)
+"""review-rules [--repo owner/name] [--base REF] <file>...   (run inside the repo under review)
 
-Prints the UNION of review rules for each file, grouped by identical rule set:
-  - open-code-review (`ocr delegate rule`): Alibaba's system ruleset per language,
-    plus the repo's own .opencodereview/rule.json and ~/.opencodereview/rule.json;
-  - every module listed in config pr_review.rule_modules (a dir with rule.json in
-    OCR format). Unlike OCR's first-match, ALL matching entries of ALL modules apply.
-A module is either a dir under llm-brain/review-rules/ or {name, git, path} — a git
-repo cloned/pulled into ~/.local/state/llm-brain/rule-modules/<name>.
+Prints the review rules that apply to this change, grouped by file:
+  - open-code-review (`ocr delegate rule`): language rules + the repo's own .opencodereview/rule.json
+  - every rule module in pr_review.rule_modules + pr_review.extra_rule_modules, looked up in
+    llm-brain/review-rules/, then <overlay>/rules/, or {name, git, path} for a git repo.
+ALL matching rules of ALL applicable modules are used (a union, unlike OCR's first match).
+
+A module (or a single rule entry) can say when it applies, loosely:
+  "when": {"repos": ["*api*"], "files": ["**/migrations/**"], "keywords": ["tenant"], "min": 1}
+Each repo glob, file glob or keyword that matches is one hit; the module applies with >= min hits
+(default 1). No "when" = always. Keywords are fuzzy: case, '_' and '-' are ignored and they match
+inside words, so "tenant" hits tenant_id, TenantName and multi-tenant.
 """
-import json, os, subprocess, sys
+import argparse, json, os, re, subprocess, sys
 from pathlib import Path, PurePosixPath
 
 BRAIN = Path(__file__).resolve().parent.parent
@@ -19,7 +23,17 @@ STATE = Path.home() / ".local/state/llm-brain/rule-modules"
 def cfg(expr):
     out = subprocess.run(["bash", "-c", f'source "{BRAIN}/bin/lib.sh"; cfg -o=json \'{expr}\''],
                          capture_output=True, text=True, env=dict(os.environ, BRAIN_DIR=str(BRAIN)))
-    return json.loads(out.stdout or "null")
+    try:
+        return json.loads(out.stdout or "null")
+    except json.JSONDecodeError:
+        return None
+
+
+def overlay_dir():
+    out = subprocess.run(["bash", "-c", f'source "{BRAIN}/bin/lib.sh"; overlay_dir'], capture_output=True, text=True,
+                         env=dict(os.environ, BRAIN_DIR=str(BRAIN)))
+    p = out.stdout.strip()
+    return Path(p) if p else None
 
 
 def expand_braces(pat):
@@ -30,59 +44,94 @@ def expand_braces(pat):
     return [p for alt in body.split(",") for p in expand_braces(pre + alt + post)]
 
 
-def matches(path, pat):
-    p = PurePosixPath(path)
-    for g in expand_braces(pat):
+def glob_match(path, pat):
+    p = PurePosixPath(path.lower())
+    for g in expand_braces(pat.lower()):
         if p.full_match(g) or (g.startswith("**/") and p.full_match(g[3:])):
             return True
     return False
 
 
-def module_dir(m):
-    if isinstance(m, str):
-        return BRAIN / "review-rules" / m, m
-    dst = STATE / m["name"]
-    if dst.exists():
-        subprocess.run(["git", "-C", str(dst), "pull", "-q", "--ff-only"], capture_output=True)
-    else:
-        STATE.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "-q", "--depth", "1", m["git"], str(dst)], check=True)
-    return dst / m.get("path", ""), m["name"]
+def norm(s):
+    return re.sub(r"[_\-\s]+", "", s.lower())
 
 
-def main(files):
-    if not files:
+def hits(when, repo, files, diff_norm):
+    if not when:
+        return True
+    n = 0
+    name = repo.split("/")[-1] if repo else ""
+    n += sum(1 for g in when.get("repos", []) if repo and (glob_match(name, g) or glob_match(repo, g)))
+    n += sum(1 for g in when.get("files", []) if any(glob_match(f, g) for f in files))
+    n += sum(1 for k in when.get("keywords", []) if norm(k) in diff_norm)
+    return n >= when.get("min", 1)
+
+
+def module_dir(m, overlay):
+    if isinstance(m, dict):
+        dst = STATE / m["name"]
+        if dst.exists():
+            subprocess.run(["git", "-C", str(dst), "pull", "-q", "--ff-only"], capture_output=True)
+        else:
+            STATE.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "clone", "-q", "--depth", "1", m["git"], str(dst)], check=True)
+        return dst / m.get("path", ""), m["name"]
+    for base in [BRAIN / "review-rules"] + ([overlay / "rules"] if overlay else []):
+        if (base / m / "rule.json").exists():
+            return base / m, m
+    return BRAIN / "review-rules" / m, m
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--repo", default=os.environ.get("REVIEW_REPO", ""))
+    ap.add_argument("--base", default="")
+    ap.add_argument("files", nargs="*")
+    a = ap.parse_args()
+    if not a.files:
         sys.exit(__doc__)
-    per_file = {f: [] for f in files}
-    mods = cfg(".pr_review.rule_modules") or []
+    diff = ""
+    if a.base:
+        diff = subprocess.run(["git", "--no-pager", "diff", "--no-color", "-U0", f"{a.base}...HEAD", "--", *a.files],
+                              capture_output=True, text=True).stdout
+        diff = "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
+    diff_norm = norm(diff)
+    overlay = overlay_dir()
+    per_file = {f: [] for f in a.files}
+    mods = (cfg(".pr_review.rule_modules") or []) + (cfg(".pr_review.extra_rule_modules") or [])
+    used = []
     if "ocr" in mods:
-        r = subprocess.run(["ocr", "delegate", "rule", "--format", "json", *files], capture_output=True, text=True)
+        r = subprocess.run(["ocr", "delegate", "rule", "--format", "json", *a.files], capture_output=True, text=True)
         if r.returncode == 0:
             for g in json.loads(r.stdout).get("groups", []):
                 for f in g["files"]:
                     per_file.setdefault(f, []).append((f"ocr:{g['source']}", g["rule"]))
+            used.append("ocr")
         else:
             print(f"(ocr rules unavailable: {r.stderr.strip()[:200]})", file=sys.stderr)
     for m in mods:
         if m == "ocr":
             continue
-        d, name = module_dir(m)
+        d, name = module_dir(m, overlay)
         rf = d / "rule.json"
         if not rf.exists():
             print(f"(module {name}: no rule.json at {rf})", file=sys.stderr)
             continue
         spec = json.loads(rf.read_text())
+        if not hits(spec.get("when"), a.repo, a.files, diff_norm):
+            continue
+        used.append(name)
         excl = spec.get("exclude", [])
-        for f in files:
-            if any(matches(f, e) for e in excl):
+        for f in a.files:
+            if any(glob_match(f, e) for e in excl):
                 continue
             for r in spec.get("rules", []):
-                if matches(f, r["path"]):
+                if glob_match(f, r["path"]) and hits(r.get("when"), a.repo, [f], diff_norm):
                     per_file[f].append((name, r["rule"]))
+    print("Modules applied: " + (", ".join(used) or "none") + "\n")
     groups = {}
     for f, rules in per_file.items():
-        key = json.dumps(rules)
-        groups.setdefault(key, ([], rules))[0].append(f)
+        groups.setdefault(json.dumps(rules), ([], rules))[0].append(f)
     for i, (fs, rules) in enumerate(groups.values(), 1):
         print(f"## Rule group {i}\nFiles: " + ", ".join(fs) + "\n")
         for src, text in rules:
@@ -90,4 +139,4 @@ def main(files):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()

@@ -213,12 +213,12 @@ func snippet(q, s string) string {
 	return out
 }
 
+// People maps GitHub logins to display names (hub serve --people "login=Name,..."); unknown logins show as-is.
+var People = map[string]string{}
+
 func who(login string) string {
-	switch login {
-	case "Assurio-n7n":
-		return "Naj"
-	case "greg-aligiannis":
-		return "Greg"
+	if n, ok := People[login]; ok && n != "" {
+		return n
 	}
 	return login
 }

@@ -47,9 +47,9 @@ func (a GatewayAccount) Stale() bool { return time.Since(ParseT(a.SeenAt)) > 5*t
 
 type GatewayRequest struct {
 	RequestID, TS, AuthIndex, Account, Model, UserAgent string
-	Input, Output, Cached, Total, LatencyMS   int64
-	Failed                                    bool
-	StatusCode                                int
+	Input, Output, Cached, Total, LatencyMS             int64
+	Failed                                              bool
+	StatusCode                                          int
 }
 
 // SaveGatewayAccounts replaces the account list with the gateway's current view.
