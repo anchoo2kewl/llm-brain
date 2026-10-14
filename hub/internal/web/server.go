@@ -240,6 +240,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// A running fleet worker's own transcript is shown on its run row, not again as a session.
+	linked := map[int64]bool{}
+	for _, r := range data.Runs {
+		linked[r.SessionID] = true
+	}
+	live := data.Live[:0]
+	for _, x := range data.Live {
+		if !linked[x.ID] {
+			live = append(live, x)
+		}
+	}
+	data.Live = live
 	tmpl := "layout"
 	if r.URL.Query().Get("fragment") == "1" {
 		tmpl = "content"

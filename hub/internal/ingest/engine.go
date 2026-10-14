@@ -169,7 +169,8 @@ func (e *Engine) Chunk(ctx context.Context, c Chunk) (int64, error) {
 		return off, ErrOffset
 	}
 	n := consumable(c)
-	if n > 0 {
+	// A worker log is registered as a run as soon as it exists: `claude -p` writes nothing until it finishes.
+	if n > 0 || c.Kind == KindRunLog {
 		data := c.Data[:n]
 		switch c.Kind {
 		case KindClaude, KindCodex:
@@ -363,7 +364,7 @@ func (e *Engine) applyRunLog(ctx context.Context, tx *sql.Tx, c Chunk, data []by
 			summary = ll
 		}
 	}
-	if provider == "" && c.Offset == 0 {
+	if provider == "" && c.Offset == 0 && text != "" {
 		provider = "claude"
 		if parse.LooksLikeCodex(text[:min(len(text), 4096)]) {
 			provider = "codex"
