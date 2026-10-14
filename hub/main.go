@@ -24,8 +24,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/gateway"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/web"
 )
@@ -86,6 +87,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	c := commonFlags(fs)
 	port := fs.Int("port", 8787, "listen port")
 	dbPath := fs.String("db", "", "database file (default <state>/hub.db)")
+	indexPath := fs.String("index", "", "full-text index directory (default <state>/hub.bleve; 'off' to search the database instead)")
 	listen := fs.String("listen", "", "comma-separated addresses to bind (default: 127.0.0.1 + this machine's Tailscale IPv4)")
 	org := fs.String("org", "elastio", "GitHub org of pr-/review- worker keys")
 	issueRepo := fs.String("issue-repo", "elastio/blue-stack", "owner/repo of issue- worker keys")
@@ -108,6 +110,23 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	srv, err := web.New(st, eng, c.state, c.host, lg)
 	if err != nil {
 		return err
+	}
+	if *indexPath == "" {
+		*indexPath = filepath.Join(c.state, "hub.bleve")
+	}
+	if *indexPath != "off" {
+		idx, err := search.Open(*indexPath, st, lg)
+		if err != nil {
+			return fmt.Errorf("search index: %w", err)
+		}
+		defer idx.Close()
+		srv.Index = idx
+		eng.OnWrite = func(ctx context.Context) {
+			if err := idx.Sync(ctx); err != nil && ctx.Err() == nil {
+				lg.Printf("search index: %v", err)
+			}
+		}
+		go idx.Run(ctx, 30*time.Second)
 	}
 	h := srv.Handler()
 

@@ -74,6 +74,9 @@ type Engine struct {
 	Org       string // GitHub org for pr-/review- keys
 	IssueRepo string // owner/repo for issue- keys
 	Now       func() time.Time
+	// OnWrite, when set, runs after every committed write (the search index catches up here, in the same
+	// pass that ingested the rows).
+	OnWrite func(context.Context)
 
 	mu     sync.Mutex
 	linked map[string]bool // hosts that had their full link pass this process
@@ -191,7 +194,17 @@ func (e *Engine) Chunk(ctx context.Context, c Chunk) (int64, error) {
 		c.Host, c.Path, c.Kind, newOff, c.Size, store.T(c.Mtime), store.Now()); err != nil {
 		return 0, err
 	}
-	return newOff, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	e.wrote(ctx)
+	return newOff, nil
+}
+
+func (e *Engine) wrote(ctx context.Context) {
+	if e.OnWrite != nil {
+		e.OnWrite(ctx)
+	}
 }
 
 func (e *Engine) reset(ctx context.Context, tx *sql.Tx, c Chunk) error {
@@ -333,7 +346,10 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 		auto_title = ?, agent_name = ?, first_at = ?, last_at = ?, file_mtime = ?, message_count = ? WHERE id = ?`,
 		m.project, m.cwd, m.branch, m.model, m.originator, m.title, m.autoTitle, m.agentName, m.firstAt, m.lastAt,
 		store.T(c.Mtime), m.count, m.id)
-	return err
+	if err != nil {
+		return err
+	}
+	return store.MarkDirty(ctx, tx, "s", m.id)
 }
 
 func setIf(dst *string, v string) {
@@ -361,9 +377,10 @@ func (e *Engine) applyRunLog(ctx context.Context, tx *sql.Tx, c Chunk, data []by
 		return err
 	}
 	text := string(data)
+	var id int64
 	var summary, provider, target string
-	if err := tx.QueryRowContext(ctx, `SELECT summary, provider, target FROM runs WHERE host = ? AND path = ?`, c.Host, c.Path).
-		Scan(&summary, &provider, &target); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id, summary, provider, target FROM runs WHERE host = ? AND path = ?`, c.Host, c.Path).
+		Scan(&id, &summary, &provider, &target); err != nil {
 		return err
 	}
 	if r, ok := parse.FindReviewed(text); ok {
@@ -386,7 +403,10 @@ func (e *Engine) applyRunLog(ctx context.Context, tx *sql.Tx, c Chunk, data []by
 	_, err := tx.ExecContext(ctx, `UPDATE runs SET log = log || ?, log_bytes = log_bytes + ?, summary = ?, provider = ?, target = ?,
 		status = CASE WHEN status = 'failed' AND ? THEN 'succeeded' ELSE status END
 		WHERE host = ? AND path = ?`, text, len(data), summary, provider, target, strings.HasPrefix(summary, "REVIEWED "), c.Host, c.Path)
-	return err
+	if err != nil {
+		return err
+	}
+	return store.MarkDirty(ctx, tx, "r", id)
 }
 
 // ---------------------------------------------------------------- scheduler log
@@ -448,7 +468,11 @@ func (e *Engine) Heartbeat(ctx context.Context, h Heartbeat) error {
 	if err := e.attachPrompts(ctx, h); err != nil {
 		return err
 	}
-	return e.link(ctx, h.Host)
+	if err := e.link(ctx, h.Host); err != nil {
+		return err
+	}
+	e.wrote(ctx)
+	return nil
 }
 
 func (e *Engine) finalize(ctx context.Context, h Heartbeat) error {
@@ -500,6 +524,9 @@ func (e *Engine) finalize(ctx context.Context, h Heartbeat) error {
 		if _, err := e.S.DB.ExecContext(ctx, `UPDATE runs SET ended_at = ?, status = ?, provider = ? WHERE id = ?`, ended, status, o.pv, o.id); err != nil {
 			return err
 		}
+		if err := store.MarkDirty(ctx, e.S.DB, "r", o.id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -520,6 +547,9 @@ func (e *Engine) attachPrompts(ctx context.Context, h Heartbeat) error {
 			continue
 		}
 		if _, err := e.S.DB.ExecContext(ctx, `UPDATE runs SET prompt = ? WHERE id = ?`, p.Text, id); err != nil {
+			return err
+		}
+		if err := store.MarkDirty(ctx, e.S.DB, "r", id); err != nil {
 			return err
 		}
 	}
@@ -581,6 +611,9 @@ func (e *Engine) link(ctx context.Context, host string) error {
 			return err
 		}
 		if _, err := e.S.DB.ExecContext(ctx, `UPDATE runs SET session_id = ?, provider = ? WHERE id = ?`, sid, prov, c.id); err != nil {
+			return err
+		}
+		if err := store.MarkDirty(ctx, e.S.DB, "r", c.id); err != nil {
 			return err
 		}
 	}

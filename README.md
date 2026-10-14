@@ -37,13 +37,13 @@ A Go service with a server-rendered UI, storing everything in Turso (the Rust SQ
 - **Overview** shows everything the old dashboard showed, read from `status.json`. It also shows the agents running now on every host: fleet workers, plus interactive Claude/Codex sessions whose transcript changed in the last 2 minutes.
 - **Runs**: every `logs/<key>.<ts>.log` with its prompt, live-tailing log, status, PR/issue link, and the worker's own conversation (Claude sessions named `fleet-<key>`).
 - **Sessions**: every `~/.claude/projects/*/*.jsonl` (subagents too) and `~/.codex/sessions/**/*.jsonl` as a readable transcript. Thinking and tool calls are collapsible, and the page updates live.
-- **Search**: LIKE over every message, tool input and tool output.
+- **Search**: a full-text index (bleve, at `~/.local/state/llm-brain/hub.bleve`) over every message (text, thinking, tool name, input and output), session (title, directory, branch, uuid), run (key, target, prompt, log) and `fleet.log` event. Ranked by relevance or newest first. Syntax: `words` (all must match), `"exact phrase"`, `deploy*`, `-word`, code tokens as typed (`uiv3#835`, `blue-stack-api`, `a/b.go`, uuids, `snake_case`), and filters `host:` `type:` `provider:` `kind:` `tool:` `role:` `status:` `session:` `after:` `before:`. Rows are indexed in the pass that ingests them; on first start the index is built in the background (search scans the database until it's done), and a restart resumes where it stopped. Delete the directory to rebuild it.
 
 Ingestion is incremental and idempotent. Each file has a byte offset that advances in the same transaction as the rows it produced, and the hub re-scans every 10 s. Other machines run `hub ship --to http://100.74.108.114:8787` (`./bootstrap.sh --shipper`). It POSTs new bytes of the same files, and the hub stores them under that machine's `host`. Ship requests are accepted only from loopback and 100.64.0.0/10.
 ```
 make -C hub build     # -> bin/hub (darwin/arm64, no CGO)
 make -C hub check     # go vet + go test
-bin/hub serve [--port 8787] [--db PATH] [--listen 127.0.0.1,...]
+bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--listen 127.0.0.1,...]
 bin/hub ship --to http://100.74.108.114:8787 [--once]
 ```
 

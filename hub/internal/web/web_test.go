@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
@@ -109,5 +110,57 @@ func TestOverviewInspectionData(t *testing.T) {
 		if strings.Contains(body, "<script>bad</script>") {
 			t.Fatal("unescaped model")
 		}
+	}
+}
+
+func TestSearchPageUsesIndex(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	idx, err := search.Open("", st, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	eng := ingest.NewEngine(st, "elastio", "elastio/blue-stack")
+	srv, err := New(st, eng, t.TempDir(), "h", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Index = idx
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	get := func(p string) string {
+		resp, err := http.Get(ts.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", p, resp.StatusCode, b)
+		}
+		return string(b)
+	}
+	// Before the first build finishes, search scans the store and says so.
+	line := `{"type":"user","sessionId":"s","timestamp":"2026-10-14T20:00:00Z","cwd":"/w","message":{"role":"user","content":"ship <b>uiv3#835</b> today"}}` + "\n"
+	if _, err := eng.Chunk(context.Background(), ingest.Chunk{Host: "h", Kind: ingest.KindClaude, Path: "/p/x/s.jsonl", Mtime: time.Now(), Data: []byte(line)}); err != nil {
+		t.Fatal(err)
+	}
+	if b := get("/search?q=uiv3%23835"); !strings.Contains(b, "building index") || !strings.Contains(b, "<mark>uiv3#835</mark>") {
+		t.Fatalf("fallback page: %s", b)
+	}
+	if err := idx.Sync(context.Background()); err != nil || !idx.Ready() {
+		t.Fatalf("build: %v", err)
+	}
+	b := get("/search?q=uiv3%23835")
+	if strings.Contains(b, "building index") || !strings.Contains(b, "<mark>uiv3#835</mark>") || strings.Contains(b, "<b>uiv3") ||
+		!strings.Contains(b, `href="/sessions/1?after=0#m1"`) {
+		t.Fatalf("indexed page: %s", b)
+	}
+	if b := get("/search?type=session"); !strings.Contains(b, "/sessions/1") {
+		t.Fatalf("type menu: %s", b)
 	}
 }

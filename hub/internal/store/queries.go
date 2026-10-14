@@ -379,6 +379,10 @@ func (s *Store) Search(ctx context.Context, q, host string, limit int) ([]Hit, e
 	}
 	sqlq += ` ORDER BY m.id DESC LIMIT ?`
 	args = append(args, limit)
+	return s.queryHits(ctx, sqlq, args...)
+}
+
+func (s *Store) queryHits(ctx context.Context, sqlq string, args ...any) ([]Hit, error) {
 	rows, err := s.DB.QueryContext(ctx, sqlq, args...)
 	if err != nil {
 		return nil, err
