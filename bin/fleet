@@ -105,12 +105,13 @@ cmd_dispatch() {
   done < <(intake_queue)
 }
 
-fleet_prs() { # JSON array of open PRs carrying the marker
-  local marker owners q
+fleet_prs() { # JSON array of my open PRs whose body carries the fleet marker
+  local marker owner
   marker="$(cfg '.pr_marker')"
-  owners="$(cfg '.pr_owners | map("org:" + .) | join(" ")')"
-  gh search prs --author "@me" --state open $owners "\"$marker\" in:body" \
-    --json url,number,repository,updatedAt --limit 100
+  for owner in $(cfg '.pr_owners[]'); do
+    gh search prs --owner "$owner" --author "@me" --state open "llm-brain" --match body \
+      --json url,number,repository,updatedAt,body --limit 100
+  done | jq -s --arg m "$marker" 'add // [] | map(select(.body | contains($m)) | del(.body))'
 }
 
 cmd_babysit() {
