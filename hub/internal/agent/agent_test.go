@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -644,5 +646,181 @@ func TestGemini(t *testing.T) {
 	}
 	if Other("gemini") != "claude" || Other("claude") != "codex" || Other("codex") != "claude" {
 		t.Error("reviewer pairing")
+	}
+}
+
+// gatedRunner's Start waits for release, like a slow process start.
+type gatedRunner struct {
+	fakeRunner
+	entered, release chan struct{}
+	procs            []*fakeProc
+}
+
+func (g *gatedRunner) Start(ctx context.Context, s Spec) (Process, error) {
+	g.entered <- struct{}{}
+	<-g.release
+	p, err := g.fakeRunner.Start(ctx, s)
+	g.mu.Lock()
+	g.procs = append(g.procs, p.(*fakeProc))
+	g.mu.Unlock()
+	return p, err
+}
+
+func TestStopDuringStartup(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	g := &gatedRunner{fakeRunner: fakeRunner{out: map[string]string{"claude": "block"}}, entered: make(chan struct{}, 1), release: make(chan struct{})}
+	r.ex.Runner = g
+	id, _ := r.ctl.Start(ctx, StartReq{Host: "studio", Cwd: r.repo, Provider: "claude", Prompt: "x"})
+	if err := r.ex.PollOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	<-g.entered // the turn is starting its process
+	if keys := r.ex.RunningKeys(); len(keys) != 1 {
+		t.Fatalf("a starting turn isn't registered: %v", keys)
+	}
+	if err := r.ctl.Stop(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ex.PollOnce(ctx); err != nil { // delivers the stop while Start is still in progress
+		t.Fatal(err)
+	}
+	close(g.release)
+	r.ex.Wait()
+	if a := r.session(t, id); a.Status != "stopped" {
+		t.Fatalf("%+v", a)
+	}
+	select {
+	case <-g.procs[0].stopped:
+	default:
+		t.Fatal("the process that started after the stop wasn't stopped")
+	}
+}
+
+func TestStopBeforeStart(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	id, cid, _ := r.st.CreateAgentSession(ctx, store.AgentSession{Host: "studio", Cwd: r.repo, Provider: "claude", Perm: PermEdit},
+		&store.Command{Host: "studio", Kind: KindTurn, Payload: payload(Turn{Provider: "claude", Cwd: r.repo, Perm: PermEdit, Prompt: "x"})})
+	// Claim it, hold the turn as the executor would, and stop it before runTurn gets going.
+	cs, _ := r.st.ClaimCommands(ctx, "studio")
+	r.ex.init()
+	tctx, cancel := context.WithCancel(ctx)
+	st := &turn{agentID: id, cancel: cancel}
+	st.halt()
+	r.ex.runTurn(tctx, cs[0], st)
+	if len(r.run.specs) != 0 {
+		t.Fatal("a process started after the stop")
+	}
+	if c, _ := r.st.Command(ctx, cid); c.Status != "stopped" {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestMaxTurnsHoldsForABatch(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	r.run.out["claude"] = "block"
+	r.ex.MaxTurns = 1
+	var ids []int64
+	for range 3 {
+		id, err := r.ctl.Start(ctx, StartReq{Host: "studio", Cwd: r.repo, Provider: "claude", Prompt: "x"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := r.ex.PollOnce(ctx); err != nil { // all three arrive in one batch
+		t.Fatal(err)
+	}
+	if keys := r.ex.RunningKeys(); len(keys) != 1 {
+		t.Fatalf("running %v", keys)
+	}
+	failed := 0
+	for _, id := range ids[1:] {
+		if a := r.session(t, id); a.Status == "failed" && strings.Contains(a.Error, "already runs 1") {
+			failed++
+		}
+	}
+	if failed != 2 {
+		t.Fatalf("%d refused", failed)
+	}
+	_ = r.ctl.Stop(ctx, ids[0])
+	r.cycle(t)
+	if keys := r.ex.RunningKeys(); len(keys) != 0 {
+		t.Fatalf("slot not released: %v", keys)
+	}
+}
+
+// The leader exits on SIGTERM but leaves a child that ignores it; after the grace period the whole group
+// gets SIGKILL.
+func TestStopKillsTheWholeGroup(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "hub-test-agent") // a name no real CLI has
+	script := "#!" + sh + "\n(trap '' TERM; exec sleep 60) &\necho $!\ntrap 'exit 0' TERM\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	p, err := ProcRunner{Grace: 300 * time.Millisecond}.Start(context.Background(), Spec{Bin: "hub-test-agent", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var child int
+	if _, err := fmt.Fscan(p.Output(), &child); err != nil || child <= 0 {
+		t.Fatalf("child pid: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the shell install its trap
+	p.Stop()
+	if _, err := p.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if syscall.Kill(child, 0) != nil {
+		t.Fatal("the child died with the leader; the test isn't testing anything")
+	}
+	<-p.(interface{ Escalated() <-chan struct{} }).Escalated()
+	deadline := time.Now().Add(3 * time.Second)
+	for syscall.Kill(child, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(child, syscall.SIGKILL)
+			t.Fatal("a descendant outlived Stop")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	p.Close()
+}
+
+// serve closes the store after Run returns, so Run must not return before its turns are stopped and their
+// final reports are in.
+func TestRunStopsTurnsBeforeReturning(t *testing.T) {
+	r := newRig(t)
+	r.run.out["claude"] = "block"
+	r.ex.Poll = 10 * time.Millisecond
+	id, _ := r.ctl.Start(context.Background(), StartReq{Host: "studio", Cwd: r.repo, Provider: "claude", Prompt: "x"})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		r.ex.Run(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for r.session(t, id).Status != "running" {
+		if time.Now().After(deadline) {
+			t.Fatal("never ran")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run didn't return")
+	}
+	if a := r.session(t, id); a.Status != "stopped" {
+		t.Fatalf("final report missing when Run returned: %+v", a)
 	}
 }

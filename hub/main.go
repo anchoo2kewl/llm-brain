@@ -203,9 +203,15 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg}
 	}
 	var ex *agent.Executor
+	exDone := make(chan struct{})
 	if c.agent {
 		ex = c.executor(lh, 2*time.Second, lg)
-		go ex.Run(ctx)
+		go func() {
+			defer close(exDone)
+			ex.Run(ctx)
+		}()
+	} else {
+		close(exDone)
 	}
 	h := srv.Handler()
 
@@ -285,6 +291,13 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	}
 	mu.Unlock()
 	wg.Wait()
+	// The store closes when serve returns: first let the session agent stop its turns' process groups (TERM,
+	// then KILL after the grace period) and record their final reports.
+	select {
+	case <-exDone:
+	case <-time.After(time.Minute):
+		lg.Printf("agent: turns still stopping after a minute; exiting anyway")
+	}
 	return nil
 }
 
