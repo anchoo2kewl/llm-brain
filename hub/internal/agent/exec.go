@@ -311,7 +311,7 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 		cwd, err = e.scratchDir(c.AgentID)
 	case t.Scratch:
 		cwd, err = NewRoots([]string{e.chatsDir()}).Validate(t.Cwd)
-	case t.InHome && t.Review != nil:
+	case t.InHome && (t.Review != nil || normPerm(t.Perm) == PermPlan):
 		home, _ := os.UserHomeDir()
 		cwd, err = NewRoots([]string{home}).Validate(t.Cwd)
 	default:
@@ -616,4 +616,9 @@ func (p *proc) Stop() {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}()
 	})
+}
+
+func normPerm(p string) string {
+	n, _ := NormPerm(p)
+	return n
 }
