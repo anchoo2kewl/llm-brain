@@ -13,9 +13,14 @@ import (
 
 type recHub struct{ reps []Report }
 
-func (h *recHub) Poll(context.Context, string, string, []int64) ([]store.Command, error) { return nil, nil }
-func (h *recHub) Report(_ context.Context, _ int64, r Report) error                         { h.reps = append(h.reps, r); return nil }
-func (h *recHub) Inventory(context.Context, Inventory) error                                { return nil }
+func (h *recHub) Poll(context.Context, string, string, []int64) ([]store.Command, error) {
+	return nil, nil
+}
+func (h *recHub) Report(_ context.Context, _ int64, r Report) error {
+	h.reps = append(h.reps, r)
+	return nil
+}
+func (h *recHub) Inventory(context.Context, Inventory) error { return nil }
 
 func TestSessionTitleAppendsCustomTitle(t *testing.T) {
 	home := t.TempDir()
