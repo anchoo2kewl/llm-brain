@@ -109,8 +109,14 @@ func (e *Executor) termCapture(ctx context.Context, c store.Command) {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
 		return
 	}
+	if len(out) > maxCapture { // keep the newest: the screen is at the end
+		out = "…(earlier lines cut)\n" + out[len(out)-maxCapture:]
+	}
 	e.report(ctx, c.ID, Report{Status: "done", Result: out})
 }
+
+// maxCapture stays under the hub's 256 KiB cap on a report's result.
+const maxCapture = 200 << 10
 
 // TermProviders are what a terminal can run.
 var TermProviders = []string{"claude", "codex", "gemini", "shell"}
