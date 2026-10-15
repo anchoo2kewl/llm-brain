@@ -24,10 +24,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/chat"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/gateway"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/insights"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/llm"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/web"
@@ -66,6 +68,8 @@ func usage() {
 type common struct {
 	state, claude, codex, host string
 	interval                   time.Duration
+	roots, brain               string
+	agent                      bool
 }
 
 func commonFlags(fs *flag.FlagSet) *common {
@@ -76,7 +80,37 @@ func commonFlags(fs *flag.FlagSet) *common {
 	fs.StringVar(&c.codex, "codex", filepath.Join(home, ".codex/sessions"), "Codex sessions dir ('' to skip)")
 	fs.StringVar(&c.host, "host", ingest.ShortHostname(), "this machine's name, as `hostname -s`")
 	fs.DurationVar(&c.interval, "interval", 10*time.Second, "re-scan interval")
+	fs.BoolVar(&c.agent, "agent", true, "run the session agent: start Claude/Codex/Gemini turns the hub queues for this host")
+	fs.StringVar(&c.roots, "roots", "", "comma-separated folders sessions may run under (default: the fleet config's work_root if it exists, else ~/projects)")
+	fs.StringVar(&c.brain, "brain", brainDir(), "llm-brain checkout (config/fleet.yaml, bin/review-rules)")
 	return c
+}
+
+// brainDir is the checkout this binary was built into (<brain>/bin/hub), when it looks like one.
+func brainDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return ""
+	}
+	d := filepath.Dir(filepath.Dir(exe))
+	if _, err := os.Stat(filepath.Join(d, "config", "fleet.yaml")); err != nil {
+		return ""
+	}
+	return d
+}
+
+// executor is this machine's session agent.
+func (c *common) executor(hub agent.Hub, poll time.Duration, lg *log.Logger) *agent.Executor {
+	cfg := agent.LoadConfig(c.brain)
+	roots := agent.DefaultRoots(cfg)
+	if c.roots != "" {
+		roots = strings.Split(c.roots, ",")
+	}
+	return &agent.Executor{Host: c.host, Version: version, Hub: hub, Roots: agent.NewRoots(roots), Brain: c.brain,
+		StateDir: c.state, Config: cfg, Log: lg, Poll: poll}
 }
 
 func (c *common) collector(role string, sink ingest.Sink, lg *log.Logger) *ingest.Collector {
@@ -96,7 +130,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	people := fs.String("people", "", "GitHub login=display name pairs, comma-separated")
 	noScan := fs.Bool("no-scan", false, "serve only; don't ingest this machine's files")
 	gwURL := fs.String("gateway", "http://127.0.0.1:8317", "account gateway (CLIProxyAPI) base URL; '' disables")
-	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY")
+	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY (quota) and CPA_API_KEY (plain chats)")
 	slackEnv := fs.String("slack-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/slack.env"), "file holding SLACK_TOKEN, read only when the hub has no Slack token yet")
 	chatInterval := fs.Duration("chat-interval", 2*time.Minute, "how often to read Slack; 0 disables chat")
 	chatBackfill := fs.Duration("chat-backfill", 24*time.Hour, "how far back a newly watched conversation is read")
@@ -160,6 +194,19 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	srv.Insights = insights.NewCache(st)
 	var backfilled sync.Once // drop reports built from a partial backfill once it finishes; after that the 60 s TTL rules
 	go (&insights.Rollup{Store: st, Log: lg, OnCatchUp: func() { backfilled.Do(srv.Insights.Invalidate) }}).Run(ctx, 15*time.Second)
+	lh := &agent.LocalHub{S: st, Log: lg}
+	srv.Agents = &web.Sessions{Ctl: &agent.Control{S: st, Log: lg}, Hub: lh}
+	if *gwURL != "" {
+		if err := st.FailStaleReplies(ctx); err != nil {
+			lg.Printf("chats: %v", err)
+		}
+		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg}
+	}
+	var ex *agent.Executor
+	if c.agent {
+		ex = c.executor(lh, 2*time.Second, lg)
+		go ex.Run(ctx)
+	}
 	h := srv.Handler()
 
 	var wg sync.WaitGroup
@@ -216,6 +263,9 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	}
 	if !*noScan {
 		col := c.collector("serve", eng, lg)
+		if ex != nil {
+			col.Extra = ex.RunningKeys
+		}
 		go col.Run(ctx, c.interval)
 	}
 	if *gwURL != "" {
@@ -243,6 +293,7 @@ func ship(ctx context.Context, lg *log.Logger, args []string) error {
 	c := commonFlags(fs)
 	to := fs.String("to", "", "hub base URL, e.g. http://hub-host:8787")
 	once := fs.Bool("once", false, "ship once and exit")
+	poll := fs.Duration("poll", 3*time.Second, "how often the session agent asks the hub for commands")
 	_ = fs.Parse(args)
 	if *to == "" {
 		return errors.New("ship needs --to")
@@ -252,7 +303,18 @@ func ship(ctx context.Context, lg *log.Logger, args []string) error {
 	if *once {
 		return col.Cycle(ctx)
 	}
+	var wg sync.WaitGroup
+	if c.agent {
+		ex := c.executor(agent.NewHTTPHub(*to), *poll, lg)
+		col.Extra = ex.RunningKeys
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ex.Run(ctx)
+		}()
+	}
 	col.Run(ctx, c.interval)
+	wg.Wait()
 	return nil
 }
 
