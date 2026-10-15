@@ -229,6 +229,7 @@
   function show(path) {
     var f = files[path];
     if (!f) return;
+    if (current !== path) remember();
     current = path;
     var e = ed();
     e.setModel(f.model);
@@ -435,7 +436,7 @@
     else if (e.key === "Escape") { e.preventDefault(); closePal(); }
   });
   pq.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== pq) { pal.hidden = true; asking = null; } }, 150); });
-  function gotoLine(n) { var e = ed(); if (!e.getModel() || !n) return; e.setPosition({ lineNumber: n, column: 1 }); e.revealLineInCenter(n); e.focus(); }
+  function gotoLine(n) { var e = ed(); if (!e.getModel() || !n) return; remember(); e.setPosition({ lineNumber: n, column: 1 }); e.revealLineInCenter(n); e.focus(); }
   function findInFile(t) { var e = ed(); e.focus(); e.trigger("kb", "actions.find"); setTimeout(function () { var c = e.getContribution("editor.contrib.findController"); if (c) c.setSearchString(t); }, 30); }
 
   // ------------------------------------------------------------ Find in Files (⌘⇧F)
@@ -512,96 +513,218 @@
       if (store_) store(store_, JSON.stringify(next));
     };
   }
-  // The palette's commands and the shortcut sheet: label, keys, what it does.
-  function commands() {
-    var t = function (id) { return function () { var e = ed(); e.focus(); e.trigger("kb", id, null); }; };
+  // ------------------------------------------------------------ Sublime-only behaviour
+  // Bookmarks (⌘F2 toggle, F2 / ⇧F2 next / previous, ⌘⇧F2 clear), per file, as glyph-margin marks.
+  var marks = {}; // path -> {line: decorationId}
+  function markDecos(path) {
+    var f = files[path], m = marks[path] || {};
+    if (!f) return;
+    var lines = Object.keys(m).map(Number);
+    f.markIds = f.model.deltaDecorations(f.markIds || [], lines.map(function (ln) {
+      return { range: new M.Range(ln, 1, ln, 1), options: { isWholeLine: true, glyphMarginClassName: "ed-mark", overviewRuler: { color: "#d29922", position: 4 } } };
+    }));
+  }
+  function toggleMark() {
+    if (!current) return;
+    var ln = ed().getPosition().lineNumber, m = marks[current] = marks[current] || {};
+    if (m[ln]) delete m[ln]; else m[ln] = 1;
+    markDecos(current);
+  }
+  function nextMark(d) {
+    if (!current || !marks[current]) return;
+    var ln = ed().getPosition().lineNumber, all = Object.keys(marks[current]).map(Number).sort(function (a, b) { return a - b; });
+    if (!all.length) return;
+    var to = d > 0 ? (all.filter(function (x) { return x > ln; })[0] || all[0]) : (all.filter(function (x) { return x < ln; }).pop() || all[all.length - 1]);
+    gotoLine(to);
+  }
+  function clearMarks() { if (current) { marks[current] = {}; markDecos(current); } }
+  // Jump back / forward (⌃- / ⌃⇧-): where the cursor was before each file switch or jump.
+  var back = [], fwd = [];
+  function remember() { var e = ed(); if (current && e && e.getPosition()) { back.push({ path: current, pos: e.getPosition() }); if (back.length > 100) back.shift(); fwd = []; } }
+  function jump(from, to) {
+    var spot = from.pop(); if (!spot) return;
+    var e = ed(); if (current && e.getPosition()) to.push({ path: current, pos: e.getPosition() });
+    open(spot.path, function () { ed().setPosition(spot.pos); ed().revealPositionInCenter(spot.pos); ed().focus(); });
+  }
+  function saveAll() { Object.keys(files).forEach(save); }
+  function closeAll() { order.slice().forEach(close); }
+  function saveAs() {
+    if (!current) return;
+    var f = files[current], text = f.model.getValue(), from = current;
+    ask("Save as", from, function (to) {
+      if (to === from) { save(from); return; }
+      call("write", { path: to, content: text, base: "" }).then(function () { refreshTree(); open(to); }).catch(function (e) { say(e.message); });
+    });
+  }
+  function toGroup(i) { // move the current file into column i (opening two columns if needed)
+    if (!current) return;
+    if (i === 1 && $("edm1").hidden) setColumns(2);
+    groups[i].setModel(files[current].model); focusGroup(i);
+  }
+  function fullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else root.requestFullscreen && root.requestFullscreen(); }
+  function center() { var e = ed(); if (e.getPosition()) e.revealPositionInCenter(e.getPosition()); }
+
+  // ------------------------------------------------------------ Sublime Text's macOS key map
+  // One table drives the editor's key bindings, the command palette, the shortcut sheet and the self-test:
+  // [section, label, keys as shown, bindings (KeyMod|KeyCode, or chords), Monaco command id or function].
+  // ⌘W/⌘T/⌘N/⌘⇧T belong to the browser, so those use ⌥ instead (app-level keys are handled further down).
+  function sublimeMap() {
+    var KM = M.KeyMod, KC = M.KeyCode, C = KM.CtrlCmd, W = KM.WinCtrl, S = KM.Shift, A = KM.Alt, K = function (k) { return KM.chord(C | KC.KeyK, k); };
     return [
-      { label: "Goto Anything", keys: "⌘P", run: function () { palette(""); } },
-      { label: "Command Palette", keys: "⌘⇧P", run: function () { palette(">"); } },
-      { label: "Goto Symbol", keys: "⌘R", run: t("editor.action.quickOutline") },
-      { label: "Goto Line", keys: "⌃G", run: t("editor.action.gotoLine") },
-      { label: "Goto Definition", keys: "F12", run: t("editor.action.revealDefinition") },
-      { label: "Find in Files", keys: "⌘⇧F", run: openFind },
-      { label: "Find", keys: "⌘F", run: t("actions.find") },
-      { label: "Replace", keys: "⌘⌥F", run: t("editor.action.startFindReplaceAction") },
-      { label: "Find Next / Previous", keys: "⌘G / ⌘⇧G", run: t("editor.action.nextMatchFindAction") },
-      { label: "Toggle Side Bar", keys: "⌘K ⌘B", run: toggleSide },
-      { label: "Single Column", keys: "⌘⌥1", run: function () { setColumns(1); } },
-      { label: "Two Columns", keys: "⌘⌥2", run: function () { setColumns(2); } },
-      { label: "Focus Column 1 / 2", keys: "⌃1 / ⌃2", run: function () { focusGroup(focusG ? 0 : 1); } },
-      { label: "Save", keys: "⌘S", run: function () { if (current) save(current); } },
-      { label: "Close File", keys: "⌥W", run: function () { if (current) close(current); } },
-      { label: "Reopen Closed File", keys: "⌥⇧T", run: reopen },
-      { label: "New File", keys: "⌥N", run: function () { newItem("", false); } },
-      { label: "Next / Previous File", keys: "⌘⌥→ / ⌘⌥←", run: function () { cycle(1); } },
-      { label: "Switch to File 1…9", keys: "⌘1…⌘9", run: function () { cycle(0); } },
-      { label: "Add Next Occurrence", keys: "⌘D", run: t("editor.action.addSelectionToNextFindMatch") },
-      { label: "Skip Occurrence", keys: "⌘K ⌘D", run: t("editor.action.moveSelectionToNextFindMatch") },
-      { label: "Select All Occurrences", keys: "⌃⌘G", run: t("editor.action.selectHighlights") },
-      { label: "Split Selection into Lines", keys: "⌘⇧L", run: t("editor.action.insertCursorAtEndOfEachLineSelected") },
-      { label: "Expand Selection to Line", keys: "⌘L", run: t("expandLineSelection") },
-      { label: "Expand Selection to Scope", keys: "⌘⇧Space", run: t("editor.action.smartSelect.expand") },
-      { label: "Jump to Matching Bracket", keys: "⌃M", run: t("editor.action.jumpToBracket") },
-      { label: "Add Cursor Above / Below", keys: "⌃⇧↑ / ⌃⇧↓", run: t("editor.action.insertCursorBelow") },
-      { label: "Column Selection", keys: "⌥ drag", run: function () {} },
-      { label: "Duplicate Line", keys: "⌘⇧D", run: t("editor.action.copyLinesDownAction") },
-      { label: "Delete Line", keys: "⌃⇧K", run: t("editor.action.deleteLines") },
-      { label: "Swap Line Up / Down", keys: "⌃⌘↑ / ⌃⌘↓", run: t("editor.action.moveLinesDownAction") },
-      { label: "Join Lines", keys: "⌘J", run: t("editor.action.joinLines") },
-      { label: "Insert Line After / Before", keys: "⌘↩ / ⌘⇧↩", run: t("editor.action.insertLineAfter") },
-      { label: "Toggle Comment", keys: "⌘/", run: t("editor.action.commentLine") },
-      { label: "Toggle Block Comment", keys: "⌘⌥/", run: t("editor.action.blockComment") },
-      { label: "Indent / Unindent", keys: "⌘] / ⌘[", run: t("editor.action.indentLines") },
-      { label: "Upper Case", keys: "⌘K ⌘U", run: t("editor.action.transformToUppercase") },
-      { label: "Lower Case", keys: "⌘K ⌘L", run: t("editor.action.transformToLowercase") },
-      { label: "Title Case", keys: "", run: t("editor.action.transformToTitlecase") },
-      { label: "Sort Lines", keys: "F5", run: t("editor.action.sortLinesAscending") },
-      { label: "Fold / Unfold", keys: "⌘⌥[ / ⌘⌥]", run: t("editor.fold") },
-      { label: "Fold All", keys: "⌘K ⌘0", run: t("editor.foldAll") },
-      { label: "Unfold All", keys: "⌘K ⌘J", run: t("editor.unfoldAll") },
-      { label: "Trim Trailing Whitespace", keys: "", run: t("editor.action.trimTrailingWhitespace") },
-      { label: "Format Document", keys: "⌥⇧F", run: t("editor.action.formatDocument") },
-      { label: "Toggle Word Wrap", keys: "⌥Z", run: toggleOpt("wordWrap", "wrap") },
-      { label: "Toggle Minimap", keys: "", run: toggleOpt("minimap", "minimap") },
-      { label: "Toggle Whitespace", keys: "", run: toggleOpt("renderWhitespace") },
-      { label: "Distraction Free", keys: "⌃⌘⇧F", run: zen },
-      { label: "Font Bigger / Smaller", keys: "⌘= / ⌘-", run: function () { fontBy(1); } },
-      { label: "Keyboard Shortcuts", keys: "⌘K ⌘S", run: showKeys }
+      ["Selection", "Add next occurrence", "⌘D", [C | KC.KeyD], "editor.action.addSelectionToNextFindMatch"],
+      ["Selection", "Skip occurrence", "⌘K ⌘D", [K(C | KC.KeyD)], "editor.action.moveSelectionToNextFindMatch"],
+      ["Selection", "Select all occurrences", "⌃⌘G", [C | W | KC.KeyG], "editor.action.selectHighlights"],
+      ["Selection", "Undo selection (soft undo)", "⌘U", [C | KC.KeyU], "cursorUndo"],
+      ["Selection", "Redo selection (soft redo)", "⌘⇧U", [C | S | KC.KeyU], "cursorRedo"],
+      ["Selection", "Expand selection to line", "⌘L", [C | KC.KeyL], "expandLineSelection"],
+      ["Selection", "Split selection into lines", "⌘⇧L", [C | S | KC.KeyL], "editor.action.insertCursorAtEndOfEachLineSelected"],
+      ["Selection", "Expand selection to scope", "⌘⇧Space", [C | S | KC.Space], "editor.action.smartSelect.expand"],
+      ["Selection", "Shrink selection", "⌘⇧⌥Space", [C | S | A | KC.Space], "editor.action.smartSelect.shrink"],
+      ["Selection", "Expand selection to brackets", "⌃⇧M", [W | S | KC.KeyM], "editor.action.selectToBracket"],
+      ["Selection", "Expand selection to indentation", "⌘⇧J", [C | S | KC.KeyJ], "editor.action.smartSelect.expand"],
+      ["Selection", "Add cursor above", "⌃⇧↑", [W | S | KC.UpArrow], "editor.action.insertCursorAbove"],
+      ["Selection", "Add cursor below", "⌃⇧↓", [W | S | KC.DownArrow], "editor.action.insertCursorBelow"],
+      ["Selection", "Select word / subword left", "⌥⇧← / ⌃⇧←", [W | S | KC.LeftArrow], "cursorWordPartLeftSelect"],
+      ["Selection", "Select word / subword right", "⌥⇧→ / ⌃⇧→", [W | S | KC.RightArrow], "cursorWordPartRightSelect"],
+      ["Selection", "Move by subword left", "⌃←", [W | KC.LeftArrow], "cursorWordPartLeft"],
+      ["Selection", "Move by subword right", "⌃→", [W | KC.RightArrow], "cursorWordPartRight"],
+      ["Selection", "Single selection", "Esc", [], "removeSecondaryCursors"],
+      ["Selection", "Add cursor / column select", "⌘ click / ⌥ drag", [], null],
+      ["Find", "Find", "⌘F", [C | KC.KeyF], "actions.find"],
+      ["Find", "Incremental find", "⌘I", [C | KC.KeyI], "actions.find"],
+      ["Find", "Replace", "⌘⌥F", [C | A | KC.KeyF], "editor.action.startFindReplaceAction"],
+      ["Find", "Find next", "⌘G", [C | KC.KeyG], "editor.action.nextMatchFindAction"],
+      ["Find", "Find previous", "⌘⇧G", [C | S | KC.KeyG], "editor.action.previousMatchFindAction"],
+      ["Find", "Use selection for find", "⌘E", [C | KC.KeyE], "actions.findWithSelection"],
+      ["Find", "Find next of selection", "⌘⌥G", [C | A | KC.KeyG], "editor.action.nextSelectionMatchFindAction"],
+      ["Find", "Find previous of selection", "⌘⌥⇧G", [C | A | S | KC.KeyG], "editor.action.previousSelectionMatchFindAction"],
+      ["Find", "Replace next", "⌘⌥E", [C | A | KC.KeyE], "editor.action.replaceOne"],
+      ["Find", "Find in files", "⌘⇧F", [], openFind],
+      ["Lines", "Duplicate line", "⌘⇧D", [C | S | KC.KeyD], "editor.action.copyLinesDownAction"],
+      ["Lines", "Delete line", "⌃⇧K", [W | S | KC.KeyK], "editor.action.deleteLines"],
+      ["Lines", "Swap line up", "⌃⌘↑", [C | W | KC.UpArrow], "editor.action.moveLinesUpAction"],
+      ["Lines", "Swap line down", "⌃⌘↓", [C | W | KC.DownArrow], "editor.action.moveLinesDownAction"],
+      ["Lines", "Join lines", "⌘J", [C | KC.KeyJ], "editor.action.joinLines"],
+      ["Lines", "Insert line after", "⌘↩", [C | KC.Enter], "editor.action.insertLineAfter"],
+      ["Lines", "Insert line before", "⌘⇧↩", [C | S | KC.Enter], "editor.action.insertLineBefore"],
+      ["Lines", "Indent", "⌘]", [C | KC.BracketRight], "editor.action.indentLines"],
+      ["Lines", "Unindent", "⌘[", [C | KC.BracketLeft], "editor.action.outdentLines"],
+      ["Lines", "Toggle comment", "⌘/", [C | KC.Slash], "editor.action.commentLine"],
+      ["Lines", "Toggle block comment", "⌘⌥/", [C | A | KC.Slash], "editor.action.blockComment"],
+      ["Lines", "Delete to end of line", "⌘K ⌘K", [K(C | KC.KeyK)], "deleteAllRight"],
+      ["Lines", "Delete to start of line", "⌘⌫ / ⌘K ⌘⌫", [C | KC.Backspace, K(C | KC.Backspace)], "deleteAllLeft"],
+      ["Lines", "Delete word", "⌥⌫", [A | KC.Backspace], "deleteWordLeft"],
+      ["Lines", "Transpose", "⌃T", [W | KC.KeyT], "editor.action.transposeLetters"],
+      ["Lines", "Sort lines", "F5 / ⌃F5", [KC.F5, W | KC.F5], "editor.action.sortLinesAscending"],
+      ["Lines", "Upper case", "⌘K ⌘U", [K(C | KC.KeyU)], "editor.action.transformToUppercase"],
+      ["Lines", "Lower case", "⌘K ⌘L", [K(C | KC.KeyL)], "editor.action.transformToLowercase"],
+      ["Lines", "Title case", "", [], "editor.action.transformToTitlecase"],
+      ["Lines", "Trim trailing whitespace", "", [], "editor.action.trimTrailingWhitespace"],
+      ["Lines", "Format document", "⌥⇧F", [A | S | KC.KeyF], "editor.action.formatDocument"],
+      ["Lines", "Redo", "⌘⇧Z / ⌘Y", [C | KC.KeyY], "redo"],
+      ["Goto", "Goto anything", "⌘P / ⌘T", [], function () { palette(""); }],
+      ["Goto", "Command palette", "⌘⇧P", [], function () { palette(">"); }],
+      ["Goto", "Goto symbol", "⌘R", [C | KC.KeyR], "editor.action.quickOutline"],
+      ["Goto", "Goto symbol in project", "⌘⇧R", [C | S | KC.KeyR], "editor.action.quickOutline"],
+      ["Goto", "Goto line", "⌃G", [W | KC.KeyG], "editor.action.gotoLine"],
+      ["Goto", "Goto definition", "F12 / ⌘⌥↓", [KC.F12, C | A | KC.DownArrow], "editor.action.revealDefinition"],
+      ["Goto", "Goto reference", "⇧F12", [S | KC.F12], "editor.action.goToReferences"],
+      ["Goto", "Jump to matching bracket", "⌃M", [W | KC.KeyM], "editor.action.jumpToBracket"],
+      ["Goto", "Jump back", "⌃-", [W | KC.Minus], function () { jump(back, fwd); }],
+      ["Goto", "Jump forward", "⌃⇧-", [W | S | KC.Minus], function () { jump(fwd, back); }],
+      ["Goto", "Center on cursor", "⌘K ⌘C", [K(C | KC.KeyC)], center],
+      ["Goto", "Scroll line up / down", "⌃⌥↑ / ⌃⌥↓", [W | A | KC.UpArrow], "scrollLineUp"],
+      ["Goto", "Scroll line down", "", [W | A | KC.DownArrow], "scrollLineDown"],
+      ["Bookmarks", "Toggle bookmark", "⌘F2", [C | KC.F2], toggleMark],
+      ["Bookmarks", "Next bookmark", "F2", [KC.F2], function () { nextMark(1); }],
+      ["Bookmarks", "Previous bookmark", "⇧F2", [S | KC.F2], function () { nextMark(-1); }],
+      ["Bookmarks", "Clear bookmarks", "⌘⇧F2", [C | S | KC.F2], clearMarks],
+      ["Folding", "Fold", "⌘⌥[", [C | A | KC.BracketLeft], "editor.fold"],
+      ["Folding", "Unfold", "⌘⌥]", [C | A | KC.BracketRight], "editor.unfold"],
+      ["Folding", "Fold level 1…7", "⌘K ⌘1…⌘7", [1, 2, 3, 4, 5, 6, 7].map(function (n) { return K(C | KC["Digit" + n]); }), "editor.foldLevel"],
+      ["Folding", "Unfold all", "⌘K ⌘0 / ⌘K ⌘J", [K(C | KC.Digit0), K(C | KC.KeyJ)], "editor.unfoldAll"],
+      ["Folding", "Fold all", "", [], "editor.foldAll"],
+      ["Files", "Save", "⌘S", [], function () { if (current) save(current); }],
+      ["Files", "Save all", "⌘⌥S", [], saveAll],
+      ["Files", "Save as", "⌘⇧S", [], saveAs],
+      ["Files", "New file", "⌥N", [], function () { newItem("", false); }],
+      ["Files", "Close file", "⌥W", [], function () { if (current) close(current); }],
+      ["Files", "Close all", "⌘K ⌘W", [], closeAll],
+      ["Files", "Reopen closed file", "⌥⇧T", [], reopen],
+      ["Files", "Switch to file 1…9", "⌘1…⌘9", [], null],
+      ["Files", "Next file", "⌘⌥→ / ⌘⇧]", [], function () { cycle(1); }],
+      ["Files", "Previous file", "⌘⌥← / ⌘⇧[", [], function () { cycle(-1); }],
+      ["View", "Toggle side bar", "⌘K ⌘B", [], toggleSide],
+      ["View", "Single column", "⌘⌥1", [], function () { setColumns(1); }],
+      ["View", "Two columns", "⌘⌥2", [], function () { setColumns(2); }],
+      ["View", "Focus column 1 / 2", "⌃1 / ⌃2", [], function () { focusGroup(focusG ? 0 : 1); }],
+      ["View", "Move file to column 1 / 2", "⌃⇧1 / ⌃⇧2", [], function () { toGroup(focusG ? 0 : 1); }],
+      ["View", "Full screen", "⌃⌘F", [], fullscreen],
+      ["View", "Distraction free", "⌃⌘⇧F", [], zen],
+      ["View", "Font bigger / smaller / reset", "⌘= / ⌘- / ⌘0", [], function () { fontBy(1); }],
+      ["View", "Toggle word wrap", "⌥Z", [A | KC.KeyZ], toggleOpt("wordWrap", "wrap")],
+      ["View", "Toggle minimap", "", [], toggleOpt("minimap", "minimap")],
+      ["View", "Toggle whitespace", "", [], toggleOpt("renderWhitespace")],
+      ["View", "Keyboard shortcuts", "⌘K ⌘S", [], showKeys]
     ];
+  }
+  function runEntry(e) {
+    var what = e[4];
+    if (typeof what === "function") return what();
+    if (!what) return;
+    var g = ed(); g.focus();
+    if (what === "editor.foldLevel") { g.trigger("sublime", "editor.foldLevel1", null); return; }
+    g.trigger("sublime", what, null);
+  }
+  function commands() {
+    return sublimeMap().filter(function (e) { return e[4]; }).map(function (e) { return { label: e[0] + ": " + e[1], keys: e[2], run: function () { runEntry(e); } }; });
   }
   function showKeys() {
     var box = $("edkeyslist"); box.textContent = "";
-    commands().forEach(function (c) { if (!c.keys) return; var r = el("div", "kr"); r.append(el("span", "", c.label), el("kbd", "", c.keys)); box.appendChild(r); });
+    var sect = "";
+    sublimeMap().forEach(function (e) {
+      if (!e[2]) return;
+      if (e[0] !== sect) { sect = e[0]; box.appendChild(el("h3", "ks", sect)); }
+      var r = el("div", "kr"); r.append(el("span", "", e[1]), el("kbd", "", e[2])); box.appendChild(r);
+    });
     $("edkeys").showModal();
   }
   $("edkeysbtn").onclick = showKeys;
   $("edkeysclose").onclick = function () { $("edkeys").close(); };
 
-  // App keys run before the browser and Monaco see them.
+  // App keys run before the browser and Monaco see them (also when the editor isn't focused).
   var chordK = false, chordT = null;
   document.addEventListener("keydown", function (e) {
     var cmd = mac ? e.metaKey : e.ctrlKey, k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     var hit = function (f) { e.preventDefault(); e.stopPropagation(); f(); };
     if (chordK && cmd && !e.shiftKey) {
       chordK = false; clearTimeout(chordT);
-      if (k === "b") return hit(toggleSide);
-      if (k === "s") return hit(showKeys);
-      return; // other ⌘K chords belong to Monaco (⌘K ⌘U, ⌘K ⌘J, …)
+      if (e.code === "KeyB") return hit(toggleSide);
+      if (e.code === "KeyS") return hit(showKeys);
+      if (e.code === "KeyW") return hit(closeAll);
+      return; // the other ⌘K chords are the editor's (⌘K ⌘U, ⌘K ⌘K, ⌘K ⌘1…)
     }
-    if (cmd && !e.shiftKey && !e.altKey && k === "k") { chordK = true; clearTimeout(chordT); chordT = setTimeout(function () { chordK = false; }, 1500); return; }
-    if (cmd && !e.shiftKey && !e.altKey && (k === "p" || k === "t")) return hit(function () { palette(""); });
-    if (cmd && e.shiftKey && k === "p") return hit(function () { palette(">"); });
-    if (cmd && e.shiftKey && k === "f") return hit(openFind);
-    if (cmd && !e.shiftKey && !e.altKey && k === "s") return hit(function () { if (current) save(current); });
-    if (cmd && e.altKey && (e.code === "Digit1" || e.code === "Digit2")) return hit(function () { setColumns(e.code === "Digit2" ? 2 : 1); });
+    if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyK") { chordK = true; clearTimeout(chordT); chordT = setTimeout(function () { chordK = false; }, 1500); return; }
+    if (cmd && !e.shiftKey && !e.altKey && (e.code === "KeyP" || e.code === "KeyT")) return hit(function () { palette(""); });
+    if (cmd && e.shiftKey && !e.altKey && e.code === "KeyP") return hit(function () { palette(">"); });
+    if (cmd && e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "KeyF") return hit(openFind);
+    if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyS") return hit(function () { if (current) save(current); });
+    if (cmd && e.altKey && !e.shiftKey && e.code === "KeyS") return hit(saveAll);
+    if (cmd && e.shiftKey && !e.altKey && e.code === "KeyS") return hit(saveAs);
+    if (cmd && e.altKey && /^Digit[1-4]$/.test(e.code)) return hit(function () { setColumns(e.code === "Digit1" ? 1 : 2); });
     if (cmd && e.altKey && (k === "ArrowRight" || k === "ArrowLeft")) return hit(function () { cycle(k === "ArrowRight" ? 1 : -1); });
-    if (cmd && !e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) return hit(function () { var p = order[+e.code.slice(5) - 1]; if (p) show(p); });
-    if (mac && e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === "Digit1" || e.code === "Digit2")) return hit(function () { focusGroup(e.code === "Digit2" ? 1 : 0); });
-    if (e.altKey && !cmd && !e.shiftKey && e.code === "KeyW") return hit(function () { if (current) close(current); });
-    if (e.altKey && !cmd && e.shiftKey && e.code === "KeyT") return hit(reopen);
-    if (e.altKey && !cmd && !e.shiftKey && e.code === "KeyN") return hit(function () { newItem("", false); });
-    if (cmd && !e.shiftKey && (k === "=" || k === "+" || k === "-")) return hit(function () { fontBy(k === "-" ? -1 : 1); });
-    if (e.ctrlKey && e.metaKey && e.shiftKey && k === "f") return hit(zen);
+    if (cmd && e.shiftKey && (e.code === "BracketRight" || e.code === "BracketLeft")) return hit(function () { cycle(e.code === "BracketRight" ? 1 : -1); });
+    if (cmd && !e.altKey && !e.shiftKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) return hit(function () { var p = order[+e.code.slice(5) - 1]; if (p) show(p); });
+    if (cmd && !e.altKey && !e.shiftKey && e.code === "Digit0") return hit(function () { fontSize = 13; fontBy(0); });
+    if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyR" && !(document.activeElement && document.activeElement.closest(".monaco-editor"))) return hit(function () { ed().trigger("kb", "editor.action.quickOutline"); });
+    if (mac && e.ctrlKey && !e.metaKey && !e.altKey && /^Digit[12]$/.test(e.code)) return hit(function () { if (e.shiftKey) toGroup(e.code === "Digit2" ? 1 : 0); else focusGroup(e.code === "Digit2" ? 1 : 0); });
+    // ⌥ keys by physical key (e.code), so they still work where ⌥ types a character on the layout.
+    if (e.altKey && !cmd && !e.ctrlKey && !e.shiftKey && e.code === "KeyW") return hit(function () { if (current) close(current); });
+    if (e.altKey && !cmd && !e.ctrlKey && e.shiftKey && e.code === "KeyT") return hit(reopen);
+    if (e.altKey && !cmd && !e.ctrlKey && !e.shiftKey && e.code === "KeyN") return hit(function () { newItem("", false); });
+    if (cmd && !e.shiftKey && !e.altKey && (e.code === "Equal" || e.code === "Minus")) return hit(function () { fontBy(e.code === "Minus" ? -1 : 1); });
+    if (e.ctrlKey && e.metaKey && !e.shiftKey && e.code === "KeyF") return hit(fullscreen);
+    if (e.ctrlKey && e.metaKey && e.shiftKey && e.code === "KeyF") return hit(zen);
   }, true);
   window.addEventListener("beforeunload", function (e) {
     var unsaved = Object.keys(files).filter(function (p) { return isDirty(files[p]); });
@@ -609,39 +732,38 @@
     if (unsaved.length) { e.preventDefault(); e.returnValue = ""; }
   });
 
-  // Sublime's editing keys, added to each Monaco column (they win over Monaco's own defaults).
+  // Each Monaco column gets the table's editor bindings (they win over Monaco's own defaults).
   function sublimeKeys(g) {
-    var KM = M.KeyMod, KC = M.KeyCode, C = KM.CtrlCmd, W = KM.WinCtrl, S = KM.Shift, A = KM.Alt;
-    [
-      [C | W | KC.KeyG, "editor.action.selectHighlights"],
-      [C | S | KC.KeyL, "editor.action.insertCursorAtEndOfEachLineSelected"],
-      [W | S | KC.KeyK, "editor.action.deleteLines"],
-      [C | W | KC.UpArrow, "editor.action.moveLinesUpAction"],
-      [C | W | KC.DownArrow, "editor.action.moveLinesDownAction"],
-      [C | S | KC.KeyD, "editor.action.copyLinesDownAction"],
-      [C | KC.KeyJ, "editor.action.joinLines"],
-      [C | KC.KeyR, "editor.action.quickOutline"],
-      [C | S | KC.Space, "editor.action.smartSelect.expand"],
-      [W | KC.KeyM, "editor.action.jumpToBracket"],
-      [C | A | KC.Slash, "editor.action.blockComment"],
-      [KC.F5, "editor.action.sortLinesAscending"],
-      [W | S | KC.UpArrow, "editor.action.insertCursorAbove"],
-      [W | S | KC.DownArrow, "editor.action.insertCursorBelow"],
-      [C | A | KC.KeyF, "editor.action.startFindReplaceAction"],
-      [C | A | KC.BracketLeft, "editor.fold"],
-      [C | A | KC.BracketRight, "editor.unfold"],
-      [KM.chord(C | KC.KeyK, C | KC.KeyU), "editor.action.transformToUppercase"],
-      [KM.chord(C | KC.KeyK, C | KC.KeyL), "editor.action.transformToLowercase"],
-      [KM.chord(C | KC.KeyK, C | KC.KeyD), "editor.action.moveSelectionToNextFindMatch"],
-      [KM.chord(C | KC.KeyK, C | KC.KeyJ), "editor.unfoldAll"],
-      [KM.chord(C | KC.KeyK, C | KC.Digit0), "editor.foldAll"]
-    ].forEach(function (m, i) {
-      g.addAction({ id: "sublime." + i, label: "Sublime: " + m[1], keybindings: [m[0]], run: function (x) { x.trigger("sublime", m[1], null); } });
+    sublimeMap().forEach(function (e, i) {
+      if (!e[3].length || !e[4]) return;
+      if (e[4] === "editor.foldLevel") { // one binding per level
+        e[3].forEach(function (b, n) { g.addAction({ id: "sublime.fold" + (n + 1), label: "Fold level " + (n + 1), keybindings: [b], run: function (x) { x.trigger("sublime", "editor.foldLevel" + (n + 1), null); } }); });
+        return;
+      }
+      g.addAction({ id: "sublime." + i, label: e[0] + ": " + e[1], keybindings: e[3], run: function (x) {
+        if (typeof e[4] === "function") e[4](); else x.trigger("sublime", e[4], null);
+      } });
     });
-    g.addAction({ id: "sublime.side", label: "Toggle Side Bar", keybindings: [KM.chord(C | KC.KeyK, C | KC.KeyB)], run: toggleSide });
-    g.addAction({ id: "sublime.wrap", label: "Toggle Word Wrap", keybindings: [A | KC.KeyZ], run: toggleOpt("wordWrap", "wrap") });
   }
 
+  // Self-test: every binding in the table resolves to its own action, and every Monaco command it names
+  // exists. window.hubEditorSelfTest() → {ok, bad: [...]}.
+  window.hubEditorSelfTest = function () {
+    var g = ed(), svc = g._standaloneKeybindingService, bad = [], ok = 0, known = {};
+    g.getSupportedActions().forEach(function (a) { known[a.id] = true; });
+    ["cursorUndo", "cursorRedo", "expandLineSelection", "cursorWordPartLeft", "cursorWordPartRight", "cursorWordPartLeftSelect", "cursorWordPartRightSelect",
+      "removeSecondaryCursors", "deleteAllRight", "deleteAllLeft", "deleteWordLeft", "redo", "scrollLineUp", "scrollLineDown", "actions.find", "actions.findWithSelection"].forEach(function (c) { known[c] = true; }); // core commands, not "actions"
+    sublimeMap().forEach(function (e, i) {
+      if (typeof e[4] === "string" && e[4] !== "editor.foldLevel" && !known[e[4]] && !g.getAction(e[4])) bad.push(e[1] + ": no such command " + e[4]);
+      if (!e[3].length || !e[4]) return;
+      if (e[4] === "editor.foldLevel") { ok++; return; }
+      var kb = svc && svc.lookupKeybinding("sublime." + i);
+      if (!kb) bad.push(e[1] + ": not bound");
+      else ok++;
+    });
+    return { ok: ok, bad: bad };
+  };
+  window.hubEditor = { editor: function () { return ed(); }, open: function (p) { open(p); } }; // for tests
 
   // ------------------------------------------------------------ Monaco
   window.MonacoEnvironment = { getWorkerUrl: function () { return "/static/monaco/vs/base/worker/workerMain.js"; } };
@@ -655,7 +777,7 @@
       fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', smoothScrolling: true, scrollBeyondLastLine: false,
       renderWhitespace: "selection", bracketPairColorization: { enabled: true }, guides: { bracketPairs: true, indentation: true },
       tabSize: 2, detectIndentation: true, wordWrap: "off", stickyScroll: { enabled: true }, cursorSmoothCaretAnimation: "on",
-      multiCursorModifier: "alt", linkedEditing: true, renderLineHighlight: "all", mouseWheelZoom: true
+      multiCursorModifier: "ctrlCmd", linkedEditing: true, renderLineHighlight: "all", mouseWheelZoom: true, glyphMargin: true
     }, saved("wrap") || {}, saved("minimap") || {});
     [0, 1].forEach(function (i) {
       var g = M.editor.create($("edm" + i), opts);
