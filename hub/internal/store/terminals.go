@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Terminal is an interactive CLI running in tmux on a host (migration 0015).
@@ -251,7 +252,7 @@ func (s *Store) RecentFolders(ctx context.Context, host, home string, limit int)
 			SELECT cwd, file_mtime AS at FROM sessions WHERE host = ? AND substr(cwd, 1, ?) = ? AND file_mtime > ?
 			UNION ALL SELECT cwd, updated_at AS at FROM terminals WHERE host = ? AND substr(cwd, 1, ?) = ?)
 		GROUP BY cwd ORDER BY last DESC LIMIT ?`, // a literal prefix: LIKE would read % and _ in home as wildcards
-		host, len(home)+1, home+"/", T(time.Now().AddDate(0, 0, -30)), host, len(home)+1, home+"/", limit)
+		host, utf8.RuneCountInString(home)+1, home+"/", T(time.Now().AddDate(0, 0, -30)), host, utf8.RuneCountInString(home)+1, home+"/", limit)
 	if err != nil {
 		return nil, err
 	}
