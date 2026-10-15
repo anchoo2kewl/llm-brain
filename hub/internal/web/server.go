@@ -25,6 +25,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/chat"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/insights"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/memory"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
@@ -44,7 +45,8 @@ type Server struct {
 	Index    *search.Index // nil: search scans the store
 	Chat     *chat.Poller  // nil: the Slack settings page can't connect or list channels
 	Insights *insights.Cache
-	Agents   *Sessions // nil: no session control or chats (sessions.go)
+	Agents   *Sessions       // nil: no session control or chats (sessions.go)
+	Memory   *memory.Service // nil: no shared agent memory (memory.go)
 
 	pages map[string]*template.Template
 }
@@ -97,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	s.registerInsights(mux)
 	s.sessionRoutes(mux)
+	s.memoryRoutes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /api/ship/offsets", s.tailnetOnly(s.shipOffsets))
 	mux.HandleFunc("POST /api/ship/chunk", s.tailnetOnly(s.shipChunk))
