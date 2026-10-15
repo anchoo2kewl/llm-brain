@@ -211,3 +211,36 @@ func TestTimedOutReplyIsFinished(t *testing.T) {
 	}
 	ch.Wait() // the second reply times out too; let it finish before the store closes
 }
+
+func TestPickerOrderAndLabels(t *testing.T) {
+	ms := []Model{{ID: "claude-sonnet-4-5-20250929"}, {ID: "claude-haiku-5-5"}, {ID: "claude-opus-5-5"}, {ID: "claude-sonnet-5-5"},
+		{ID: "gpt-5.5"}, {ID: "gpt-6.1-sol"}, {ID: "gpt-6-luna"}, {ID: "gpt-image-2"}, {ID: "codex-auto-review"}}
+	var got []string
+	for _, g := range Grouped(ms) {
+		for _, m := range g.Models {
+			got = append(got, Label(m.ID))
+		}
+	}
+	want := "Claude Opus 5.5|Claude Sonnet 5.5|Claude Haiku 5.5|Claude Sonnet 4.5 (2025-09-29)|GPT-6.1 Sol|GPT-6 Luna|GPT-5.5"
+	if s := strings.Join(got, "|"); s != want {
+		t.Fatalf("got  %s\nwant %s", s, want)
+	}
+}
+
+func TestPickerOrderEdges(t *testing.T) {
+	ms := []Model{{ID: "gpt-5-nano"}, {ID: "gpt-5-mini"}, {ID: "gpt-5"}, {ID: "claude-sonnet-4-5-20250929"}, {ID: "claude-sonnet-4-5-20251001"},
+		{ID: "claude-sonnet-4-5"}, {ID: "gpt-4o-2024-08-06"}, {ID: "gpt-4o"}}
+	var got []string
+	for _, g := range Grouped(ms) {
+		for _, m := range g.Models {
+			got = append(got, m.ID)
+		}
+	}
+	want := "claude-sonnet-4-5|claude-sonnet-4-5-20251001|claude-sonnet-4-5-20250929|gpt-5|gpt-5-mini|gpt-5-nano|gpt-4o|gpt-4o-2024-08-06"
+	if s := strings.Join(got, "|"); s != want {
+		t.Fatalf("got  %s\nwant %s", s, want)
+	}
+	if l := Label("gpt-4o-2024-08-06"); l != "GPT-4o (2024-08-06)" {
+		t.Fatalf("label %q", l)
+	}
+}
