@@ -218,6 +218,7 @@ type page struct {
 	Title string
 	Nav   string
 	Q     string
+	Embed bool // shown inside another page (the workspace): no header
 }
 
 func pathID(r *http.Request) (int64, bool) {
@@ -502,7 +503,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		Stats      *insights.SessionStats
 		Files      []sessFile
 		CanFetch   bool
-	}{page{Title: sess.DisplayTitle(), Nav: "sessions"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id),
+	}{page{Title: sess.DisplayTitle(), Nav: "sessions", Embed: q.Get("embed") == "1"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id),
 		s.sessionFiles(ctx, sess), s.Agents != nil})
 }
 

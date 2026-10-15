@@ -54,3 +54,5 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-dialog{max-width:min(860px,94vw);width:100%;border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--fg);padding:16px 20px}
 .ws-dialog::backdrop{background:rgba(0,0,0,.45)}.ws-dialog h2{margin:0;font-size:18px}
 @media (max-width:760px){.ws{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto}.ws-side{border-right:0;border-bottom:1px solid var(--line)}.ws-list{max-height:30vh}.ws-main{height:70dvh}.ws-layouts{display:none}}
+.ws-sect{list-style:none;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);padding:12px 10px 4px;cursor:help}
+.sesspane iframe{width:100%;height:100%;border:0;background:var(--bg)}

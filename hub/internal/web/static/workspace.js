@@ -31,10 +31,12 @@
   function drop(id) { if (panes[id]) { panes[id].dispose(); delete panes[id]; } }
   // attach connects a terminal; at the cap, force evicts one that isn't on screen.
   function attach(info, force) {
+    if (info && info.kind === "session") { if (!panes[info.id]) panes[info.id] = sessionPane(info); return; }
     if (!info || panes[info.id] || !(info.status === "live" || info.status === "starting")) return;
     if (Object.keys(panes).length >= MAX_ATTACHED) {
       if (!force) return;
-      var off = Object.keys(panes).filter(function (id) { return st.slots.slice(0, logical()).indexOf(+id) < 0; });
+      var on = st.slots.slice(0, logical()).map(String); // keys are numbers (terminals) or "s<id>" (sessions)
+      var off = Object.keys(panes).filter(function (id) { return on.indexOf(id) < 0; });
       if (!off.length) return;
       drop(off[off.length - 1]);
     }
@@ -53,8 +55,42 @@
     panes[info.id] = p;
   }
 
+  // sessionPane: a live session from elsewhere, as its transcript page (embed mode, refreshes itself).
+  // The page loads the first time the pane is shown.
+  function sessionPane(info) {
+    var wrap = el("div", "termpane-x sesspane"), frame = null;
+    park.appendChild(wrap);
+    return {
+      el: wrap,
+      show: function (on) {
+        if (on && !frame) {
+          frame = document.createElement("iframe");
+          frame.src = "/sessions/" + info.sid + "?embed=1";
+          frame.title = info.title;
+          wrap.appendChild(frame);
+        }
+      },
+      focus: function () { if (frame) frame.focus(); },
+      markSeen: function () {},
+      state: function () { return stateOf(info.id); },
+      lastLine: function () { return info.updated ? "active " + Math.max(0, Math.round((Date.now() - Date.parse(info.updated)) / 1000)) + "s ago" : ""; },
+      stop: function () {},
+      dispose: function () { wrap.remove(); }
+    };
+  }
+
   function refresh(then) {
-    fetch("/api/terminals", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (ts) {
+    Promise.all([
+      fetch("/api/terminals", { cache: "no-store" }).then(function (r) { return r.json(); }),
+      fetch("/api/live-sessions", { cache: "no-store" }).then(function (r) { return r.json(); }).catch(function () { return []; })
+    ]).then(function (both) {
+      var ts = both[0], live = both[1];
+      // Sessions running elsewhere (the laptop's own terminal, an IDE): keyed "s<id>", shown read-only.
+      // One already in a pane stays listed after it goes quiet.
+      live.forEach(function (x) { ts.push({ id: "s" + x.id, sid: x.id, kind: "session", title: x.title, host: x.host, cli: x.cli, cwd: x.cwd, status: "elsewhere", updated: x.updated }); });
+      Object.keys(infos).forEach(function (k) {
+        if (infos[k].kind === "session" && st.slots.indexOf(k) >= 0 && !live.some(function (x) { return "s" + x.id === k; })) ts.push(infos[k]);
+      });
       var seen = {};
       order = ts.map(function (t) { return t.id; });
       ts.forEach(function (t) {
@@ -86,15 +122,23 @@
   function stateOf(id) {
     var p = panes[id], i = infos[id];
     if (!i) return "ended";
+    if (i.kind === "session") return Date.now() - Date.parse(i.updated) < 30000 ? "working" : "idle";
     if (i.status === "ended" || i.status === "failed") return "ended";
     return p ? p.state() : "idle";
   }
   function renderList() {
     var q = (document.getElementById("wsq").value || "").toLowerCase();
     list.textContent = "";
+    var header = false;
     order.forEach(function (id) {
       var t = infos[id];
       if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
+      if (t.kind === "session" && !header) {
+        header = true;
+        var h = el("li", "ws-sect", "Running elsewhere");
+        h.title = "Claude/Codex sessions started outside the hub (your own terminal, an IDE). Read-only, updates live.";
+        list.appendChild(h);
+      }
       var li = items[id] || makeItem(id);
       list.appendChild(li);
       paintItem(id);
@@ -122,7 +166,7 @@
     li.parts.dot.title = dotTitle[s] || s;
     li.parts.dot.className = "dot-s " + s;
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
-    li.parts.meta.textContent = t.cli + " · " + t.host.replace(/^Anshumans?-?/, "") + " · " + t.cwd;
+    li.parts.meta.textContent = t.cli + " · " + t.host.replace(/^Anshumans?-?/, "") + " · " + t.cwd + (t.kind === "session" ? " · read-only" : "");
     var slot = slotOf(id);
     li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
     li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : p ? p.lastLine() : "";
@@ -205,7 +249,7 @@
   }
   function fillEmpty(s, i) {
     s.empty.textContent = "";
-    var free = order.filter(function (id) { return infos[id] && (infos[id].status === "live" || infos[id].status === "starting") && st.slots.slice(0, logical()).indexOf(id) < 0; });
+    var free = order.filter(function (id) { return infos[id] && (infos[id].status === "live" || infos[id].status === "starting" || infos[id].kind === "session") && st.slots.slice(0, logical()).indexOf(id) < 0; });
     s.empty.appendChild(el("p", "mut", free.length ? "Pick a terminal for pane " + (i + 1) + ":" : "Every terminal is already on screen."));
     free.slice(0, 8).forEach(function (id) {
       var b = el("button", "chip", (infos[id].title || "terminal " + id).slice(0, 60));
@@ -227,7 +271,7 @@
     s.meta.textContent = t.cli + " · " + t.cwd;
     s.dot.className = "dot-s " + stt;
     s.dot.title = dotTitle[stt] || stt;
-    s.open.href = "/terminals/" + id;
+    s.open.href = t.kind === "session" ? "/sessions/" + t.sid : "/terminals/" + id;
     s.root.classList.toggle("waiting", stt === "waiting");
   }
   function focusSlot(i, focusTerm) {
