@@ -87,8 +87,9 @@ type Inventory struct {
 	Providers []string            `json:"providers"`
 	// Terminals are the ids of the host's live terminals (term.go); Tmux says the list can be trusted, so
 	// the hub ends the terminals missing from it. Agents from before terminals send neither.
-	Terminals []int64 `json:"terminals,omitempty"`
-	Tmux      bool    `json:"tmux,omitempty"`
+	Terminals []store.TermSeen `json:"terminals,omitempty"`
+	TermsAt   time.Time        `json:"terms_at,omitempty"` // taken just before tmux was listed
+	Tmux      bool             `json:"tmux,omitempty"`
 }
 
 // Hub is the executor's side of the queue.

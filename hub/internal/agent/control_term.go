@@ -95,6 +95,13 @@ func (c *Control) KillTerminal(ctx context.Context, id int64) error {
 	if !t.Open() {
 		return nil
 	}
+	opened, err := c.S.CancelQueuedTerm(ctx, id)
+	if err != nil {
+		return err
+	}
+	if opened { // no host had it yet: nothing to kill
+		return c.S.SetTerminal(ctx, id, "ended", "", "")
+	}
 	if !c.HostLive(ctx, t.Host) {
 		return bad("the agent on %s is offline; end it there with: tmux -L %s kill-session -t %s", t.Host, tmuxSocket, TmuxName(id))
 	}

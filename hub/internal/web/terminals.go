@@ -310,8 +310,14 @@ func (s *Server) agentTermWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// Closed here whatever happens: a browser that gave up before this handoff never reads it.
+	defer aws.CloseNow()
 	aws.SetReadLimit(4 << 20)
-	br.agent <- aws
+	select {
+	case br.agent <- aws:
+	case <-br.done:
+		return
+	}
 	select {
 	case <-br.done:
 	case <-r.Context().Done():

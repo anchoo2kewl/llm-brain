@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS terminals (
   error      TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  live_at    TEXT NOT NULL DEFAULT '', -- when it last became live: an inventory taken before then can't end it
   ended_at   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS terminals_updated ON terminals (updated_at);
