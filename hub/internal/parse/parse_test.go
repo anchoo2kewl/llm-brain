@@ -224,3 +224,24 @@ func TestTruncateRuneSafe(t *testing.T) {
 		t.Fatalf("%q", out)
 	}
 }
+
+func TestClaudeUsageBeforeRawCap(t *testing.T) {
+	big := strings.Repeat("y", MaxRaw+1024)
+	line := `{"type":"assistant","timestamp":"2026-10-14T20:00:00Z","message":{"id":"msg_1","role":"assistant","model":"claude-x","content":[{"type":"text","text":"` +
+		big + `"}],"usage":{"input_tokens":3,"output_tokens":7,"cache_read_input_tokens":11,"cache_creation_input_tokens":13}}}`
+	ev, err := Claude([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.Raw) >= len(line) {
+		t.Fatal("raw should be capped")
+	}
+	u := ev.Usage
+	if u == nil || u.ID != "msg_1" || u.Model != "claude-x" || u.Input != 3 || u.Output != 7 || u.CacheRead != 11 || u.CacheWrite != 13 {
+		t.Fatalf("usage %+v", u)
+	}
+	synthetic, _ := Claude([]byte(`{"type":"assistant","message":{"id":"m","model":"<synthetic>","content":"hi","usage":{"output_tokens":1}}}`))
+	if synthetic.Usage != nil {
+		t.Fatal("synthetic responses carry no real usage")
+	}
+}
