@@ -122,3 +122,5 @@ pre{font-size:13px;line-height:1.65;padding:16px}.msg{padding:14px 18px}.txt{lin
 .chat-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px;margin-bottom:8px}
 .chat-picker label{overflow-wrap:anywhere}
 @media(max-width:800px){.chat{grid-template-columns:1fr}.chat-sources{position:static;flex-direction:row;flex-wrap:wrap}}
+
+.brand{display:inline-flex;align-items:center;gap:8px}.brand img{display:block;border-radius:7px}
