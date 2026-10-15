@@ -58,6 +58,20 @@
   });
   var fileIn = document.getElementById("termfile");
   if (fileIn && pane.take) fileIn.addEventListener("change", function () { pane.take(fileIn.files); fileIn.value = ""; });
+  // Editor beside the terminal (same folder); the choice is remembered per browser.
+  var edBtn = document.getElementById("edtoggle"), ed = document.getElementById("termed"), split = document.getElementById("termsplit");
+  if (edBtn && ed) {
+    var setEd = function (on) {
+      if (on && !ed.src) ed.src = edBtn.getAttribute("data-src");
+      ed.hidden = !on; split.classList.toggle("on", on); edBtn.classList.toggle("on", on);
+      edBtn.textContent = on ? "Hide editor" : "</> Editor";
+      try { localStorage.setItem("llmb.termEditor", on ? "1" : ""); } catch (e) { /* private mode */ }
+      setTimeout(function () { pane.resize(); }, 50);
+    };
+    edBtn.addEventListener("click", function () { setEd(ed.hidden); });
+    try { if (localStorage.getItem("llmb.termEditor")) setEd(true); } catch (e) { /* private mode */ }
+  }
+
   var endForm = document.querySelector("form.endform");
   if (endForm) endForm.addEventListener("submit", function () { pane.stop(); });
 })();

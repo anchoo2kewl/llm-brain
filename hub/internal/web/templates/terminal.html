@@ -4,12 +4,14 @@
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .T.Error}}<pre class="err small">{{.T.Error}}</pre>{{end}}
 <div class="row actions termbar">
-<span class="mut small">{{home .T.Cwd}}</span> · <a class="small" href="/edit?host={{.T.Host}}&amp;root={{.T.Cwd}}" target="_blank" rel="noopener">edit files</a> · <a class="small" href="/browse?host={{.T.Host}}&amp;path={{.T.Cwd}}">download</a><span class="grow"></span>
+<span class="mut small">{{home .T.Cwd}}</span> · <a class="small" href="/browse?host={{.T.Host}}&amp;path={{.T.Cwd}}">download</a><span class="grow"></span>
+<button type="button" class="small primary" id="edtoggle" data-src="/edit?embed=1&amp;host={{.T.Host}}&amp;root={{.T.Cwd}}">&lt;/&gt; Editor</button>
+<a class="small" href="/edit?host={{.T.Host}}&amp;root={{.T.Cwd}}" target="_blank" rel="noopener" title="Open the editor in its own tab">↗</a>
 <form class="inline" method="post" action="/terminals/{{.T.ID}}/review"><input type="hidden" name="with" value="codex"><button class="small" type="submit" {{if not .T.Open}}disabled{{end}}>Review with Codex</button></form>
 <form class="inline" method="post" action="/terminals/{{.T.ID}}/review"><input type="hidden" name="with" value="claude"><button class="small" type="submit" {{if not .T.Open}}disabled{{end}}>Review with Claude</button></form>
 {{if .T.Open}}<details class="endbox"><summary class="small danger">End…</summary><form method="post" action="/terminals/{{.T.ID}}/kill" class="endform"><span class="small">Stops the CLI and anything it runs.</span> <button class="small danger" type="submit">End terminal</button></form></details>{{end}}
 </div>
-<div id="term" class="term" data-term="{{.T.ID}}" data-status="{{.T.Status}}" data-host="{{.T.Host}}"></div>
+<div class="termsplit" id="termsplit"><div id="term" class="term" data-term="{{.T.ID}}" data-status="{{.T.Status}}" data-host="{{.T.Host}}"></div><iframe class="termed" id="termed" title="Editor" hidden></iframe></div>
 <div class="termmsg mut small" id="termmsg"></div>
 <div class="keys" id="termkeys" aria-label="Keys">
 <button type="button" data-key="esc">Esc</button><button type="button" data-key="tab">Tab</button><button type="button" data-key="stab">⇧Tab</button>

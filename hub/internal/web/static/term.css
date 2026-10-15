@@ -25,3 +25,7 @@
 .termform .perms legend{font-weight:600;padding:0 4px}
 .termform .perms label{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;flex-direction:row;color:var(--fg)}
 .termform .perms code{font-size:11.5px}
+.termsplit{display:grid;grid-template-columns:1fr;gap:8px}.termsplit.on{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr)}
+.termed{width:100%;height:calc(100vh - 330px);min-height:320px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.termed[hidden]{display:none}#edtoggle.on{background:var(--card);color:var(--acc)}
+@media (max-width:900px){.termsplit.on{grid-template-columns:1fr}}
