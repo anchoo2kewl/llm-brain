@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -52,6 +53,9 @@ func (c *Control) OpenTerminal(ctx context.Context, r TermReq) (int64, error) {
 		}
 	}
 	o := TermOpen{Provider: r.Provider, Cwd: cwd, Model: r.Model, Prompt: strings.TrimSpace(r.Prompt), Ask: r.Ask}
+	if r.Provider == "claude" { // the hub picks the session id, so it knows which transcript is this terminal's
+		o.SessionID = newUUID()
+	}
 	if r.WorktreeSlug != "" {
 		if cwd == "" {
 			return 0, bad("pick the repo to make the worktree from")
@@ -77,7 +81,7 @@ func (c *Control) OpenTerminal(ctx context.Context, r TermReq) (int64, error) {
 		}
 	}
 	b, _ := json.Marshal(o)
-	id, err := c.S.CreateTerminal(ctx, store.Terminal{Host: r.Host, Provider: r.Provider, Cwd: cwd, Model: r.Model, Title: t},
+	id, err := c.S.CreateTerminal(ctx, store.Terminal{Host: r.Host, Provider: r.Provider, Cwd: cwd, Model: r.Model, Title: t, SessionUUID: o.SessionID},
 		store.Command{Host: r.Host, Kind: KindTermOpen, Payload: b})
 	if err != nil {
 		return 0, err
@@ -158,4 +162,26 @@ func (c *Control) QueueFile(ctx context.Context, host, kind string, r FileReq) (
 	}
 	b, _ := json.Marshal(r)
 	return c.S.QueueCommand(ctx, store.Command{Host: host, Kind: kind, Payload: b})
+}
+
+// newUUID is a random (v4) UUID.
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// TitleSession queues a session_title for a Claude transcript on its Mac (hub terminal or not).
+func (c *Control) TitleSession(ctx context.Context, x store.Session, title string) error {
+	if x.Provider != "claude" || x.UUID == "" || x.Path == "" {
+		return nil // only Claude transcripts carry a name of their own
+	}
+	if _, err := c.liveHost(ctx, x.Host); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(SessionTitle{Path: x.Path, UUID: x.UUID, Title: title})
+	_, err := c.S.QueueCommand(ctx, store.Command{Host: x.Host, Kind: KindSessionTitle, Payload: b})
+	return err
 }
