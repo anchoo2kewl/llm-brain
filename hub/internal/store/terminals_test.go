@@ -114,3 +114,22 @@ func TestRecentFoldersLiteralPrefix(t *testing.T) {
 		t.Fatalf("unicode home: %v", got)
 	}
 }
+
+func TestSessionSearchFindsHubName(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.DB.Exec(`INSERT INTO sessions (id, host, path, provider, title, message_count) VALUES (5, 'h', '/a.jsonl', 'claude', 'first prompt', 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameSession(ctx, 5, "Meircom ransomware"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Sessions(ctx, SessionFilter{Q: "meircom"})
+	if err != nil || len(got) != 1 || got[0].DisplayTitle() != "Meircom ransomware" {
+		t.Fatalf("search: %+v %v", got, err)
+	}
+}

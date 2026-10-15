@@ -249,9 +249,9 @@ func (s *Store) Sessions(ctx context.Context, f SessionFilter) ([]Session, error
 	}
 	if f.Q != "" {
 		l := Like(f.Q)
-		q += ` AND (s.title LIKE ? ESCAPE '\' OR s.auto_title LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR s.branch LIKE ? ESCAPE '\'
+		q += ` AND (s.name LIKE ? ESCAPE '\' OR s.title LIKE ? ESCAPE '\' OR s.auto_title LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR s.branch LIKE ? ESCAPE '\'
 			OR s.agent_name LIKE ? ESCAPE '\' OR s.session_uuid = ?)`
-		args = append(args, l, l, l, l, l, f.Q)
+		args = append(args, l, l, l, l, l, l, f.Q)
 	}
 	if f.Limit <= 0 {
 		f.Limit = 300

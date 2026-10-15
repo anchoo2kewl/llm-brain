@@ -104,11 +104,11 @@ func (s *Server) rename(ctx context.Context, kind string, id int64, name string)
 		if err := s.Store.RenameAgentSession(ctx, id, name); err != nil {
 			return err
 		}
-		if a.ProviderSession != "" {
-			if x, err := s.Store.SessionByProviderUUID(ctx, a.Host, a.Provider, a.ProviderSession); err == nil {
-				_ = s.Store.RenameSession(ctx, x.ID, name)
-				s.titleSession(ctx, x, name)
-			}
+		if x, err := s.Store.SessionByProviderUUID(ctx, a.Host, a.Provider, a.ProviderSession); err == nil && a.ProviderSession != "" {
+			_ = s.Store.RenameSession(ctx, x.ID, name)
+			s.titleSession(ctx, x, name)
+		} else {
+			s.renameTaskLater(id, name) // the first turn hasn't produced a transcript yet
 		}
 	case "chat":
 		if _, err := s.Store.LLMChat(ctx, id); err != nil {
@@ -146,6 +146,34 @@ func (s *Server) renameLater(t store.Terminal, name string) {
 				return // renamed again (that rename takes over) or gone
 			}
 			if x, err := s.Store.TerminalSession(ctx, cur); err == nil {
+				_ = s.Store.RenameSession(ctx, x.ID, name)
+				s.titleSession(ctx, x, name)
+				return
+			}
+		}
+	}()
+}
+
+// renameTaskLater applies a task's name to its transcript once the first turn has created it (up to
+// 30 minutes), unless the task was renamed again meanwhile.
+func (s *Server) renameTaskLater(id int64, name string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		for ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Second):
+			}
+			a, err := s.Store.AgentSession(ctx, id)
+			if err != nil || a.Title != name {
+				return
+			}
+			if a.ProviderSession == "" {
+				continue
+			}
+			if x, err := s.Store.SessionByProviderUUID(ctx, a.Host, a.Provider, a.ProviderSession); err == nil {
 				_ = s.Store.RenameSession(ctx, x.ID, name)
 				s.titleSession(ctx, x, name)
 				return
