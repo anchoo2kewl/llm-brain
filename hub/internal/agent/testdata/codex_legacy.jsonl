@@ -1,0 +1,4 @@
+{"id":"0","msg":{"type":"session_configured","session_id":"0b6f2c11-2222-4c2b-9a51-0d6c3b1f7a10","model":"gpt-5","history_log_id":0,"history_entry_count":0}}
+{"id":"1","msg":{"type":"exec_command_begin","call_id":"c1","command":["bash","-lc","ls"],"cwd":"/w/app"}}
+{"id":"1","msg":{"type":"agent_message","message":"Looks clean."}}
+{"id":"1","msg":{"type":"task_complete","last_agent_message":"## Verdict: CLEAN"}}
