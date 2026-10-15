@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -72,6 +73,7 @@ type fsResp struct {
 	SHA      string      `json:"sha,omitempty"`
 	Binary   bool        `json:"binary,omitempty"`
 	Conflict bool        `json:"conflict,omitempty"`
+	Deleted  bool        `json:"deleted,omitempty"` // a conflict because the file is gone (not just emptied)
 	Files    []string    `json:"files,omitempty"`
 	Path     string      `json:"path,omitempty"`
 	Root     string      `json:"root,omitempty"`
@@ -144,6 +146,30 @@ func (f *fsSession) resolve(rel string) (string, error) {
 		return "", err
 	}
 	return real, nil
+}
+
+// resolveEntry is resolve for operations on a directory entry itself (rename, delete): the parent is
+// resolved, the last element is not, so a symlink is moved or trashed, never the file it points to.
+func (f *fsSession) resolveEntry(rel string) (string, error) {
+	if strings.ContainsRune(rel, 0) || filepath.IsAbs(rel) {
+		return "", ErrTraversal
+	}
+	clean := filepath.Clean("/" + rel)
+	if clean == "/" {
+		return f.root, nil
+	}
+	parent, err := f.resolve(filepath.Dir(clean)[1:])
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(parent, filepath.Base(clean))
+	if err := checkSecret(filepath.Join(f.root, clean)); err != nil {
+		return "", err
+	}
+	if err := checkSecret(p); err != nil {
+		return "", err
+	}
+	return p, nil
 }
 
 func (f *fsSession) handle(r fsReq) fsResp {
@@ -220,8 +246,7 @@ func (f *fsSession) handle(r fsReq) fsResp {
 			return fail(err)
 		}
 		if !exists && r.Base != "" { // deleted on disk since the editor read it
-			empty := ""
-			out.Conflict, out.Content = true, &empty
+			out.Conflict, out.Deleted = true, true
 			return out
 		}
 		if exists && r.Base != "" && sha(cur) != r.Base { // changed on disk since the editor read it
@@ -326,11 +351,11 @@ func (f *fsSession) handle(r fsReq) fsResp {
 			return fail(err)
 		}
 	case "rename":
-		from, err := f.resolve(r.Path)
+		from, err := f.resolveEntry(r.Path)
 		if err != nil {
 			return fail(err)
 		}
-		to, err := f.resolve(r.To)
+		to, err := f.resolveEntry(r.To)
 		if err != nil {
 			return fail(err)
 		}
@@ -347,7 +372,7 @@ func (f *fsSession) handle(r fsReq) fsResp {
 			return fail(err)
 		}
 	case "delete": // to the Trash, so a slip can be undone from Finder
-		p, err := f.resolve(r.Path)
+		p, err := f.resolveEntry(r.Path)
 		if err != nil {
 			return fail(err)
 		}
@@ -359,9 +384,21 @@ func (f *fsSession) handle(r fsReq) fsResp {
 		if err := os.MkdirAll(trash, 0o700); err != nil {
 			return fail(err)
 		}
+		if _, err := os.Lstat(p); err != nil {
+			return fail(err)
+		}
+		// A name nothing else in the Trash has: the name itself, else with a time and random suffix.
 		dest := filepath.Join(trash, filepath.Base(p))
-		if _, err := os.Lstat(dest); err == nil {
-			dest = filepath.Join(trash, fmt.Sprintf("%s %s", filepath.Base(p), time.Now().Format("15.04.05")))
+		for i := 0; ; i++ {
+			if _, err := os.Lstat(dest); errors.Is(err, os.ErrNotExist) {
+				break
+			}
+			var rb [4]byte
+			_, _ = rand.Read(rb[:])
+			dest = filepath.Join(trash, fmt.Sprintf("%s (hub %s %x)", filepath.Base(p), time.Now().Format("20060102-150405"), rb))
+			if i > 5 {
+				return fail(errors.New("couldn't find a free name in the Trash"))
+			}
 		}
 		if err := os.Rename(p, dest); err != nil {
 			return fail(err)
@@ -534,12 +571,12 @@ func (f *fsSession) grep(r fsReq, out fsResp) fsResp {
 			return nil
 		}
 		if d.IsDir() {
-			if p != f.root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".")) {
+			if p != f.root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".") || checkSecret(p) != nil) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if strings.HasPrefix(d.Name(), ".") || secretFile(d.Name()) {
+		if strings.HasPrefix(d.Name(), ".") || checkSecret(p) != nil {
 			return nil
 		}
 		if seen++; seen > maxGrepFiles || len(out.Hits) >= maxHits || time.Since(start) > 20*time.Second {
