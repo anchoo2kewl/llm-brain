@@ -281,16 +281,28 @@ type Message struct {
 	} `json:"bot_profile"`
 	// search.messages only:
 	Permalink string `json:"permalink"`
-	Channel   *struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		IsChannel bool   `json:"is_channel"`
-		IsGroup   bool   `json:"is_group"`
-		IsPrivate bool   `json:"is_private"`
-		IsIM      bool   `json:"is_im"`
-		IsMPIM    bool   `json:"is_mpim"`
-		User      string `json:"user"`
-	} `json:"channel"`
+	Channel   *MsgChannel `json:"channel"`
+}
+
+// MsgChannel is a message's channel: an object in search.messages, a plain id string elsewhere
+// (e.g. some messages in group DMs' history).
+type MsgChannel struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	IsChannel bool   `json:"is_channel"`
+	IsGroup   bool   `json:"is_group"`
+	IsPrivate bool   `json:"is_private"`
+	IsIM      bool   `json:"is_im"`
+	IsMPIM    bool   `json:"is_mpim"`
+	User      string `json:"user"`
+}
+
+func (c *MsgChannel) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &c.ID)
+	}
+	type plain MsgChannel
+	return json.Unmarshal(b, (*plain)(c))
 }
 
 // History returns one page of a conversation's messages newer than oldest (newest first) and the cursor of
