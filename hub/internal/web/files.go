@@ -32,6 +32,7 @@ func (s *Server) fileRoutes(g, p func(string, http.HandlerFunc), mux *http.Serve
 	p("GET /hosts/{host}/download", s.hostDownload)
 	p("POST /hosts/{host}/upload", s.hostUpload)
 	p("POST /hosts/{host}/keep", s.hostKeep)
+	p("POST /llms/upload", s.chatUpload)
 	g("GET /files", s.assetsPage)
 	g("GET /browse", s.browsePage)
 	g("GET /files/{id}", s.assetGet)
@@ -549,4 +550,37 @@ func localPath(p string) bool {
 	}
 	u, err := url.Parse(p)
 	return err == nil && u.Scheme == "" && u.Host == "" && u.User == nil
+}
+
+// chatUpload stores files for a model chat on the hub itself (no Mac involved) and returns their ids.
+func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUpload+1<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		jsonErr(w, http.StatusBadRequest, fmt.Errorf("upload (max %d MB): %w", MaxUpload>>20, err))
+		return
+	}
+	type up struct {
+		ID    int64  `json:"id"`
+		Name  string `json:"name"`
+		Image bool   `json:"image"`
+		URL   string `json:"url"`
+	}
+	out := []up{}
+	for _, fh := range r.MultipartForm.File["file"] {
+		f, err := fh.Open()
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err)
+			return
+		}
+		name := agent.SafeName(fh.Filename)
+		id, err := s.storeAsset(r.Context(), "hub", "chat/"+name, name, f, nil, "upload")
+		f.Close()
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		mt, _, _ := mime.ParseMediaType(mime.TypeByExtension(filepath.Ext(name)))
+		out = append(out, up{id, name, strings.HasPrefix(mt, "image/") && mt != "image/svg+xml", fmt.Sprintf("/files/%d", id)})
+	}
+	writeJSON(w, http.StatusOK, out)
 }

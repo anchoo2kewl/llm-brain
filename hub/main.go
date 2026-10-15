@@ -200,7 +200,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 		if err := st.FailStaleReplies(ctx); err != nil {
 			lg.Printf("chats: %v", err)
 		}
-		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg}
+		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg, AssetDir: filepath.Join(c.state, "assets")}
 	}
 	go srv.RunHarvest(ctx, time.Minute) // keep a copy of every document a session writes
 	var ex *agent.Executor

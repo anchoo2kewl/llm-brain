@@ -378,6 +378,9 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 	switch t.Provider {
 	case "claude":
 		spec, err = BuildClaude(t, cwd, prompt, gw)
+		if err == nil { // files dropped onto the chat live outside the folder; let it read them
+			spec.Args = append(spec.Args, "--add-dir", e.uploadsDir())
+		}
 	case "codex":
 		spec, err = BuildCodex(t, cwd, prompt, filepath.Join(tmpDir, fmt.Sprintf("%d.last", c.ID)), gw)
 	default:

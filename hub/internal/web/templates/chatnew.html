@@ -1,8 +1,8 @@
-{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/files.css">
 <div class="top"><div><h1>{{if eq .F.Kind "model"}}New model chat{{else}}New task{{end}}</h1></div></div>
 {{template "newtabs" .F.Kind}}
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
-<form method="post" action="/chats/new" class="newchat-form"><input type="hidden" name="kind" value="{{.F.Kind}}">
+<form method="post" action="/chats/new" class="newchat-form" {{if eq .F.Kind "model"}}data-attach-hub{{end}}><input type="hidden" name="kind" value="{{.F.Kind}}">
 <label class="pick"><span>{{if eq .F.Kind "model"}}Model{{else}}Who does it{{end}}</span>
 <select name="with" id="with" required>{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.F.With}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
 {{if .GwErr}}<p class="warn small">Model chats are unavailable: {{.GwErr}}.</p>{{end}}
@@ -22,10 +22,12 @@
 <label class="wide">Prompt variables<textarea name="vars" rows="2" placeholder="NAME=value, one per line, for {{"{{NAME}}"}} in the prompt">{{.F.Vars}}</textarea></label>
 </div></details>{{end}}
 <div class="composer">
+{{if eq .F.Kind "model"}}<div class="atttray"></div><p class="bad small atterr" hidden></p>{{end}}
 <textarea name="prompt" rows="5" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line" required autofocus>{{.F.Prompt}}</textarea>
-<div class="row">{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}<a class="small" href="/prompts">prompt library</a>
+<div class="row">{{if eq .F.Kind "model"}}<label class="btn upl small">Attach images or files…<input type="file" data-attach-hub multiple hidden></label>{{else}}<label class="btn upl small">Attach images or files…<input type="file" id="taskattach" multiple hidden></label>{{end}}{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}<a class="small" href="/prompts">prompt library</a>
 <span class="grow"></span><button type="submit" class="primary">{{if eq .F.Kind "model"}}Send{{else}}Start task{{end}}</button></div>
 </div>
 </form>
 <script src="/static/agents.js" defer></script>
+<script src="/static/drop.js" defer></script><script src="/static/attach.js" defer></script>
 {{end}}

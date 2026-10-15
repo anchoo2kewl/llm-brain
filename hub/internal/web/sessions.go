@@ -427,7 +427,7 @@ func (s *Server) newChatPost(w http.ResponseWriter, r *http.Request) {
 			fail(llm.InputError("plain chat is off on this hub"))
 			return
 		}
-		id, _, err := s.Agents.Chats.Start(ctx, val, f.Prompt)
+		id, _, err := s.Agents.Chats.Start(ctx, val, f.Prompt, formIDs(r, "att")...)
 		if err != nil {
 			fail(err)
 			return
@@ -789,6 +789,7 @@ func (s *Server) sessionReview(w http.ResponseWriter, r *http.Request) {
 type llmMsgView struct {
 	store.LLMMessage
 	HTML template.HTML
+	Files []store.Asset // attached to this message
 }
 
 func (s *Server) llmPage(w http.ResponseWriter, r *http.Request) {
@@ -808,10 +809,11 @@ func (s *Server) llmPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	atts, _ := s.Store.LLMAttachments(ctx, id)
 	var views []llmMsgView
 	var streaming int64
 	for _, m := range ms {
-		v := llmMsgView{LLMMessage: m}
+		v := llmMsgView{LLMMessage: m, Files: atts[m.ID]}
 		if m.Role == "assistant" {
 			v.HTML = llm.Markdown(m.Content)
 			if m.Status == "streaming" {
@@ -863,7 +865,7 @@ func (s *Server) llmSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := r.PostFormValue("model")
-	_, err := s.Agents.Chats.Send(r.Context(), id, model, r.PostFormValue("prompt"))
+	_, err := s.Agents.Chats.Send(r.Context(), id, model, r.PostFormValue("prompt"), formIDs(r, "att")...)
 	if err == nil {
 		_ = s.Store.SetSettings(r.Context(), map[string]string{store.KeyChatLast: "plain:" + model})
 	}
@@ -984,4 +986,15 @@ func (s *Server) promptDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.back(w, r, "/prompts", s.Store.DeletePrompt(r.Context(), id))
+}
+
+// formIDs reads repeated positive integer form values (attachment ids).
+func formIDs(r *http.Request, key string) []int64 {
+	var out []int64
+	for _, v := range r.PostForm[key] {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 && len(out) < 20 {
+			out = append(out, n)
+		}
+	}
+	return out
 }

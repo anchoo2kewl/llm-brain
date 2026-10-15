@@ -1,18 +1,20 @@
-{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/files.css">
 <div class="top"><div><p class="eyebrow">Model chat</p><h1 class="title">{{.C.Title}}</h1></div><div class="meta"><a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 <div class="transcript convo" id="llmconvo">
-{{range .Msgs}}{{if eq .Role "user"}}<div class="msg user" id="l{{.ID}}"><div class="who">you</div><div class="txt">{{.Content}}</div></div>
+{{range .Msgs}}{{if eq .Role "user"}}<div class="msg user" id="l{{.ID}}"><div class="who">you</div>{{if .Files}}<div class="attshow">{{range .Files}}{{if viewable .Name}}{{if imageName .Name}}<a href="/files/{{.ID}}?view=1" target="_blank" rel="noopener"><img src="/files/{{.ID}}?view=1" alt="{{.Name}}"></a>{{else}}<a class="attchip" href="/files/{{.ID}}">{{.Name}}</a>{{end}}{{else}}<a class="attchip" href="/files/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</div>{{end}}{{if .Content}}<div class="txt">{{.Content}}</div>{{end}}</div>
 {{else}}<div class="msg assistant" {{if eq .ID $.Streaming}}id="streaming" data-src="/llms/{{$.C.ID}}/events?msg={{.ID}}"{{else}}id="l{{.ID}}"{{end}}><div class="who">{{.Model}}{{if eq .Status "error"}} <span class="bad">error</span>{{end}}{{if eq .ID $.Streaming}} <span class="typing"><i></i><i></i><i></i></span>{{end}}</div>
 {{if eq .ID $.Streaming}}<div class="txt live">{{.Content}}</div>{{else}}<div class="md">{{.HTML}}</div>{{end}}
 {{if .Error}}<p class="bad small err-msg">{{.Error}}</p>{{else}}<p class="bad small err-msg" hidden></p>{{end}}</div>{{end}}{{end}}
 </div>
 <div class="composer" id="composer">
 {{if .GwErr}}<p class="warn small">The account gateway isn't answering ({{.GwErr}}). Replies will fail until it is back.</p>{{end}}
-<form method="post" action="/llms/{{.C.ID}}/send" class="send">
-<textarea name="prompt" rows="3" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line" required {{if .Streaming}}disabled{{end}}></textarea>
-<div class="row"><label class="small">Model <select name="model" aria-label="Model">{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.C.Model}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
+<form method="post" action="/llms/{{.C.ID}}/send" class="send" data-attach-hub>
+<div class="atttray"></div><p class="bad small atterr" hidden></p>
+<textarea name="prompt" rows="3" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line. Drop or paste images and files." required {{if .Streaming}}disabled{{end}}></textarea>
+<div class="row"><label class="btn upl small">Attach…<input type="file" data-attach-hub multiple hidden></label><label class="small">Model <select name="model" aria-label="Model">{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.C.Model}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
 <span class="grow"></span><button type="submit" class="primary" {{if .Streaming}}disabled{{end}}>Send</button></div>
 </form></div>
 <script src="/static/agents.js" defer></script>
+<script src="/static/attach.js" defer></script>
 {{end}}
