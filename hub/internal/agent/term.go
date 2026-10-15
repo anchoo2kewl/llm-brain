@@ -67,6 +67,7 @@ type TermOpen struct {
 	Model    string    `json:"model,omitempty"`
 	Prompt   string    `json:"prompt,omitempty"` // the first message, typed into the CLI
 	Worktree *Worktree `json:"worktree,omitempty"`
+	Ask      bool      `json:"ask,omitempty"` // the CLI's normal approval prompts instead of every permission
 }
 
 // TermAttach is a term_attach payload.
@@ -245,7 +246,10 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 	var argv, env []string
 	switch o.Provider {
 	case "claude":
-		argv = []string{"claude", "--dangerously-skip-permissions"}
+		argv = []string{"claude"}
+		if !o.Ask {
+			argv = append(argv, "--dangerously-skip-permissions")
+		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
 		}
@@ -253,7 +257,10 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 			env = []string{"ANTHROPIC_BASE_URL=" + gw.URL, "ANTHROPIC_AUTH_TOKEN=" + gw.Key}
 		}
 	case "codex":
-		argv = []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+		argv = []string{"codex"}
+		if !o.Ask {
+			argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
+		}
 		if o.Model != "" {
 			argv = append(argv, "-m", o.Model)
 		}
@@ -264,7 +271,10 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 			env = []string{"CPA_API_KEY=" + gw.Key}
 		}
 	case "gemini":
-		argv = []string{"gemini", "--approval-mode", "yolo"}
+		argv = []string{"gemini"}
+		if !o.Ask {
+			argv = append(argv, "--approval-mode", "yolo")
+		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
 		}
@@ -565,4 +575,24 @@ func bridge(ctx context.Context, ws *websocket.Conn, ptmx *os.File, stop func())
 			_ = pty.Setsize(ptmx, &pty.Winsize{Cols: clampSize(m.Cols, 80), Rows: clampSize(m.Rows, 24)})
 		}
 	}
+}
+
+// homePlaces: the home folder and the folders directly in it, minus hidden ones and macOS's media/system
+// folders, for the terminal folder picker.
+func homePlaces() (string, []string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", nil
+	}
+	skip := map[string]bool{"Library": true, "Applications": true, "Movies": true, "Music": true, "Pictures": true, "Public": true}
+	ents, _ := os.ReadDir(home)
+	var out []string
+	for _, e := range ents {
+		n := e.Name()
+		if strings.HasPrefix(n, ".") || skip[n] || !e.IsDir() {
+			continue
+		}
+		out = append(out, filepath.Join(home, n))
+	}
+	return home, out
 }

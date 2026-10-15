@@ -164,6 +164,7 @@ func (e *Executor) inventory(ctx context.Context) Inventory {
 	}
 	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
 	if e.HubURL != "" {
+		inv.Home, inv.Places = homePlaces()
 		inv.TermsAt = time.Now()
 		inv.Terminals, inv.Tmux = e.Terminals(ctx)
 		if ctx.Err() != nil { // stopping: a listing cut short proves nothing

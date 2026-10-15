@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,7 +75,23 @@ func token() string {
 // ---------------------------------------------------------------- pages
 
 type termForm struct {
-	Host, Provider, Folder, Path, Model, Prompt, WtSlug, WtBase string
+	Host, Provider, Folder, Path, Model, Prompt, WtSlug, WtBase, Perm string
+}
+
+// pick is a folder the picker offers: Value is what goes in the box ("~/elastio"), Label how it reads.
+type pick struct{ Value, Label string }
+
+// tilde writes p relative to that host's home ("~/elastio"), so the same path reads the same on every Mac.
+func tilde(home, p string) string {
+	switch {
+	case home == "":
+		return p
+	case p == home:
+		return "~"
+	case strings.HasPrefix(p, home+"/"):
+		return "~/" + strings.TrimPrefix(p, home+"/")
+	}
+	return p
 }
 
 func (s *Server) newTerminal(w http.ResponseWriter, r *http.Request) {
@@ -83,19 +100,65 @@ func (s *Server) newTerminal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termForm, errMsg string) {
-	hosts, err := s.Agents.Ctl.Folders(r.Context())
+	ctx := r.Context()
+	hosts, err := s.Agents.Ctl.Folders(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	type hostOpt struct {
 		store.AgentHost
-		Live bool
+		Live          bool
+		Quick, Recent []pick
+		All           []pick // the datalist: quick, recent, every folder in home, every repo
 	}
 	var hs []hostOpt
 	for _, h := range hosts {
-		hs = append(hs, hostOpt{h, h.Live()})
-		if f.Host == "" && h.Live() && h.Host == s.Host {
+		o := hostOpt{AgentHost: h, Live: h.Live()}
+		home, places, _ := s.Store.AgentPlaces(ctx, h.Host)
+		seen := map[string]bool{}
+		add := func(list *[]pick, p, label string) {
+			v := tilde(home, p)
+			if label == "" {
+				label = v
+			}
+			*list = append(*list, pick{v, label})
+			if !seen[v] {
+				seen[v] = true
+				o.All = append(o.All, pick{v, label})
+			}
+		}
+		if home != "" {
+			add(&o.Quick, home, "~ home")
+		}
+		for _, root := range h.Roots { // where the repos live (~/elastio), then the usual code folders
+			add(&o.Quick, root, "")
+		}
+		for _, p := range places {
+			switch filepath.Base(p) {
+			case "projects", "code", "src", "dev", "work", "repos", "git":
+				if !seen[tilde(home, p)] {
+					add(&o.Quick, p, "")
+				}
+			}
+		}
+		recent, _ := s.Store.RecentFolders(ctx, h.Host, home, 8)
+		for _, p := range recent {
+			add(&o.Recent, p, "")
+		}
+		var rest []pick
+		for _, p := range places {
+			add(&rest, p, "")
+		}
+		for _, fo := range h.Folders {
+			label := tilde(home, fo.Path)
+			if fo.Branch != "" {
+				label += " (" + fo.Branch + ")"
+			}
+			add(&rest, fo.Path, label)
+		}
+		hs = append(hs, o)
+		if f.Host == "" && o.Live && h.Host == s.Host {
 			f.Host = h.Host
 		}
 	}
@@ -110,11 +173,14 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 	if f.Provider == "" {
 		f.Provider = "claude"
 	}
+	if f.Perm != "ask" {
+		f.Perm = "full"
+	}
 	type cli struct{ Value, Label, Note string }
 	clis := []cli{
-		{"claude", "Claude Code", "claude --dangerously-skip-permissions"},
-		{"codex", "Codex", "codex --dangerously-bypass-approvals-and-sandbox"},
-		{"gemini", "Gemini CLI", "gemini --approval-mode yolo"},
+		{"claude", "Claude Code", "claude"},
+		{"codex", "Codex", "codex"},
+		{"gemini", "Gemini CLI", "gemini"},
 		{"shell", "Shell", "your login shell"},
 	}
 	s.render(w, "terminalnew", "layout", struct {
@@ -129,8 +195,10 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 func (s *Server) newTerminalPost(w http.ResponseWriter, r *http.Request) {
 	f := termForm{Host: r.PostFormValue("host"), Provider: r.PostFormValue("cli"), Folder: r.PostFormValue("folder"),
 		Path: strings.TrimSpace(r.PostFormValue("path")), Model: strings.TrimSpace(r.PostFormValue("model")),
-		Prompt: r.PostFormValue("prompt"), WtSlug: strings.TrimSpace(r.PostFormValue("wt_slug")), WtBase: strings.TrimSpace(r.PostFormValue("wt_base"))}
-	req := agent.TermReq{Host: f.Host, Provider: f.Provider, Model: f.Model, Prompt: f.Prompt, WorktreeSlug: f.WtSlug, WorktreeBase: f.WtBase}
+		Prompt: r.PostFormValue("prompt"), WtSlug: strings.TrimSpace(r.PostFormValue("wt_slug")), WtBase: strings.TrimSpace(r.PostFormValue("wt_base")),
+		Perm: r.PostFormValue("perm")}
+	req := agent.TermReq{Host: f.Host, Provider: f.Provider, Model: f.Model, Prompt: f.Prompt, WorktreeSlug: f.WtSlug, WorktreeBase: f.WtBase,
+		Ask: f.Perm == "ask"}
 	switch {
 	case f.Path != "": // a typed path wins over the list
 		req.Cwd = f.Path

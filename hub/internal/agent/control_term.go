@@ -14,6 +14,7 @@ import (
 type TermReq struct {
 	Host, Provider, Cwd, Model, Prompt string
 	WorktreeBase, WorktreeSlug         string
+	Ask                                bool // approval prompts on, instead of every permission
 }
 
 // OpenTerminal records a terminal and queues its term_open. The folder is only checked for shape here; the
@@ -50,7 +51,7 @@ func (c *Control) OpenTerminal(ctx context.Context, r TermReq) (int64, error) {
 			cwd = "~"
 		}
 	}
-	o := TermOpen{Provider: r.Provider, Cwd: cwd, Model: r.Model, Prompt: strings.TrimSpace(r.Prompt)}
+	o := TermOpen{Provider: r.Provider, Cwd: cwd, Model: r.Model, Prompt: strings.TrimSpace(r.Prompt), Ask: r.Ask}
 	if r.WorktreeSlug != "" {
 		if cwd == "" {
 			return 0, bad("pick the repo to make the worktree from")
