@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -379,5 +380,37 @@ func TestPlainChatSearchUsesIndex(t *testing.T) {
 	}
 	if _, body, _ := r.get(t, "/llms/1"); !strings.Contains(body, `id="l2"`) {
 		t.Error("search links point at a missing anchor")
+	}
+}
+
+// The hub's CSP allows scripts and styles only from /static: no inline <script>, style= or on*= handlers.
+func TestChatPagesFitTheCSP(t *testing.T) {
+	r := newSessRig(t)
+	_, _ = r.post(t, "/chats/new", url.Values{"with": {"agent:claude"}, "folder": {"studio|" + r.repo}, "prompt": {"x"}}, "")
+	_, _ = r.post(t, "/chats/new", url.Values{"with": {"plain:gpt-5"}, "prompt": {"x"}}, "")
+	_, _ = r.post(t, "/prompts", url.Values{"name": {"p"}, "body": {"b"}}, "")
+	r.chats.Wait()
+	inlineScript := regexp.MustCompile(`(?i)<script(\s[^>]*)?>`)
+	handler := regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
+	style := regexp.MustCompile(`(?i)\sstyle\s*=|<style`)
+	for _, p := range []string{"/chats", "/chats/new", "/agents", "/agents/1", "/agents/1/conversation", "/llms/1", "/prompts", "/sessions"} {
+		code, body, h := r.get(t, p)
+		if code != 200 {
+			t.Fatalf("%s: %d", p, code)
+		}
+		if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") {
+			t.Errorf("%s: CSP %q", p, csp)
+		}
+		for _, m := range inlineScript.FindAllString(body, -1) {
+			if !strings.Contains(m, `src="/static/`) {
+				t.Errorf("%s: inline script %s", p, m)
+			}
+		}
+		if m := handler.FindString(body); m != "" {
+			t.Errorf("%s: inline handler %q", p, m)
+		}
+		if m := style.FindString(body); m != "" {
+			t.Errorf("%s: inline style %q", p, m)
+		}
 	}
 }
