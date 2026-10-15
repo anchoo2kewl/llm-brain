@@ -52,6 +52,7 @@
     }
     function connect() {
       clearTimeout(timer);
+      if (!wanted) return; // disposed while a status check was in flight
       say(tries ? "Reconnecting…" : "Connecting…");
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
       ws = new WebSocket(proto + location.host + "/terminals/" + id + "/ws?cols=" + term.cols + "&rows=" + term.rows);
@@ -73,6 +74,7 @@
         if (!wanted) return;
         var why = ev.code === 4000 && ev.reason ? ev.reason : "";
         status(function (s) {
+          if (!wanted) return;
           if (opts.onStatus) opts.onStatus(s);
           if (s.status === "starting") { say("Starting…"); setState("connecting"); timer = setTimeout(connect, 1500); return; }
           if (s.status && s.status !== "live") { say(why || ("The terminal has " + s.status + ".") + (s.error ? " " + s.error : "")); setState("ended"); return; }
