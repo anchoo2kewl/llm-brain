@@ -74,3 +74,5 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-pen{border:0;background:none;color:var(--mut);padding:0 3px;font-size:12px;cursor:pointer;opacity:0}.ws-item:hover .ws-pen,.ws-item.on .ws-pen{opacity:1}.ws-pen:hover{color:var(--acc)}
 .ws-slot-title{cursor:text;border-radius:4px}.ws-slot-title:hover{background:color-mix(in srgb,var(--acc) 10%,transparent)}
 .ws-slot-title[contenteditable=true]{outline:1px solid var(--acc);background:var(--bg);padding:0 4px;max-width:60%}
+.ws-editor{position:absolute;left:0;right:0;top:29px;bottom:0;width:100%;height:calc(100% - 29px);border:0;background:var(--bg);z-index:3}
+.ws-editor[hidden]{display:none}.ws-btn.on{color:var(--acc)}

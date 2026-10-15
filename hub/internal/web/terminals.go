@@ -32,6 +32,8 @@ func (s *Server) terminalRoutes(g, p func(string, http.HandlerFunc), mux *http.S
 	g("GET /terminals/{id}", s.terminalPage)
 	g("GET /terminals/{id}/status", s.terminalStatus)
 	g("GET /workspace", s.workspace)
+	g("GET /edit", s.editorPage)
+	p("GET /fs/ws", s.fsWS)
 	g("GET /api/terminals", s.terminalsAPI)
 	g("GET /api/live-sessions", s.liveSessionsAPI)
 	p("POST /terminals/{id}/rename", s.terminalRename)
@@ -414,7 +416,7 @@ func (s *Server) agentTermWS(w http.ResponseWriter, r *http.Request) {
 	}
 	// Closed here whatever happens: a browser that gave up before this handoff never reads it.
 	defer aws.CloseNow()
-	aws.SetReadLimit(4 << 20)
+	aws.SetReadLimit(32 << 20) // editor files are up to 8 MB, JSON-escaped
 	select {
 	case br.agent <- aws:
 	case <-br.done:
@@ -696,4 +698,78 @@ func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
 		out = append(out, liveJSON{x.ID, x.DisplayTitle(), x.Host, agent.TermProviderName(x.Provider), tilde(home, x.Cwd), x.FileMtime, int(x.MessageCount)})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---------------------------------------------------------------- editor
+
+// editorPage: Monaco on a folder of a Mac (?host=&root=), files over a live channel (agent/fsbridge.go).
+func (s *Server) editorPage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	host, root := q.Get("host"), q.Get("root")
+	if host == "" {
+		host = s.Host
+	}
+	if root == "" {
+		root = "~"
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ws://"+r.Host+" wss://"+r.Host)
+	s.render(w, "editor", "layout", struct {
+		page
+		Host, Root, File string
+		Live             bool
+	}{page{Title: "Edit " + root, Nav: "workspace", Embed: q.Get("embed") == "1"}, host, root, q.Get("file"), s.Agents.Ctl.HostLive(r.Context(), host)})
+}
+
+// fsWS bridges the editor to the host's file channel, the same way a terminal is bridged.
+func (s *Server) fsWS(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	host, root := r.URL.Query().Get("host"), r.URL.Query().Get("root")
+	bws, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	bws.SetReadLimit(32 << 20)
+	closeWith := func(msg string) { _ = bws.Close(4000, truncReason(msg)) }
+	if !s.Agents.Ctl.HostLive(ctx, host) {
+		closeWith("the agent on " + host + " is offline")
+		return
+	}
+	tok := token()
+	br := s.Agents.bridges.add(tok)
+	defer func() {
+		s.Agents.bridges.take(tok)
+		close(br.done)
+	}()
+	b, _ := json.Marshal(agent.FSAttach{Token: tok, Root: root})
+	cid, err := s.Store.QueueCommand(ctx, store.Command{Host: host, Kind: agent.KindFSAttach, Payload: b})
+	if err != nil {
+		closeWith(err.Error())
+		return
+	}
+	var aws *websocket.Conn
+	tick := time.NewTicker(300 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(30 * time.Second)
+wait:
+	for {
+		select {
+		case aws = <-br.agent:
+			break wait
+		case <-ctx.Done():
+			return
+		case <-deadline:
+			closeWith("the agent on " + host + " didn't answer")
+			return
+		case <-tick.C:
+			if c, err := s.Store.Command(ctx, cid); err == nil && c.Status == "failed" {
+				msg := reportError(c.Result)
+				if msg == "" {
+					msg = "couldn't open the folder"
+				}
+				closeWith(msg)
+				return
+			}
+		}
+	}
+	pipe(ctx, bws, aws)
 }

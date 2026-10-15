@@ -1,0 +1,17 @@
+{{define "content"}}<link rel="stylesheet" href="/static/editor.css">
+<div class="ed" id="ed" data-host="{{.Host}}" data-root="{{.Root}}" data-file="{{.File}}">
+  <aside class="ed-side">
+    <div class="ed-head"><b class="ed-root" id="edroot" title="{{.Root}}">{{.Root}}</b><span class="ed-host">{{.Host}}</span></div>
+    <div class="ed-find"><input id="edq" placeholder="Go to file…  (⌘P)" autocomplete="off" spellcheck="false" aria-label="Go to file"></div>
+    <ul class="ed-results" id="edresults" hidden></ul>
+    <div class="ed-tree" id="edtree" role="tree"></div>
+  </aside>
+  <main class="ed-main">
+    <div class="ed-tabs" id="edtabs" role="tablist"></div>
+    <div class="ed-banner" id="edbanner" hidden></div>
+    <div class="ed-editor" id="edmonaco"></div>
+    <div class="ed-status"><span id="edstate">connecting…</span><span class="grow"></span><span id="edpos"></span><span id="edlang"></span></div>
+  </main>
+</div>
+<script src="/static/monaco/vs/loader.js" defer></script><script src="/static/editor.js" defer></script>
+{{end}}
