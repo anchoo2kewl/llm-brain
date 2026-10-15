@@ -149,27 +149,41 @@
     li.tabIndex = 0;
     var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
     top.append(dot, title, num);
-    var meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
-    li.append(top, meta, prev);
+    var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
+    li.append(top, badges, meta, prev);
     li.addEventListener("click", function () { show(id); });
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num };
+    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges };
     return li;
   }
   function paintItem(id) {
     var li = items[id], t = infos[id];
     if (!li || !t) return;
     var s = stateOf(id), p = panes[id];
-    li.className = "ws-item s-" + s + (slotOf(id) === st.focus ? " on" : slotOf(id) >= 0 ? " shown" : "");
+    li.className = "ws-item s-" + s + (t.kind === "session" ? " ext" : "") + (slotOf(id) === st.focus ? " on" : slotOf(id) >= 0 ? " shown" : "");
+    badgesFor(li.parts.badges, t);
     li.parts.dot.title = dotTitle[s] || s;
     li.parts.dot.className = "dot-s " + s;
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
-    li.parts.meta.textContent = t.cli + " · " + t.host.replace(/^Anshumans?-?/, "") + " · " + t.cwd + (t.kind === "session" ? " · read-only" : "");
+    li.parts.meta.textContent = t.cli + " · " + t.cwd;
     var slot = slotOf(id);
     li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
     li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : p ? p.lastLine() : "";
+  }
+  // badgesFor: where it runs. Hub terminals: the Mac. Sessions started elsewhere: OUTSIDE HUB, the Mac, read-only.
+  function shortHost(h) { return /macbook/i.test(h) ? "MacBook" : /studio/i.test(h) ? "Studio" : h; }
+  function badgesFor(box, t) {
+    box.textContent = "";
+    if (t.kind === "session") {
+      box.appendChild(el("span", "bdg ext", "OUTSIDE HUB"));
+      box.appendChild(el("span", "bdg host", shortHost(t.host)));
+      box.appendChild(el("span", "bdg ro", "read-only"));
+    } else {
+      box.appendChild(el("span", "bdg hub", "HUB"));
+      box.appendChild(el("span", "bdg host", shortHost(t.host)));
+    }
   }
   function badge() {
     var n = order.filter(function (id) { return stateOf(id) === "waiting"; }).length;
@@ -232,16 +246,16 @@
   }
   function makeSlot(i) {
     var root = el("section", "ws-slot"), head = el("header", "ws-slot-head"), body = el("div", "ws-slot-body"), msg = el("div", "ws-slot-msg");
-    var num = el("span", "ws-num", String(i + 1)), dot = el("span", "dot-s"), title = el("span", "ws-slot-title"), meta = el("span", "ws-slot-meta");
+    var num = el("span", "ws-num", String(i + 1)), dot = el("span", "dot-s"), title = el("span", "ws-slot-title"), meta = el("span", "ws-slot-meta"), badges = el("span", "ws-badges");
     var grow = el("span", "grow");
     var open = el("a", "ws-btn", "↗"); open.title = "Open on its own page"; open.target = "_blank"; open.rel = "noopener";
     var zoom = el("button", "ws-btn", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
     var clear = el("button", "ws-btn", "✕"); clear.type = "button"; clear.title = "Take it out of this pane (it keeps running)";
-    head.append(num, dot, title, meta, grow, open, zoom, clear);
+    head.append(num, dot, title, badges, meta, grow, open, zoom, clear);
     var empty = el("div", "ws-slot-empty");
     root.append(head, body, msg, empty);
     grid.appendChild(root);
-    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, open: open, i: i };
+    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i };
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
@@ -265,7 +279,9 @@
   function paintSlot(i) {
     if (i < 0 || !slotEls[i]) return;
     var s = slotEls[i], id = s.id, t = id && infos[id];
-    if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
+    s.root.classList.toggle("ext", !!(t && t.kind === "session"));
+    if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.badges.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
+    badgesFor(s.badges, t);
     var stt = stateOf(id);
     s.title.textContent = t.title || "terminal " + id;
     s.meta.textContent = t.cli + " · " + t.cwd;
