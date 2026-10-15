@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -78,6 +79,15 @@ type fsSession struct {
 	watched map[string]string // rel path -> last sha sent or read
 }
 
+var pathLocks sync.Map // real path -> *sync.Mutex
+
+func lockPath(p string) func() {
+	m, _ := pathLocks.LoadOrStore(p, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 func sha(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 // resolve maps a path relative to the root to a real path inside it. A file that doesn't exist yet is
@@ -100,12 +110,12 @@ func (f *fsSession) resolve(rel string) (string, error) {
 	if real != f.root && !strings.HasPrefix(real, f.root+string(filepath.Separator)) {
 		return "", errors.New("outside the editor's folder")
 	}
-	if _, err := os.Stat(real); err == nil {
-		if _, err := HomePath(real); err != nil { // key folders and credential files
-			return "", err
-		}
-	} else if secretFile(filepath.Base(real)) {
-		return "", fmt.Errorf("%s looks like a credential", filepath.Base(real))
+	// Key folders and credential names, on the path as asked and where it leads (also for a new file).
+	if err := checkSecret(p); err != nil {
+		return "", err
+	}
+	if err := checkSecret(real); err != nil {
+		return "", err
 	}
 	return real, nil
 }
@@ -157,7 +167,7 @@ func (f *fsSession) handle(r fsReq) fsResp {
 			return fail(err)
 		}
 		out.SHA = sha(b)
-		if strings.ContainsRune(string(b[:min(len(b), 8000)]), 0) {
+		if strings.ContainsRune(string(b[:min(len(b), 8000)]), 0) || !utf8.Valid(b) { // shown read-only: a save would mangle it
 			out.Binary = true
 			return out
 		}
@@ -176,10 +186,17 @@ func (f *fsSession) handle(r fsReq) fsResp {
 		if err != nil {
 			return fail(err)
 		}
+		unlock := lockPath(p) // check and replace as one step, across every editor on this Mac
+		defer unlock()
 		cur, err := os.ReadFile(p)
 		exists := err == nil
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fail(err)
+		}
+		if !exists && r.Base != "" { // deleted on disk since the editor read it
+			empty := ""
+			out.Conflict, out.Content = true, &empty
+			return out
 		}
 		if exists && r.Base != "" && sha(cur) != r.Base { // changed on disk since the editor read it
 			s := string(cur)
