@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS agent_sessions_updated ON agent_sessions (updated_at)
 CREATE UNIQUE INDEX IF NOT EXISTS agent_sessions_provider ON agent_sessions (host, provider, provider_session) WHERE provider_session != '';
 CREATE INDEX IF NOT EXISTS agent_sessions_review ON agent_sessions (review_of, id);
 
--- The command queue. Host agents pull their host's queued commands (GET /api/agent/commands) and report
+-- The command queue. Host agents pull their host's queued commands (POST /api/agent/poll) and report
 -- back; the hub's own agent reads the table directly. Rows are kept: this is also the command log.
 CREATE TABLE IF NOT EXISTS commands (
   id          INTEGER PRIMARY KEY,

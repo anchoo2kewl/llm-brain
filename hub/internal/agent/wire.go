@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -108,13 +107,17 @@ func NewHTTPHub(base string) *HTTPHub {
 	return &HTTPHub{Base: strings.TrimRight(base, "/"), Client: &http.Client{Timeout: 30 * time.Second}}
 }
 
+// PollRequest is the body of POST /api/agent/poll.
+type PollRequest struct {
+	Host    string  `json:"host"`
+	Version string  `json:"version"`
+	Running []int64 `json:"running"`
+}
+
 func (h *HTTPHub) Poll(ctx context.Context, host, version string, running []int64) ([]store.Command, error) {
-	ids := make([]string, len(running))
-	for i, id := range running {
-		ids[i] = strconv.FormatInt(id, 10)
-	}
-	q := url.Values{"host": {host}, "version": {version}, "running": {strings.Join(ids, ",")}}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, h.Base+"/api/agent/commands?"+q.Encode(), nil)
+	body, _ := json.Marshal(PollRequest{Host: host, Version: version, Running: running})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.Base+"/api/agent/poll", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	var out []store.Command
 	return out, h.do(req, &out)
 }
