@@ -28,6 +28,7 @@ type AgentSession struct {
 	Adopted         bool
 	Scratch         bool
 	Turns           int
+	CurrentCmd      int64 // the turn command whose reports move this session
 	LastResult      string
 	Error           string
 	CreatedAt       string
@@ -94,13 +95,13 @@ func insertID(ctx context.Context, tx *sql.Tx, q string, args ...any) (int64, er
 // ---------------------------------------------------------------- agent sessions
 
 const agentCols = `id, host, cwd, provider, model, perm, bypass_ok, title, provider_session, status, pid, review_of, adopted, scratch,
-	turns, last_result, error, created_at, updated_at`
+	turns, current_cmd, last_result, error, created_at, updated_at`
 
 func scanAgent(sc interface{ Scan(...any) error }) (AgentSession, error) {
 	var a AgentSession
 	var bypass, adopted, scratch int
 	err := sc.Scan(&a.ID, &a.Host, &a.Cwd, &a.Provider, &a.Model, &a.Perm, &bypass, &a.Title, &a.ProviderSession, &a.Status,
-		&a.PID, &a.ReviewOf, &adopted, &scratch, &a.Turns, &a.LastResult, &a.Error, &a.CreatedAt, &a.UpdatedAt)
+		&a.PID, &a.ReviewOf, &adopted, &scratch, &a.Turns, &a.CurrentCmd, &a.LastResult, &a.Error, &a.CreatedAt, &a.UpdatedAt)
 	a.BypassOK, a.Adopted, a.Scratch = bypass != 0, adopted != 0, scratch != 0
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
@@ -133,7 +134,7 @@ func (s *Store) CreateAgentSession(ctx context.Context, a AgentSession, first *C
 		if cid, err = queueTx(ctx, tx, *first); err != nil {
 			return 0, 0, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'queued', turns = turns + 1 WHERE id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'queued', turns = turns + 1, current_cmd = ? WHERE id = ?`, cid, id); err != nil {
 			return 0, 0, err
 		}
 	}
@@ -145,9 +146,9 @@ func (s *Store) AgentSession(ctx context.Context, id int64) (AgentSession, error
 }
 
 // AgentSessionByProvider finds the agent session driving a CLI session on a host.
-func (s *Store) AgentSessionByProvider(ctx context.Context, host, providerSession string) (AgentSession, error) {
-	return scanAgent(s.DB.QueryRowContext(ctx, `SELECT `+agentCols+` FROM agent_sessions WHERE host = ? AND provider_session = ?
-		AND provider_session != '' ORDER BY id LIMIT 1`, host, providerSession))
+func (s *Store) AgentSessionByProvider(ctx context.Context, host, provider, providerSession string) (AgentSession, error) {
+	return scanAgent(s.DB.QueryRowContext(ctx, `SELECT `+agentCols+` FROM agent_sessions WHERE host = ? AND provider = ?
+		AND provider_session = ? AND provider_session != ''`, host, provider, providerSession))
 }
 
 func (s *Store) AgentSessions(ctx context.Context, limit int) ([]AgentSession, error) {
@@ -200,6 +201,15 @@ type AgentUpdate struct {
 }
 
 func (s *Store) UpdateAgentSession(ctx context.Context, id int64, u AgentUpdate) error {
+	return updateAgent(ctx, s.DB, id, 0, u)
+}
+
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// updateAgent applies u; with onlyCmd > 0, only while that command is the session's current one.
+func updateAgent(ctx context.Context, x execer, id, onlyCmd int64, u AgentUpdate) error {
 	sets := []string{"updated_at = ?"}
 	args := []any{Now()}
 	add := func(col string, v any) {
@@ -224,9 +234,95 @@ func (s *Store) UpdateAgentSession(ctx context.Context, id int64, u AgentUpdate)
 	if u.Error != nil {
 		add("error", *u.Error)
 	}
+	q := `UPDATE agent_sessions SET ` + strings.Join(sets, ", ") + ` WHERE id = ?`
 	args = append(args, id)
-	_, err := s.DB.ExecContext(ctx, `UPDATE agent_sessions SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+	if onlyCmd > 0 {
+		q += ` AND current_cmd = ?`
+		args = append(args, onlyCmd)
+	}
+	_, err := x.ExecContext(ctx, q, args...)
 	return err
+}
+
+// FinalStatus: a command in one of these is finished and its record no longer changes.
+func FinalStatus(s string) bool {
+	switch s {
+	case "done", "failed", "stopped", "cancelled":
+		return true
+	}
+	return false
+}
+
+// ApplyReport records an executor's report on a command and moves its session, in one transaction. A
+// command that already finished is left alone, so a retried or late report is a no-op; and a turn's report
+// moves the session only while that turn is the session's current one, so an old turn can't overwrite a
+// newer one. It returns the command and whether the report was applied.
+func (s *Store) ApplyReport(ctx context.Context, id int64, status, result string, u AgentUpdate) (Command, bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Command{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := scanCmd(tx.QueryRowContext(ctx, `SELECT `+cmdCols+` FROM commands WHERE id = ?`, id))
+	if err != nil {
+		return c, false, err
+	}
+	if FinalStatus(c.Status) {
+		return c, false, nil
+	}
+	now := Now()
+	fin := ""
+	if FinalStatus(status) {
+		fin = now
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE commands SET status = ?, result = ?, updated_at = ?,
+		finished_at = CASE WHEN ? != '' THEN ? ELSE finished_at END WHERE id = ?`, status, result, now, fin, fin, id); err != nil {
+		return c, false, err
+	}
+	if c.Kind == "turn" && c.AgentID > 0 {
+		if u.ProviderSession != "" { // never take another session's CLI id (the unique index would refuse it)
+			var other int64
+			err := tx.QueryRowContext(ctx, `SELECT a.id FROM agent_sessions a, agent_sessions me WHERE me.id = ? AND a.id != me.id
+				AND a.host = me.host AND a.provider = me.provider AND a.provider_session = ?`, c.AgentID, u.ProviderSession).Scan(&other)
+			if err == nil {
+				u.ProviderSession = ""
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return c, false, err
+			}
+		}
+		if err := updateAgent(ctx, tx, c.AgentID, c.ID, u); err != nil {
+			return c, false, err
+		}
+	}
+	c.Status = status
+	return c, true, tx.Commit()
+}
+
+// AdoptAgentSession returns the agent session for a's CLI session (host, provider, provider_session),
+// creating it as a when there is none, atomically.
+func (s *Store) AdoptAgentSession(ctx context.Context, a AgentSession) (int64, bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var id int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM agent_sessions WHERE host = ? AND provider = ? AND provider_session = ?`,
+		a.Host, a.Provider, a.ProviderSession).Scan(&id)
+	if err == nil {
+		return id, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+	now := Now()
+	id, err = insertID(ctx, tx, `INSERT INTO agent_sessions (host, cwd, provider, model, perm, bypass_ok, title, provider_session,
+		status, adopted, scratch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', 1, ?, ?, ?)`,
+		a.Host, a.Cwd, a.Provider, a.Model, a.Perm, b2i(a.BypassOK), a.Title, a.ProviderSession, b2i(a.Scratch), now, now)
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, tx.Commit()
 }
 
 // QueueTurn queues a command for an agent session and marks it queued, unless a turn is already queued or
@@ -251,8 +347,8 @@ func (s *Store) QueueTurn(ctx context.Context, c Command) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'queued', turns = turns + 1, error = '', updated_at = ?
-		WHERE id = ?`, Now(), c.AgentID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'queued', turns = turns + 1, error = '', current_cmd = ?,
+		updated_at = ? WHERE id = ?`, id, Now(), c.AgentID); err != nil {
 		return 0, err
 	}
 	return id, tx.Commit()
@@ -373,7 +469,8 @@ func (s *Store) FinishCommand(ctx context.Context, id int64, status, result stri
 		fin = now
 	}
 	_, err := s.DB.ExecContext(ctx, `UPDATE commands SET status = ?, result = ?, updated_at = ?,
-		finished_at = CASE WHEN ? != '' THEN ? ELSE finished_at END WHERE id = ?`, status, result, now, fin, fin, id)
+		finished_at = CASE WHEN ? != '' THEN ? ELSE finished_at END
+		WHERE id = ? AND status NOT IN ('done', 'failed', 'stopped', 'cancelled')`, status, result, now, fin, fin, id)
 	return err
 }
 

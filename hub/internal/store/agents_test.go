@@ -63,7 +63,7 @@ func TestCommandQueue(t *testing.T) {
 	if n, _ := st.CancelQueued(ctx, id); n != 1 {
 		t.Fatalf("cancel: %d", n)
 	}
-	got, err := st.AgentSessionByProvider(ctx, "studio", "uuid-1")
+	got, err := st.AgentSessionByProvider(ctx, "studio", "claude", "uuid-1")
 	if err != nil || got.ID != id {
 		t.Fatalf("by provider: %+v %v", got, err)
 	}
@@ -93,5 +93,92 @@ func TestPromptsAndHosts(t *testing.T) {
 	h, err := st.AgentHost(ctx, "laptop")
 	if err != nil || !h.Live() || len(h.Folders) != 1 || len(h.Providers) != 1 || h.Roots[0] != "/w" {
 		t.Fatalf("%+v %v", h, err)
+	}
+}
+
+func TestReportsAreIdempotentAndScopedToTheCurrentTurn(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	id, c1, err := st.CreateAgentSession(ctx, AgentSession{Host: "studio", Cwd: "/w", Provider: "claude", Perm: "acceptEdits"},
+		&Command{Host: "studio", Kind: "turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := st.ApplyReport(ctx, c1, "done", `{}`, AgentUpdate{Status: "idle", ProviderSession: "uuid-1"}); err != nil || !ok {
+		t.Fatalf("first report: %v %v", ok, err)
+	}
+	c2, err := st.QueueTurn(ctx, Command{Host: "studio", Kind: "turn", AgentID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first turn's final report arrives again (a retry after a lost response): nothing changes.
+	for _, status := range []string{"done", "failed", "running"} {
+		if _, ok, err := st.ApplyReport(ctx, c1, status, `{}`, AgentUpdate{Status: "idle"}); err != nil || ok {
+			t.Fatalf("late %s report applied: %v %v", status, ok, err)
+		}
+	}
+	if a, _ := st.AgentSession(ctx, id); a.Status != "queued" || a.CurrentCmd != c2 {
+		t.Fatalf("session moved by an old report: %+v", a)
+	}
+	if c, _ := st.Command(ctx, c1); c.Status != "done" {
+		t.Fatalf("finished command rewritten: %+v", c)
+	}
+	// A command that isn't the session's current turn records its report but can't move the session.
+	x, _ := st.QueueCommand(ctx, Command{Host: "studio", Kind: "turn", AgentID: id})
+	if _, ok, _ := st.ApplyReport(ctx, x, "failed", `{}`, AgentUpdate{Status: "failed"}); !ok {
+		t.Fatal("not applied to its command")
+	}
+	if a, _ := st.AgentSession(ctx, id); a.Status != "queued" {
+		t.Fatalf("a stray command moved the session: %+v", a)
+	}
+	if _, ok, _ := st.ApplyReport(ctx, c2, "running", `{}`, AgentUpdate{Status: "running"}); !ok {
+		t.Fatal("current turn's report not applied")
+	}
+	if a, _ := st.AgentSession(ctx, id); a.Status != "running" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAdoptIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	a := AgentSession{Host: "laptop", Cwd: "/w", Provider: "codex", Perm: "acceptEdits", ProviderSession: "uuid-9"}
+	ids := make(chan int64, 8)
+	for range 8 {
+		go func() {
+			id, _, err := st.AdoptAgentSession(ctx, a)
+			if err != nil {
+				t.Error(err)
+			}
+			ids <- id
+		}()
+	}
+	first := <-ids
+	for range 7 {
+		if id := <-ids; id != first {
+			t.Fatalf("two rows: %d %d", first, id)
+		}
+	}
+	var n int
+	_ = st.DB.QueryRow(`SELECT count(*) FROM agent_sessions`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d rows", n)
+	}
+	// The unique index backs it up.
+	if _, _, err := st.CreateAgentSession(ctx, a, nil); err == nil {
+		t.Fatal("a second row for the same CLI session was accepted")
+	}
+	// Sessions without a CLI id yet don't collide.
+	a.ProviderSession = ""
+	for range 2 {
+		if _, _, err := st.CreateAgentSession(ctx, a, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ix := range []string{"agent_sessions_provider", "agent_sessions_review"} {
+		var name string
+		if err := st.DB.QueryRow(`SELECT name FROM sqlite_schema WHERE type = 'index' AND name = ?`, ix).Scan(&name); err != nil {
+			t.Errorf("index %s: %v", ix, err)
+		}
 	}
 }
