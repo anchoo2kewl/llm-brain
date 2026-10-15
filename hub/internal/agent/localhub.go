@@ -83,6 +83,12 @@ func (h *LocalHub) Report(ctx context.Context, id int64, r Report) error {
 		return err
 	} else if strings.HasPrefix(c.Kind, "term_") {
 		return h.termReport(ctx, c, r, string(body))
+	} else if c.Kind == KindToolUpdate {
+		if applied, err := h.S.FinishToolUpdate(ctx, id, r.Status, string(body)); err != nil || !applied || !r.Final() {
+			return err
+		}
+		h.logf("agent: tool update %d on %s %s%s", id, c.Host, r.Status, errSuffix(r.Error))
+		return nil
 	}
 	u := store.AgentUpdate{ProviderSession: r.SessionID, Cwd: r.Cwd}
 	zero, empty := 0, ""
@@ -136,6 +142,11 @@ func (h *LocalHub) Inventory(ctx context.Context, inv Inventory) error {
 	}
 	if err := h.S.SetAgentInventory(ctx, inv.Host, inv.Version, inv.Roots, inv.Folders, provs); err != nil {
 		return err
+	}
+	if inv.Tools != nil {
+		if err := h.S.SetAgentTools(ctx, inv.Host, inv.Tools); err != nil {
+			return err
+		}
 	}
 	if inv.Home != "" {
 		if len(inv.Places) > 200 {

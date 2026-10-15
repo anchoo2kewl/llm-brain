@@ -42,8 +42,8 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-slot-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}
 .ws-slot-meta{color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
 .ws-btn{background:none;border:0;color:var(--mut);padding:0 4px;font-size:14px;cursor:pointer;text-decoration:none}.ws-btn:hover{color:var(--fg)}
-.ws-slot-body{flex:1;min-height:0;padding:4px 2px 2px 6px;background:#fff}
-@media (prefers-color-scheme:dark){.ws-slot-body{background:#0d1117}}
+.ws-slot-body{flex:1;min-height:0;padding:4px 2px 2px 6px;background:var(--term-bg)}
+
 .ws-slot-body .termpane-x{height:100%}
 .ws-slot-msg:empty{display:none}.ws-slot-msg{font-size:12px;color:var(--mut);padding:2px 8px}
 .ws-slot-empty{position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:6px;padding:20px;text-align:center}
@@ -57,7 +57,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-sect{list-style:none;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);padding:12px 10px 4px;cursor:help}
 .sesspane iframe{width:100%;height:100%;border:0;background:var(--bg)}
 /* where a terminal runs: hub terminals (blue) vs sessions started outside the hub (violet) */
-:root{--ext:#7c3aed}@media (prefers-color-scheme:dark){:root{--ext:#a78bfa}}
+
 .ws-badges{display:flex;gap:4px;flex-wrap:wrap;margin:3px 0 0 15px}.ws-slot-head .ws-badges{margin:0;flex:none}
 .bdg{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:4px;padding:1px 5px;line-height:1.5;border:1px solid transparent}
 .bdg.hub{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}

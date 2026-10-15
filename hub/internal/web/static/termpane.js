@@ -10,7 +10,7 @@
 (function () {
   "use strict";
   var enc = new TextEncoder();
-  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  var dark = window.hubDark ? window.hubDark() : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   window.TermPane = function (opts) {
     var id = opts.id, self = this;

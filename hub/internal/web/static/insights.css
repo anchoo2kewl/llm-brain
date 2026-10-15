@@ -1,7 +1,5 @@
 /* insights: charts, KPI tiles, callouts. Series colours are the categorical slots s0..s7 (fixed order, validated
    for colour-vision deficiency on both surfaces); marks paint with currentColor, so a class sets the colour. */
-:root{--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;--c6:#6250d6;--c7:#e34948;--grid:#e6ebf2;--track:#e8edf4}
-@media (prefers-color-scheme:dark){:root{--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;--grid:#26324a;--track:#26324a}}
 .s0{color:var(--c0)}.s1{color:var(--c1)}.s2{color:var(--c2)}.s3{color:var(--c3)}.s4{color:var(--c4)}.s5{color:var(--c5)}.s6{color:var(--c6)}.s7{color:var(--c7)}
 svg .ok,.g-ok,.sw.ok{color:var(--ok)}svg .warn,.g-warn,.sw.warn{color:var(--warn)}svg .bad,.g-bad,.sw.bad{color:var(--bad)}svg .mut,.sw.mut{color:var(--mut)}
 

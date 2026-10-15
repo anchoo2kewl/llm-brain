@@ -1,0 +1,61 @@
+{{define "content"}}
+<div class="top"><div><p class="eyebrow">Settings</p><h1>Updates</h1><p class="mut">Keep Homebrew, Claude Code, Codex, Gemini CLI and the rest current on every Mac. The agent on each host runs the update the same way the tool was installed.</p></div>
+<div class="meta"><a href="/settings">← Settings</a></div></div>
+{{if .Saved}}<p class="ok" role="status">Saved.</p>{{end}}
+{{if .Queued}}<p class="ok" role="status">Update queued on {{.Queued}}. This page refreshes until it's done.</p>{{end}}
+{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}
+
+<section class="panel">
+<form method="post" action="/settings/updates">
+<div class="panel-heading"><h2>Daily update</h2>{{if .Set.Auto}}<span class="chip s-done">on</span>{{else}}<span class="chip s-idle">off</span>{{end}}</div>
+<label class="switch"><input type="checkbox" name="auto" value="1" {{if .Set.Auto}}checked{{end}}> <span>Update automatically once a day</span></label>
+<p class="field"><label for="hour">After</label>
+<select id="hour" name="hour">{{range .Hours}}<option value="{{.}}" {{if eq . $.Set.Hour}}selected{{end}}>{{printf "%02d:00" .}}</option>{{end}}</select>
+<span class="mut small">{{.TZ}}, the hub's time. A Mac that's asleep then is updated when it's back that day.</span></p>
+<h3>Tools</h3>
+<div class="checks">{{range .Opts}}<label><input type="checkbox" name="tool" value="{{.Name}}" {{if .On}}checked{{end}}> {{.Label}}</label>{{end}}</div>
+{{if .Hosts}}<h3>Hosts</h3>
+<div class="checks">{{range .Hosts}}<input type="hidden" name="host" value="{{.Host}}"><label><input type="checkbox" name="daily" value="{{.Host}}" {{if not .Skip}}checked{{end}}> {{.Host}}</label>{{end}}</div>{{end}}
+<p class="actions"><button type="submit" class="primary">Save</button></p>
+</form>
+</section>
+
+<section class="panel">
+<div class="panel-heading"><h2>Update now</h2>
+<form method="post" action="/settings/updates/run"><button type="submit" class="primary">Update every host</button></form></div>
+{{if not .Hosts}}<p class="empty">No host agent has run yet.</p>{{end}}
+<div class="cards">
+{{range .Hosts}}{{$h := .}}
+<article class="card">
+<header class="card-head"><span class="dot{{if not .Live}} off{{end}}" aria-hidden="true"></span><strong>{{.Host}}</strong>
+{{if .Busy}}<span class="chip s-working">updating…</span>{{else if not .Live}}<span class="chip s-idle">offline</span>{{end}}
+{{if .Last}}<span class="mut small">daily: {{.Last}}</span>{{end}}</header>
+{{if .Tools}}<ul class="rows">
+{{range .Tools}}<li class="row"><span class="grow"><strong>{{.Name}}</strong> <span class="mut">{{if .Version}}{{.Version}}{{else}}?{{end}}</span>
+<span class="mut small">{{if .Updatable}}{{.Method}}{{else}}installed some other way{{end}}</span></span>
+{{if and .Updatable $h.Live (not $h.Busy)}}<form method="post" action="/settings/updates/run"><input type="hidden" name="host" value="{{$h.Host}}"><input type="hidden" name="tool" value="{{.Name}}"><button type="submit" class="ghost">Update</button></form>{{end}}</li>{{end}}
+</ul>{{else}}<p class="mut small">{{if .Live}}Waiting for this host's list of tools (it comes with the agent's next check-in; an older agent needs <code>bin/hub</code> rebuilt).{{else}}Offline.{{end}}</p>{{end}}
+{{if and .Live (not .Busy)}}<form method="post" action="/settings/updates/run" class="actions"><input type="hidden" name="host" value="{{.Host}}"><button type="submit">Update {{.Host}}</button></form>{{end}}
+</article>{{end}}
+</div>
+</section>
+
+<section class="panel">
+<div class="panel-heading"><h2>History</h2></div>
+{{if not .Runs}}<p class="empty">Nothing has been updated yet.</p>{{end}}
+<ul class="rows">
+{{range .Runs}}<li class="row block">
+<div class="row-head"><span class="chip s-{{state .Status}}">{{stateWord .Status}}</span><strong>{{.Host}}</strong><span class="mut small">{{if .Auto}}daily{{else}}by hand{{end}} · {{ago .CreatedAt}}</span></div>
+{{if .Error}}<p class="bad small">{{.Error}}</p>{{end}}
+{{if .Results}}<ul class="sub">{{range .Results}}<li><strong>{{.Name}}</strong>
+{{if .Skip}}<span class="mut">skipped: {{.Skip}}</span>
+{{else if .Changed}}<span class="ok">{{.Before}} → {{.After}}</span>
+{{else if .OK}}<span class="mut">{{.After}}, already current</span>
+{{else}}<span class="bad">failed</span>{{end}}
+{{if .Output}}<details><summary class="small">output</summary><pre>{{.Output}}</pre></details>{{end}}</li>{{end}}</ul>
+{{else if not (final .Status)}}<p class="mut small">Updating {{range $i, $t := .Tools}}{{if $i}}, {{end}}{{$t}}{{end}}…</p>{{end}}
+</li>{{end}}
+</ul>
+</section>
+{{if .Pending}}<meta data-refresh="5">{{end}}
+{{end}}

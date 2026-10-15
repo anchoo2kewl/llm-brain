@@ -53,7 +53,7 @@ func TestPagesEscapeTranscripts(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	for _, p := range []string{"/", "/sessions", "/sessions/1", "/search?q=alert", "/runs", "/hosts", "/sessions/1/more?after=0"} {
+	for _, p := range []string{"/", "/fleet", "/inbox", "/now", "/settings", "/offline", "/manifest.webmanifest", "/sw.js", "/sessions", "/sessions/1", "/search?q=alert", "/runs", "/hosts", "/sessions/1/more?after=0"} {
 		resp, err := http.Get(ts.URL + p)
 		if err != nil {
 			t.Fatal(err)
@@ -66,7 +66,7 @@ func TestPagesEscapeTranscripts(t *testing.T) {
 		if strings.Contains(string(body), evil) {
 			t.Fatalf("%s: unescaped transcript text", p)
 		}
-		if p != "/" && p != "/runs" && p != "/hosts" && !strings.Contains(string(body), "&lt;script&gt;") {
+		if p != "/" && p != "/fleet" && p != "/inbox" && p != "/now" && p != "/settings" && p != "/offline" && p != "/manifest.webmanifest" && p != "/sw.js" && p != "/runs" && p != "/hosts" && !strings.Contains(string(body), "&lt;script&gt;") {
 			t.Fatalf("%s: transcript text missing", p)
 		}
 	}
@@ -95,7 +95,7 @@ func TestOverviewInspectionData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/", "/?fragment=1"} {
+	for _, path := range []string{"/fleet", "/fleet?fragment=1"} {
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		body := w.Body.String()

@@ -1,6 +1,6 @@
 /* terminals (terminals.go, term.js) */
-.term{height:calc(100vh - 330px);min-height:320px;border:1px solid var(--line);border-radius:10px;padding:6px;background:#fff;overflow:hidden}
-@media (prefers-color-scheme:dark){.term{background:#0d1117}}
+.term{height:calc(100vh - 330px);min-height:320px;border:1px solid var(--line);border-radius:10px;padding:6px;background:var(--term-bg);overflow:hidden}
+
 .term .xterm,.termpane-x,.termpane-x .xterm{height:100%}
 .termmsg{min-height:1.2em;margin:4px 2px}
 .termbar{margin:6px 0 8px}

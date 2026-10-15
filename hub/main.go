@@ -202,7 +202,10 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 		}
 		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg, AssetDir: filepath.Join(c.state, "assets")}
 	}
-	go srv.RunHarvest(ctx, time.Minute) // keep a copy of every document a session writes
+	go srv.RunHarvest(ctx, time.Minute)                       // keep a copy of every document a session writes
+	go (&agent.Updater{S: st, Log: lg}).Run(ctx, time.Minute) // the daily tool update, when it's on
+	srv.Push = &web.Push{S: st, Log: lg}
+	go srv.RunEvents(ctx, 5*time.Second) // the live stream (badges, inbox) and push notifications
 	var ex *agent.Executor
 	exDone := make(chan struct{})
 	if c.agent {

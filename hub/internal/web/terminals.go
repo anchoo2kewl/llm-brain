@@ -212,7 +212,7 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 		Err   string
 		Hosts []termHost
 		CLIs  []cli
-	}{page{Title: "New terminal", Nav: "chats"}, f, errMsg, hs, termCLIs})
+	}{page{Title: "New terminal", Nav: "new"}, f, errMsg, hs, termCLIs})
 }
 
 func (s *Server) newTerminalPost(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +273,7 @@ func (s *Server) terminalPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.markSeen(r.Context(), "t:"+strconv.FormatInt(id, 10))
 	// xterm.js writes its theme into a <style> element, and the websocket is same-host ws://.
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' ws://"+r.Host+" wss://"+r.Host)
 	s.render(w, "terminal", "layout", struct {
@@ -282,7 +283,7 @@ func (s *Server) terminalPage(w http.ResponseWriter, r *http.Request) {
 		Attach   string
 		HostLive bool
 		Err      string
-	}{page{Title: t.Title, Nav: "chats"}, t, agent.TermProviderName(t.Provider), agent.AttachCommand(t.ID),
+	}{page{Title: t.Title, Nav: "now"}, t, agent.TermProviderName(t.Provider), agent.AttachCommand(t.ID),
 		s.Agents.Ctl.HostLive(r.Context(), t.Host), r.URL.Query().Get("err")})
 }
 

@@ -394,7 +394,7 @@ func newRig(t *testing.T) *rig {
 	repo, _ = filepath.EvalSymlinks(repo)
 	run := &fakeRunner{out: map[string]string{"claude": fixture(t, "claude_stream.jsonl"), "codex": fixture(t, "codex_exec.jsonl")}}
 	hub := &LocalHub{S: st}
-	ex := &Executor{Host: "studio", Version: "test", Hub: hub, Roots: NewRoots([]string{root}), StateDir: t.TempDir(), Runner: run,
+	ex := &Executor{Host: "studio", Version: "test", Hub: hub, FindTools: noTools, Roots: NewRoots([]string{root}), StateDir: t.TempDir(), Runner: run,
 		Providers: []string{"claude", "codex"}}
 	ex.init()
 	if err := hub.Inventory(context.Background(), ex.inventory(context.Background())); err != nil {

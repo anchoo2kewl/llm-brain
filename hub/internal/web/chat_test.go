@@ -74,7 +74,7 @@ func chatServer(t *testing.T) (*Server, *store.Store, *httptest.Server) {
 func TestChatPagesNeverShowToken(t *testing.T) {
 	_, _, ts := chatServer(t)
 	defer ts.Close()
-	for _, p := range []string{"/settings/slack", "/chat", "/chat?src=C0000000001", "/chat?src=mentions", "/", "/api/chat/me",
+	for _, p := range []string{"/settings/slack", "/chat", "/chat?src=C0000000001", "/chat?src=mentions", "/", "/fleet", "/inbox", "/api/chat/me",
 		"/api/chat/messages", "/settings/slack?err=x"} {
 		resp, err := http.Get(ts.URL + p)
 		if err != nil {
@@ -108,7 +108,7 @@ func TestChatPagesNeverShowToken(t *testing.T) {
 		!strings.Contains(b, "acme.slack.com/archives/C0000000001/p1792012200000100") || !strings.Contains(b, "mentions you") {
 		t.Errorf("chat page: %s", b)
 	}
-	if b := get(t, ts.URL+"/"); !strings.Contains(b, "From Slack: 2 messages in 24h") && !strings.Contains(b, "From Slack: 0 messages in 24h") {
+	if b := get(t, ts.URL+"/fleet"); !strings.Contains(b, "From Slack: 2 messages in 24h") && !strings.Contains(b, "From Slack: 0 messages in 24h") {
 		t.Errorf("overview has no chat count")
 	}
 }

@@ -1,7 +1,3 @@
-:root{--bg:#f7f7f5;--card:#fff;--fg:#1b1b1a;--mut:#6b6b66;--line:#e4e3de;--ok:#1f7a4d;--warn:#a15c00;--bad:#b42318;--acc:#2f5bd3;
---user:#eef3ff;--asst:#fff;--tool:#f4f3ef;--think:#faf6ec;--code:#f4f3ef}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1d1d1b;--fg:#ecebe6;--mut:#9a998f;--line:#2e2d2a;--ok:#4cc38a;--warn:#e0a24a;--bad:#f2766b;--acc:#7da2ff;
---user:#1c2333;--asst:#1d1d1b;--tool:#232320;--think:#26231c;--code:#232320}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .wrapw{max-width:1180px;margin:0 auto;padding:0 16px}
@@ -69,8 +65,6 @@ details>summary{cursor:pointer}
   .gsearch{max-width:none;flex-basis:100%}
 }
 /* Comfortable, full-width control room; details remain available at every screen size. */
-:root{--bg:#f3f5f9;--card:#fff;--fg:#182238;--mut:#5e6c82;--line:#dce3ee;--acc:#315bd6}
-@media(prefers-color-scheme:dark){:root{--bg:#101622;--card:#182131;--fg:#edf2fc;--mut:#a5b2c9;--line:#303e55;--acc:#9bb7ff}}
 body{font-size:15px;line-height:1.6}
 .wrapw{max-width:1600px;padding-left:32px;padding-right:32px}
 main.wrapw{padding-top:30px}

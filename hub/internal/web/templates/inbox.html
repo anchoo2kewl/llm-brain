@@ -1,0 +1,37 @@
+{{define "content"}}<div id="live" data-live="inbox" data-refresh="/inbox?fragment=1{{if .Filter}}&amp;state={{.Filter}}{{end}}">
+<div class="top"><div><p class="eyebrow">What needs you</p><h1>Inbox</h1>
+<p class="mut">{{if .All}}{{.All}} {{if eq .All 1}}thing{{else}}things{{end}} across your agents, PRs and chat{{else}}Agents that are waiting for you, PRs to review, blocked issues and failures show up here.{{end}}{{if .Running.Total}} · <a href="/now">{{.Running.Total}} running now</a>{{end}}</p></div>
+<div class="head-actions"><a class="btn" href="/new">+ New</a></div></div>
+
+{{if .All}}<nav class="seg" aria-label="Filter">
+<a href="/inbox" {{if not .Filter}}class="on" aria-current="page"{{end}}>All<span class="n">{{.All}}</span></a>
+{{with index .In.Counts "waiting"}}<a href="/inbox?state=waiting" {{if eq $.Filter "waiting"}}class="on" aria-current="page"{{end}}>Waiting<span class="n">{{.}}</span></a>{{end}}
+{{with index .In.Counts "review"}}<a href="/inbox?state=review" {{if eq $.Filter "review"}}class="on" aria-current="page"{{end}}>Review<span class="n">{{.}}</span></a>{{end}}
+{{with index .In.Counts "blocked"}}<a href="/inbox?state=blocked" {{if eq $.Filter "blocked"}}class="on" aria-current="page"{{end}}>Blocked<span class="n">{{.}}</span></a>{{end}}
+{{with index .In.Counts "failed"}}<a href="/inbox?state=failed" {{if eq $.Filter "failed"}}class="on" aria-current="page"{{end}}>Failed<span class="n">{{.}}</span></a>{{end}}
+</nav>{{end}}
+
+{{if .In.Items}}<ul class="ibx">
+{{range .In.Items}}{{$it := .}}<li class="ibx-item s-{{.State}}" data-key="{{.Key}}" data-at="{{.At}}">
+<div class="ibx-main">
+<div class="ibx-top"><span class="chip s-{{.State}}">{{stateWord .State}}</span><span class="ibx-kind">{{.Kind}}</span></div>
+<a class="ibx-title" href="{{.Link}}" data-open {{if .Ext}}rel="noreferrer" target="_blank"{{end}}>{{.Title}}</a>
+{{if .Detail}}<p class="ibx-detail">{{.Detail}}</p>{{end}}
+<div class="ibx-meta">{{if .Where}}{{.Where}} · {{end}}{{ago .At}}</div>
+</div>
+<div class="ibx-side"><div class="ibx-acts">
+<a class="btn small" href="{{.Link}}" data-open {{if .Ext}}rel="noreferrer" target="_blank"{{end}}>Open{{if .Ext}} ↗{{end}}</a>
+<form method="post" action="/inbox/seen" data-dismiss><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="at" value="{{.At}}"><input type="hidden" name="back" value="/inbox"><button type="submit" class="small ghost" aria-label="Dismiss {{.Title}}">Dismiss</button></form>
+</div></div>
+{{if .TermID}}<div class="ibx-reply" data-term="{{.TermID}}">
+<div class="quick" role="group" aria-label="Quick replies">{{range $.Replies}}<button type="button" class="small" data-say="{{.}}">{{.}}</button>{{end}}<button type="button" class="small" data-keys="esc">Esc</button></div>
+<form class="say" data-term-say><input name="text" placeholder="Reply…" aria-label="Reply" enterkeyhint="send" autocomplete="off" autocapitalize="off"><button type="submit" class="primary small">Send</button></form>
+</div>{{else if .ReplyTo}}<div class="ibx-reply">
+<div class="quick" role="group" aria-label="Quick replies">{{range $.Replies}}<form method="post" action="{{$it.ReplyTo}}" data-reply><input type="hidden" name="prompt" value="{{.}}"><button type="submit" class="small">{{.}}</button></form>{{end}}</div>
+<form class="say" method="post" action="{{.ReplyTo}}" data-reply><input name="prompt" placeholder="Reply to {{.Provider}}…" aria-label="Reply" enterkeyhint="send" required><button type="submit" class="primary small">Send</button></form>
+</div>{{end}}
+</li>{{end}}
+</ul>
+{{else}}<div class="empty-state"><div class="big" aria-hidden="true">✓</div><h2>{{if .Filter}}Nothing {{.Filter}}{{else}}You're all caught up{{end}}</h2>
+<p>{{if .Filter}}<a href="/inbox">Show everything</a>{{else}}When an agent finishes and waits for you, a PR needs a review, or something fails, it shows up here{{if .Running.Total}}. Meanwhile <a href="/now">{{.Running.Total}} things are running</a>{{end}}.{{end}}</p></div>{{end}}
+</div>{{end}}

@@ -1,0 +1,49 @@
+/* llm-brain design tokens: the one source of colour, type, spacing, radius and motion for every page.
+   Light by default; dark follows the system unless Settings picks one (html[data-theme]). Text colours
+   meet WCAG AA (4.5:1) on --bg and --card in both themes. */
+:root{
+  color-scheme:light dark;
+  /* surfaces and text */
+  --bg:#f4f6fa;--card:#fff;--raised:#fff;--sunk:#eef1f6;--fg:#121a2b;--mut:#566278;--line:#dde3ec;--line-2:#c9d2df;
+  /* brand and meaning */
+  --acc:#4f46e5;--acc-fg:#fff;--acc-soft:#eceafe;--ok:#15803d;--warn:#b45309;--bad:#c2261b;--ext:#7c3aed;
+  /* the status language: working, waiting for you, blocked, done, failed, idle */
+  --st-working:#4f46e5;--st-waiting:#b45309;--st-blocked:#c2410c;--st-done:#15803d;--st-failed:#c2261b;--st-idle:#6b778c;--on-warn:#fff;
+  /* transcript blocks */
+  --user:#eef2ff;--asst:#fff;--tool:#f3f5f8;--think:#fbf7ec;--code:#f3f5f8;--term-bg:#fff;
+  /* charts (insights.css): categorical slots, validated for colour-vision deficiency */
+  --c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;--c6:#6250d6;--c7:#e34948;--grid:#e6ebf2;--track:#e8edf4;
+  /* type */
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --fs-xs:12px;--fs-sm:13px;--fs-md:15px;--fs-lg:18px;--fs-xl:24px;--fs-2xl:30px;
+  /* spacing (4 px grid), radius, elevation */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;
+  --r-sm:6px;--r-md:10px;--r-lg:14px;--r-xl:20px;--r-pill:999px;
+  --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --shadow-2:0 8px 28px rgba(16,24,40,.14);
+  /* motion */
+  --dur-1:120ms;--dur-2:200ms;--ease:cubic-bezier(.2,.8,.2,1);
+  /* touch */
+  --tap:44px;--bar-h:60px;--tabbar-h:64px;
+  --safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0d121c;--card:#151c2a;--raised:#1a2232;--sunk:#111826;--fg:#e8edf6;--mut:#9ba7bc;--line:#283246;--line-2:#36425a;
+  --acc:#8f96ff;--acc-fg:#0d121c;--acc-soft:#232a4a;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--ext:#a78bfa;
+  --st-working:#8f96ff;--st-waiting:#fbbf24;--st-blocked:#fb923c;--st-done:#4ade80;--st-failed:#f87171;--st-idle:#8592a8;--on-warn:#111;
+  --user:#1b2340;--asst:#151c2a;--tool:#182031;--think:#221f18;--code:#111826;--term-bg:#0d1117;
+  --c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;--grid:#26324a;--track:#26324a;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);--shadow-2:0 10px 30px rgba(0,0,0,.5);
+}}
+:root[data-theme=dark]{
+  --bg:#0d121c;--card:#151c2a;--raised:#1a2232;--sunk:#111826;--fg:#e8edf6;--mut:#9ba7bc;--line:#283246;--line-2:#36425a;
+  --acc:#8f96ff;--acc-fg:#0d121c;--acc-soft:#232a4a;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--ext:#a78bfa;
+  --st-working:#8f96ff;--st-waiting:#fbbf24;--st-blocked:#fb923c;--st-done:#4ade80;--st-failed:#f87171;--st-idle:#8592a8;--on-warn:#111;
+  --user:#1b2340;--asst:#151c2a;--tool:#182031;--think:#221f18;--code:#111826;--term-bg:#0d1117;
+  --c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;--grid:#26324a;--track:#26324a;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);--shadow-2:0 10px 30px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+:root[data-theme=light]{color-scheme:light}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms}}

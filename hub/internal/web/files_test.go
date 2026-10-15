@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
 // TestFilesEndToEnd: list, download (kept by the hub), keep, upload and the key-folder refusal, through a
@@ -33,7 +34,7 @@ func TestFilesEndToEnd(t *testing.T) {
 	rig.srv.StateDir = t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	state := t.TempDir()
-	ex := &agent.Executor{Host: "studio", Version: "test", Hub: rig.srv.Agents.Hub, StateDir: state, HubURL: rig.ts.URL,
+	ex := &agent.Executor{Host: "studio", Version: "test", Hub: rig.srv.Agents.Hub, FindTools: func(context.Context) []store.ToolInfo { return nil }, StateDir: state, HubURL: rig.ts.URL,
 		TmuxSocket: "llmb-files-test", Poll: 100 * time.Millisecond, Providers: []string{"claude"}, Log: log.New(io.Discard, "", 0)}
 	done := make(chan struct{})
 	go func() { defer close(done); ex.Run(ctx) }()

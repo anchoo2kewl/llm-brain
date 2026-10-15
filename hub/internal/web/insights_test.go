@@ -92,7 +92,7 @@ func TestInsightsPage(t *testing.T) {
 		}
 	}
 	// The overview shows KPI tiles.
-	if _, body := iget(t, ts.URL+"/"); !strings.Contains(body, `class="kpi"`) {
+	if _, body := iget(t, ts.URL+"/fleet"); !strings.Contains(body, `class="kpi"`) {
 		t.Error("overview has no KPI tiles")
 	}
 	_, body = iget(t, ts.URL+"/insights?range=24h")
