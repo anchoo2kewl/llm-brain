@@ -92,6 +92,21 @@ Setup: create a Slack app with the user scopes `channels:history groups:history 
 fleet tick | dispatch | babysit | review-prs | review-pr <url> | review <url> | status | labels | pause | resume | providers
 ```
 
+## Shared memory
+
+One memory every agent reads before it works and writes to as it learns, so a Codex worker doesn't rediscover what a Claude session found yesterday. Each memory is a lesson, not a transcript: a `fact`, `decision`, `gotcha`, `runbook` or `handoff`, scoped to a repo (and an issue, a PR, files) or a folder.
+
+- **Write:** `bin/brain-remember gotcha "RDS refuses IAM tokens on replication" "Use the password user for the replica slot." --issue 12`, or `POST /api/memory` with JSON. The hub checks it:
+  - kind and scope are valid, and the title and body are small (140 and 2,000 bytes);
+  - nothing looks like a credential (key prefixes, `password=…`, tokens in URLs, long random strings). Such a write is refused, and the refusal never repeats the value;
+  - an exact repeat in the same scope is a no-op, and a near-duplicate (70 % of the same words) supersedes the older memory instead of adding a second one;
+  - handoffs expire after 14 days and facts after 180; decisions, gotchas and runbooks don't expire.
+- **Read:** `bin/brain-context` prints the context pack for the current repo, issue (from `$BRAIN_ISSUE` or the branch name) and folder as markdown. `GET /api/memory/context?repo=&issue=&pr=&folder=&files=&q=&k=` gives JSON (`&format=md` gives markdown). Memories are ranked by scope (this issue, then the same files, this folder, this repo), kind, confidence and age. Anything that names a file, flag or function is marked "verify before use". The pack is scored in memory on the hub (a few ms); TaskAI's hybrid search is merged in when it answers within 150 ms, and is otherwise cached for the next pack.
+- **Awareness:** the pack also says who else is on it right now: live sessions, running fleet workers and open hub terminals in the same issue, PR, folder or repo. `GET /api/presence?repo=&issue=&cwd=` gives the same as a feed; `/memory` shows it with the recent memories.
+- **Fleet:** with `memory.enabled: true`, `bin/llm-run` adds the pack and the `brain-remember` instructions to every worker's prompt. It fails open: no hub, no change.
+- **TaskAI:** every memory is also one page in TaskAI's "Agent memory" project (`--memory-project`, found or created on first use), so people can read and search it there. The hub is the outbox: a write lands on the hub first and is forwarded with retries (30 s doubling to an hour). A superseded memory's page is retitled `[superseded]`. The key is `TASKAI_API_KEY` in `~/.config/llm-brain/taskai.env` (or `TASKAI_X_API_KEY` in `secrets.env`); with no key, memories stay on the hub.
+- **Claude's own memories:** `hub memory import [--to http://<hub>:8787]` imports `~/.claude/projects/*/memory/*.md` on that Mac. It is safe to run again: an unchanged file is a no-op, an edited file supersedes its earlier import, and a file an agent has since improved is left alone.
+
 ## Hub (`hub/`)
 
 Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite), server-rendered, no build step. Binds only to 127.0.0.1 and the machine's Tailscale IP; ship requests are accepted only from loopback and 100.64.0.0/10.

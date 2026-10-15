@@ -104,7 +104,7 @@ cmd_dispatch() {
       BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" \
       render "$BRAIN_DIR/prompts/implement.md" >"$pf"
-    spawn "issue-$num" "$(implementer)" write "$(cfg '.limits.implement_timeout')" "$pf"
+    BRAIN_REPO="$repo" BRAIN_ISSUE="$num" spawn "issue-$num" "$(implementer)" write "$(cfg '.limits.implement_timeout')" "$pf"
     slots=$((slots - 1))
   done < <(intake_queue)
 }
@@ -157,7 +157,7 @@ cmd_babysit() {
       MARKER="$(cfg '.pr_marker')${issue:-?}" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
       render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
-    spawn "$key" "$(implementer)" write "$(cfg '.limits.babysit_timeout')" "$pf"
+    BRAIN_REPO="${refs%%#*}" BRAIN_PR="${refs##*#}" spawn "$key" "$(implementer)" write "$(cfg '.limits.babysit_timeout')" "$pf"
   done
 }
 
@@ -248,7 +248,7 @@ cmd_review_prs() {
     PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
-    SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
+    BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
   done
 }
 
