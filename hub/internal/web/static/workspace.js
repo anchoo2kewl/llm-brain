@@ -155,6 +155,9 @@
     li.addEventListener("click", function () { show(id); });
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
+    var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
+    pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
+    top.insertBefore(pen, num);
     items[id] = li;
     li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges };
     return li;
@@ -202,7 +205,7 @@
       if (!ok || !title || title === infos[id].title) { span.textContent = infos[id].title; return; }
       var body = new URLSearchParams(); body.set("title", title);
       fetch(infos[id].kind === "session" ? "/sessions/" + infos[id].sid + "/rename" : "/terminals/" + id + "/rename", { method: "POST", body: body }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j.title) { infos[id].title = j.title; paintSlot(slotOf(id)); }
+        if (j.title) { infos[id].title = j.title; paintSlot(shownAt(id)); }
         paintItem(id);
       });
     }
@@ -258,6 +261,8 @@
     grid.appendChild(root);
     var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i };
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
+    title.title = "Click to rename";
+    title.addEventListener("click", function (e) { e.stopPropagation(); if (s.id && infos[s.id]) rename(s.id, title); });
     zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
@@ -284,7 +289,7 @@
     if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.badges.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
     badgesFor(s.badges, t);
     var stt = stateOf(id);
-    s.title.textContent = t.title || "terminal " + id;
+    if (s.title.getAttribute("contenteditable") !== "true") s.title.textContent = t.title || "terminal " + id;
     s.meta.textContent = t.cli + " · " + t.cwd;
     s.dot.className = "dot-s " + stt;
     s.dot.title = dotTitle[stt] || stt;
