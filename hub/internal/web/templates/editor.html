@@ -1,17 +1,47 @@
 {{define "content"}}<link rel="stylesheet" href="/static/editor.css">
 <div class="ed" id="ed" data-host="{{.Host}}" data-root="{{.Root}}" data-file="{{.File}}">
-  <aside class="ed-side">
-    <div class="ed-head"><b class="ed-root" id="edroot" title="{{.Root}}">{{.Root}}</b><span class="ed-host">{{.Host}}</span></div>
-    <div class="ed-find"><input id="edq" placeholder="Go to file…  (⌘P)" autocomplete="off" spellcheck="false" aria-label="Go to file"></div>
-    <ul class="ed-results" id="edresults" hidden></ul>
+  <aside class="ed-side" id="edside">
+    <div class="ed-head"><b class="ed-root" id="edroot">{{.Root}}</b><span class="ed-host" id="edhost">{{.Host}}</span></div>
+    <div class="ed-sect"><span>Open files</span></div>
+    <ul class="ed-open" id="edopen"></ul>
+    <div class="ed-sect"><span>Folders</span><span class="grow"></span>
+      <button type="button" class="ed-ib" data-act="newfile" title="New file (⌥N)">＋</button>
+      <button type="button" class="ed-ib" data-act="newdir" title="New folder">⊞</button>
+      <button type="button" class="ed-ib" data-act="refresh" title="Refresh">↻</button>
+      <button type="button" class="ed-ib" data-act="collapse" title="Collapse all">⊟</button>
+    </div>
     <div class="ed-tree" id="edtree" role="tree"></div>
   </aside>
+  <div class="ed-resize" id="edresize" title="Drag to resize · ⌘K ⌘B hides the side bar"></div>
   <main class="ed-main">
     <div class="ed-tabs" id="edtabs" role="tablist"></div>
+    <div class="ed-crumbs" id="edcrumbs"></div>
     <div class="ed-banner" id="edbanner" hidden></div>
-    <div class="ed-editor" id="edmonaco"></div>
-    <div class="ed-status"><span id="edstate">connecting…</span><span class="grow"></span><span id="edpos"></span><span id="edlang"></span></div>
+    <div class="ed-groups" id="edgroups"><div class="ed-editor" id="edm0"></div><div class="ed-editor" id="edm1" hidden></div></div>
+    <section class="ed-panel" id="edfind" hidden>
+      <div class="ed-fbar"><b>Find in files</b>
+        <input id="edfq" placeholder="Find…" spellcheck="false" autocomplete="off" aria-label="Find in files">
+        <label title="Regular expression"><input type="checkbox" id="edfre"> .*</label>
+        <label title="Match case"><input type="checkbox" id="edfcase"> Aa</label>
+        <button type="button" id="edfgo">Find</button><span class="mut small" id="edfcount"></span><span class="grow"></span>
+        <button type="button" class="ed-ib" id="edfclose" title="Close (Esc)">✕</button></div>
+      <div class="ed-fres" id="edfres"></div>
+    </section>
+    <div class="ed-status">
+      <span id="edstate">connecting…</span><span id="edbranch"></span><span class="grow"></span>
+      <button type="button" class="ed-sb" id="edpos" title="Go to line (⌃G)"></button>
+      <button type="button" class="ed-sb" id="edindent" title="Click: spaces / tabs and width"></button>
+      <button type="button" class="ed-sb" id="edeol" title="Click: switch line endings"></button>
+      <span class="ed-sb">UTF-8</span>
+      <button type="button" class="ed-sb" id="edlang" title="Click: change syntax"></button>
+      <span class="ed-sb" id="edsize"></span>
+      <button type="button" class="ed-sb" id="edkeysbtn" title="Keyboard shortcuts">⌘?</button>
+    </div>
   </main>
+  <div class="ed-pal" id="edpal" hidden><input id="edpq" spellcheck="false" autocomplete="off" aria-label="Goto anything"><ul id="edpl"></ul><div class="ed-pal-hint" id="edph"></div></div>
+  <ul class="ed-menu" id="edmenu" hidden></ul>
 </div>
+<dialog class="ed-keys" id="edkeys"><div class="row"><h2>Keyboard shortcuts</h2><span class="grow"></span><button type="button" id="edkeysclose" class="ed-ib">✕</button></div><div id="edkeyslist"></div>
+<p class="mut small">Sublime Text's keys, as far as a browser allows: ⌘W, ⌘T, ⌘N and ⌘⇧T belong to the browser, so close / new / reopen use ⌥ instead.</p></dialog>
 <script src="/static/monaco/vs/loader.js" defer></script><script src="/static/editor.js" defer></script>
 {{end}}

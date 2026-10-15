@@ -82,3 +82,38 @@ func TestFSSession(t *testing.T) {
 		t.Fatalf("reported twice: %+v", ch)
 	}
 }
+
+func TestFSSessionManage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "proj")
+	_ = os.MkdirAll(root, 0o755)
+	real, _ := filepath.EvalSymlinks(root)
+	f := &fsSession{root: real, watched: map[string]string{}}
+	str := func(s string) *string { return &s }
+	if r := f.handle(fsReq{Op: "create", Path: "docs/plan.md"}); r.Error != "" {
+		t.Fatalf("create: %+v", r)
+	}
+	f.handle(fsReq{Op: "write", Path: "docs/plan.md", Content: str("alpha\nBeta gamma\nbeta\n")})
+	if r := f.handle(fsReq{Op: "grep", Query: "beta"}); len(r.Hits) != 2 || r.Hits[0].Line != 2 || r.Hits[0].Col != 1 {
+		t.Fatalf("grep: %+v", r.Hits)
+	}
+	if r := f.handle(fsReq{Op: "grep", Query: "beta", Case: true}); len(r.Hits) != 1 {
+		t.Fatalf("grep case: %+v", r.Hits)
+	}
+	if r := f.handle(fsReq{Op: "grep", Query: `^\w+$`, Regex: true}); len(r.Hits) != 2 {
+		t.Fatalf("grep regex: %+v", r.Hits)
+	}
+	if r := f.handle(fsReq{Op: "rename", Path: "docs/plan.md", To: "docs/roadmap.md"}); r.Error != "" {
+		t.Fatalf("rename: %+v", r)
+	}
+	if r := f.handle(fsReq{Op: "delete", Path: "docs/roadmap.md"}); r.Error != "" {
+		t.Fatalf("delete: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".Trash", "roadmap.md")); err != nil {
+		t.Fatal("deleted file isn't in the Trash")
+	}
+	if r := f.handle(fsReq{Op: "delete", Path: ""}); r.Error == "" {
+		t.Fatal("deleted the root")
+	}
+}
