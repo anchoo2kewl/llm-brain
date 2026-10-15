@@ -1,0 +1,34 @@
+{{define "content"}}
+<div class="top"><h1>Memory</h1>
+<p class="meta">What agents learned, shared with every agent: they read the top memories for their repo and issue before a turn and write new ones as they learn. {{if .Synced}}Each memory is also a page in TaskAI's "Agent memory" project.{{else}}TaskAI sync is off (no key): memories stay on the hub.{{end}}</p></div>
+<div class="grid">
+  <div class="tile"><b>{{.Counts.Active}}</b><span>active</span></div>
+  <div class="tile"><b>{{.Counts.Superseded}}</b><span>superseded</span></div>
+  {{if .Synced}}<div class="tile"><b>{{.Counts.Synced}}</b><span>in TaskAI</span></div>
+  <div class="tile"><b>{{.Counts.Pending}}</b><span>waiting to sync{{if .Counts.Failing}}, <span class="bad">{{.Counts.Failing}} retrying</span>{{end}}</span></div>{{end}}
+  <div class="tile"><b>{{len .Presence}}</b><span>agents at work now</span></div>
+</div>
+
+<h2>Working now</h2>
+{{if .Presence}}<div class="wrap"><table><tr><th>Who</th><th>Host</th><th>On</th><th>Folder</th><th>Last active</th></tr>
+{{range .Presence}}<tr><td><a href="{{.Link}}">{{if .Provider}}{{.Provider}}{{else}}{{.Kind}}{{end}}</a> <span class="pill">{{.Kind}}</span></td><td>{{.Host}}</td>
+<td>{{if .Repo}}{{.Repo}}{{end}}{{if .Issue}} #{{.Issue}}{{end}}{{if .PR}} PR {{.PR}}{{end}}{{if .Title}} <span class="mut small">{{trunc 80 .Title}}</span>{{end}}</td>
+<td class="mut small">{{home .Folder}}{{if .Branch}} · {{.Branch}}{{end}}</td><td class="mut small nowrap">{{ago .Active}}</td></tr>{{end}}
+</table></div>{{else}}<p class="empty">No agent is working right now.</p>{{end}}
+
+<h2>Recent memories</h2>
+{{if .Memories}}<div class="wrap"><table><tr><th>Memory</th><th>Scope</th><th>By</th><th>When</th><th>TaskAI</th></tr>
+{{range .Memories}}<tr><td><span class="pill{{if eq .Kind "gotcha"}} warn{{end}}">{{.Kind}}</span> {{if ne .Status "active"}}<s class="mut">{{.Title}}</s> <span class="mut small">superseded by {{.Superseded}}</span>{{else}}<b>{{.Title}}</b>{{end}}
+<details><summary class="mut small">{{trunc 120 .Body}}</summary><pre>{{.Body}}</pre></details></td>
+<td class="small">{{.Scope.Label}}{{range .Scope.Files}}<br><code>{{.}}</code>{{end}}</td>
+<td class="mut small">{{.Author.Agent}}{{if .Author.Host}} on {{.Author.Host}}{{end}}{{if eq .Source "import"}} <span class="pill">import</span>{{end}}</td>
+<td class="mut small nowrap">{{ago .CreatedAt}}{{if not .ExpiresAt.IsZero}}<br>expires {{.ExpiresAt.Format "2006-01-02"}}{{end}}</td>
+<td class="small">{{if eq .SyncState "synced"}}{{if .PageID}}<span class="ok">page {{.PageID}}</span>{{else}}<span class="mut">—</span>{{end}}{{else if eq .SyncState "pending"}}<span class="{{if .LastError}}bad{{else}}warn{{end}}" title="{{.LastError}}">{{if .LastError}}retrying{{else}}pending{{end}}</span>{{else}}<span class="mut">off</span>{{end}}</td></tr>{{end}}
+</table></div>{{else}}<p class="empty">No memories yet. Agents write them with <code>POST /api/memory</code>; import Claude's own with <code>hub memory import</code>.</p>{{end}}
+
+<details class="block"><summary>API</summary>
+<pre>POST /api/memory              {"kind":"gotcha","title":"…","body":"…","scope":{"repo":"owner/name","issue":12,"files":["a/b.go"]},"author":{"agent":"claude-code","host":"studio","session":"…"},"confidence":"high"}
+GET  /api/memory/context?repo=owner/name&amp;issue=12&amp;files=a/b.go&amp;k=8[&amp;format=md]
+GET  /api/presence?repo=owner/name&amp;issue=12&amp;cwd=/path
+GET  /api/memory?limit=100</pre></details>
+{{end}}
