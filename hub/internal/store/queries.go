@@ -51,6 +51,7 @@ type Session struct {
 	LastAt       string
 	FileMtime    string
 	MessageCount int64
+	Name         string // given on the hub; wins over everything else
 	Live         bool
 	RunID        int64 // the fleet run this session belongs to, if any
 }
@@ -58,6 +59,8 @@ type Session struct {
 // DisplayTitle prefers a person's own words, then a generated title.
 func (s Session) DisplayTitle() string {
 	switch {
+	case s.Name != "":
+		return s.Name
 	case s.AutoTitle != "" && strings.HasPrefix(s.AgentName, "fleet-"):
 		return s.AutoTitle
 	case s.Title != "":
@@ -203,12 +206,12 @@ func (s *Store) RunLog(ctx context.Context, id int64) (log, status, ended string
 }
 
 const sessCols = `s.id, s.host, s.path, s.provider, s.session_uuid, s.parent_uuid, s.project, s.cwd, s.branch, s.model,
-	s.originator, s.title, s.auto_title, s.agent_name, s.first_at, s.last_at, s.file_mtime, s.message_count`
+	s.originator, s.title, s.auto_title, s.agent_name, s.first_at, s.last_at, s.file_mtime, s.message_count, s.name`
 
 func scanSession(sc interface{ Scan(...any) error }) (Session, error) {
 	var x Session
 	err := sc.Scan(&x.ID, &x.Host, &x.Path, &x.Provider, &x.UUID, &x.ParentUUID, &x.Project, &x.Cwd, &x.Branch, &x.Model,
-		&x.Originator, &x.Title, &x.AutoTitle, &x.AgentName, &x.FirstAt, &x.LastAt, &x.FileMtime, &x.MessageCount)
+		&x.Originator, &x.Title, &x.AutoTitle, &x.AgentName, &x.FirstAt, &x.LastAt, &x.FileMtime, &x.MessageCount, &x.Name)
 	x.Live = x.FileMtime >= ago(LiveWindow)
 	return x, err
 }
@@ -395,7 +398,7 @@ func (s *Store) queryHits(ctx context.Context, sqlq string, args ...any) ([]Hit,
 		x := &h.Session
 		if err := rows.Scan(&h.ID, &h.SessionID, &h.Role, &h.Kind, &meta, &h.TS, &h.Text, &h.ToolName, &h.ToolUseID, &h.ToolInput, &iserr,
 			&x.ID, &x.Host, &x.Path, &x.Provider, &x.UUID, &x.ParentUUID, &x.Project, &x.Cwd, &x.Branch, &x.Model,
-			&x.Originator, &x.Title, &x.AutoTitle, &x.AgentName, &x.FirstAt, &x.LastAt, &x.FileMtime, &x.MessageCount); err != nil {
+			&x.Originator, &x.Title, &x.AutoTitle, &x.AgentName, &x.FirstAt, &x.LastAt, &x.FileMtime, &x.MessageCount, &x.Name); err != nil {
 			return nil, err
 		}
 		h.Meta, h.IsError = meta != 0, iserr != 0

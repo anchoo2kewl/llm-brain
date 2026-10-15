@@ -201,7 +201,7 @@
       var title = span.textContent.trim();
       if (!ok || !title || title === infos[id].title) { span.textContent = infos[id].title; return; }
       var body = new URLSearchParams(); body.set("title", title);
-      fetch("/terminals/" + id + "/rename", { method: "POST", body: body }).then(function (r) { return r.json(); }).then(function (j) {
+      fetch(infos[id].kind === "session" ? "/sessions/" + infos[id].sid + "/rename" : "/terminals/" + id + "/rename", { method: "POST", body: body }).then(function (r) { return r.json(); }).then(function (j) {
         if (j.title) { infos[id].title = j.title; paintSlot(slotOf(id)); }
         paintItem(id);
       });

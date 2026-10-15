@@ -273,3 +273,59 @@ func (s *Store) RenameTerminal(ctx context.Context, id int64, title string) erro
 	_, err := s.DB.ExecContext(ctx, `UPDATE terminals SET title = ? WHERE id = ?`, title, id)
 	return err
 }
+
+// RenameSession names a transcript on the hub.
+func (s *Store) RenameSession(ctx context.Context, id int64, name string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE sessions SET name = ? WHERE id = ?`, name, id)
+	return err
+}
+
+// TerminalSession is the transcript a hub terminal is running: same Mac, folder and CLI, the first one to
+// start after the terminal was opened.
+func (s *Store) TerminalSession(ctx context.Context, t Terminal) (Session, error) {
+	return scanSession(s.DB.QueryRowContext(ctx, `SELECT `+sessCols+` FROM sessions s WHERE s.host = ? AND s.cwd = ? AND s.provider = ?
+		AND s.parent_uuid = '' AND s.first_at >= ? ORDER BY s.first_at LIMIT 1`, t.Host, t.Cwd, t.Provider, t.CreatedAt))
+}
+
+// SessionTerminal is the open hub terminal running this transcript, if any (the inverse of TerminalSession).
+func (s *Store) SessionTerminal(ctx context.Context, x Session) (Terminal, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND cwd = ? AND provider = ?
+		AND status IN ('starting', 'live') AND created_at <= ? ORDER BY created_at DESC`, x.Host, x.Cwd, x.Provider, x.FirstAt)
+	if err != nil {
+		return Terminal{}, err
+	}
+	var ts []Terminal
+	for rows.Next() {
+		t, err := scanTerm(rows)
+		if err != nil {
+			rows.Close()
+			return Terminal{}, err
+		}
+		ts = append(ts, t)
+	}
+	rows.Close()
+	for _, t := range ts {
+		if y, err := s.TerminalSession(ctx, t); err == nil && y.ID == x.ID {
+			return t, nil
+		}
+	}
+	return Terminal{}, ErrNotFound
+}
+
+// RenameAgentSession sets a task's title.
+func (s *Store) RenameAgentSession(ctx context.Context, id int64, title string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE agent_sessions SET title = ?, updated_at = ? WHERE id = ?`, title, Now(), id)
+	return err
+}
+
+// RenameLLMChat sets a model chat's title.
+func (s *Store) RenameLLMChat(ctx context.Context, id int64, title string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE llm_chats SET title = ? WHERE id = ?`, title, id)
+	return err
+}
+
+// SessionByUUID is a transcript by host, provider and the CLI's session id.
+func (s *Store) SessionByProviderUUID(ctx context.Context, host, provider, uuid string) (Session, error) {
+	return scanSession(s.DB.QueryRowContext(ctx, `SELECT `+sessCols+` FROM sessions s WHERE s.host = ? AND s.provider = ? AND s.session_uuid = ?
+		ORDER BY s.id LIMIT 1`, host, provider, uuid))
+}

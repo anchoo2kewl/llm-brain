@@ -520,12 +520,12 @@ func (s *Server) terminalRename(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	title := strings.TrimSpace(r.FormValue("title"))
-	if title == "" || len(title) > 120 {
-		jsonErr(w, http.StatusBadRequest, errors.New("a title of 1–120 characters"))
+	title, err := cleanName(r.FormValue("title"))
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.Store.RenameTerminal(r.Context(), id, title); err != nil {
+	if err := s.rename(r.Context(), "terminal", id, title); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err)
 		return
 	}

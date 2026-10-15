@@ -1,5 +1,5 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">{{with .V}}
-<div class="top"><div><p class="eyebrow">{{if .A.ReviewOf}}Review · {{end}}{{.With}} · {{.A.Host}}</p><h1 class="title">{{.A.Title}}</h1></div>
+<div class="top"><div><p class="eyebrow">{{if .A.ReviewOf}}Review · {{end}}{{.With}} · {{.A.Host}}</p><h1 class="title"><span data-rename="/agents/{{.A.ID}}/rename">{{.A.Title}}</span></h1></div>
 <div class="meta"><span class="pill {{statusClass .A.Status}}" id="agentstatus">{{.A.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .A.Error}}{{if ne .A.Status "running"}}<pre class="err small">{{.A.Error}}</pre>{{end}}{{end}}
