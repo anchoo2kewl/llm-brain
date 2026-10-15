@@ -131,7 +131,11 @@ document.addEventListener("DOMContentLoaded", function () {
   var pick = document.getElementById("taskattach");
   if (!pick || !window.hubDrop) return;
   var form = pick.closest("form"), ta = form.querySelector("textarea[name=prompt]");
-  var host = function () { var h = form.querySelector("select[name=host]"); return h ? h.value : ""; };
+  var host = function () { // the folder's Mac wins, as when the task is created
+    var f = form.querySelector("select[name=folder]");
+    if (f && f.value.indexOf("|") > 0) return f.value.split("|")[0];
+    var h = form.querySelector("select[name=host]"); return h ? h.value : "";
+  };
   var take = window.hubDrop(form, host, "new", function (paths) {
     var add = paths.map(function (p) { return "Attached: " + p; }).join("\n");
     ta.value = ta.value ? ta.value.replace(/\s*$/, "") + "\n" + add + "\n" : add + "\n";

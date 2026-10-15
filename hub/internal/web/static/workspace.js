@@ -244,7 +244,7 @@
   // show: put a terminal in the focused pane (or go to its pane if it's on screen already).
   function show(id) {
     var at = slotOf(id);
-    if (at >= 0 && !st.zoom) { focusSlot(at, true); return; }
+    if (at >= 0) { focusSlot(at, true); return; } // already in a pane (zoomed: focusSlot brings it up)
     if (!panes[id]) attach(infos[id], true);
     if (!panes[id]) return;
     st.slots[st.focus] = id;

@@ -254,7 +254,8 @@ func TestPartsFromAttachments(t *testing.T) {
 	write("txt", []byte("a,b\n1,2\n"))
 	write("bin", []byte{0, 1, 2})
 	c := &Chats{AssetDir: dir}
-	ps := c.parts("what is this?", []store.Asset{{Name: "shot.png", SHA256: "img"}, {Name: "data.csv", SHA256: "txt"}, {Name: "blob.bin", SHA256: "bin"}, {Name: "gone.md", SHA256: "nope"}})
+	budget := 1 << 20
+	ps := c.parts("what is this?", []store.Asset{{Name: "shot.png", SHA256: "img"}, {Name: "data.csv", SHA256: "txt"}, {Name: "blob.bin", SHA256: "bin"}, {Name: "gone.md", SHA256: "nope"}}, &budget)
 	if len(ps) != 5 || ps[0].Text != "what is this?" {
 		t.Fatalf("parts: %+v", ps)
 	}
@@ -263,6 +264,10 @@ func TestPartsFromAttachments(t *testing.T) {
 	}
 	if !strings.Contains(ps[2].Text, "a,b\n1,2") || !strings.Contains(ps[3].Text, "can't be read") || !strings.Contains(ps[4].Text, "no longer") {
 		t.Fatalf("files: %+v", ps[2:])
+	}
+	small := 5
+	if ps := c.parts("", []store.Asset{{Name: "big.png", SHA256: "img", Size: 10}}, &small); !strings.Contains(ps[0].Text, "too big") {
+		t.Fatalf("budget: %+v", ps)
 	}
 	b, _ := json.Marshal(Message{Role: "user", Content: ps[:2]})
 	if !strings.Contains(string(b), `"type":"image_url","image_url":{"url":"data:image/png`) {

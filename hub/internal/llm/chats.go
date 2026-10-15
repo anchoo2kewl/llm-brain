@@ -172,13 +172,27 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 		return
 	}
 	atts, _ := c.S.LLMAttachments(ctx, chatID)
+	// Files go in full only for the last few messages that have them, within a byte budget; earlier ones
+	// are named, so a long chat with images doesn't resend (and re-encode) them all on every reply.
+	full := map[int64]bool{}
+	for i, n := len(ms)-1, 0; i >= 0 && n < recentFileMsgs; i-- {
+		if len(atts[ms[i].ID]) > 0 {
+			full[ms[i].ID] = true
+			n++
+		}
+	}
+	budget := maxFileBytes
 	var hist []Message
 	for _, m := range ms {
 		if m.ID == rid || (m.Role == "assistant" && (m.Status != "done" || m.Content == "")) {
 			continue
 		}
 		if m.Role == "user" && len(atts[m.ID]) > 0 {
-			hist = append(hist, Message{Role: m.Role, Content: c.parts(m.Content, atts[m.ID])})
+			if full[m.ID] {
+				hist = append(hist, Message{Role: m.Role, Content: c.parts(m.Content, atts[m.ID], &budget)})
+			} else {
+				hist = append(hist, Message{Role: m.Role, Content: m.Content + "\n" + named(atts[m.ID])})
+			}
 			continue
 		}
 		hist = append(hist, Message{Role: m.Role, Content: m.Content})
@@ -214,12 +228,23 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 
 // Attachment limits: images go to the model as data URLs, text files inline.
 const (
-	maxImage    = 8 << 20
-	maxTextFile = 256 << 10
+	maxImage       = 8 << 20
+	maxTextFile    = 256 << 10
+	maxFileBytes   = 24 << 20 // all files sent with one reply, before base64
+	recentFileMsgs = 3        // messages whose files are sent in full
 )
 
+// named lists files sent earlier in the chat, without their contents.
+func named(atts []store.Asset) string {
+	var ns []string
+	for _, a := range atts {
+		ns = append(ns, a.Name)
+	}
+	return "[attached earlier: " + strings.Join(ns, ", ") + "]"
+}
+
 // parts turns a message with attachments into content parts: the text, each image, each text file.
-func (c *Chats) parts(text string, atts []store.Asset) []Part {
+func (c *Chats) parts(text string, atts []store.Asset, budget *int) []Part {
 	var out []Part
 	if strings.TrimSpace(text) != "" {
 		out = append(out, Part{Type: "text", Text: text})
@@ -227,7 +252,16 @@ func (c *Chats) parts(text string, atts []store.Asset) []Part {
 	for _, a := range atts {
 		ctype := mime.TypeByExtension(strings.ToLower(filepath.Ext(a.Name)))
 		mt, _, _ := mime.ParseMediaType(ctype)
-		b, err := os.ReadFile(filepath.Join(c.AssetDir, a.SHA256))
+		var b []byte
+		var err error
+		if a.Size > int64(*budget) {
+			out = append(out, Part{Type: "text", Text: fmt.Sprintf("[attached file %s is too big to send along with the rest]", a.Name)})
+			continue
+		}
+		b, err = os.ReadFile(filepath.Join(c.AssetDir, a.SHA256))
+		if err == nil {
+			*budget -= len(b)
+		}
 		switch {
 		case err != nil:
 			out = append(out, Part{Type: "text", Text: fmt.Sprintf("[attached file %s is no longer on the hub]", a.Name)})
