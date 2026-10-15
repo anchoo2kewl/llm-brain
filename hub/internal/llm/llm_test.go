@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
@@ -143,4 +145,69 @@ func TestMarkdownIsSafe(t *testing.T) {
 	if strings.Contains(got, "<script>") || strings.Contains(got, `href="javascript`) {
 		t.Errorf("unsafe output:\n%s", got)
 	}
+}
+
+func TestStreamLimits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if r.URL.Query().Get("big") == "line" || strings.Contains(r.Header.Get("X-Test"), "line") {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", strings.Repeat("x", 4096))
+			return
+		}
+		for i := 0; i < 10000; i++ { // an endless reply
+			if _, err := fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", strings.Repeat("y", 100)); err != nil {
+				return // the client hung up
+			}
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer srv.Close()
+	c := &Client{URL: srv.URL, Key: "k", MaxLine: 1024, MaxReply: 1000}
+	got, err := c.Stream(context.Background(), "m", nil, nil)
+	if !errors.Is(err, ErrTooLarge) || len(got) > 1000 || len(got) < 900 {
+		t.Fatalf("reply cap: %d bytes, %v", len(got), err)
+	}
+	c.HTTP = &http.Client{Transport: headerRT{"X-Test", "line"}}
+	if _, err := c.Stream(context.Background(), "m", nil, nil); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("line cap: %v", err)
+	}
+}
+
+type headerRT struct{ k, v string }
+
+func (h headerRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	r.Header.Set(h.k, h.v)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A reply that times out is finished as an error with a fresh context, so the chat isn't busy forever.
+func TestTimedOutReplyIsFinished(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+		w.(http.Flusher).Flush()
+		select { // stall
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	st, _ := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	defer st.Close()
+	ch := &Chats{S: st, C: &Client{URL: srv.URL, Key: "k"}, Timeout: 200 * time.Millisecond}
+	id, rid, err := ch.Start(context.Background(), "gpt-5", "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch.Wait()
+	m, _ := st.LLMMessage(context.Background(), rid)
+	if m.Status != "error" || m.Content != "partial" || !strings.Contains(m.Error, "no complete reply") {
+		t.Fatalf("%+v", m)
+	}
+	if _, err := ch.Send(context.Background(), id, "gpt-5", "again"); err != nil {
+		t.Fatalf("chat still busy: %v", err)
+	}
+	ch.Wait() // the second reply times out too; let it finish before the store closes
 }
