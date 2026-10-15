@@ -41,6 +41,26 @@ house() {
 # Expand ~ in a config path.
 cfg_path() { local p; p="$(cfg "$1")"; echo "${p/#\~/$HOME}"; }
 
+# Variables every prompt can use: who we work for, who the people are, and the overlay's house notes.
+WORK_ROOT="${FLEET_WORK_ROOT:-$(cfg_path '.work_root')}"
+prompt_env() { # prompt_env <prompt-name>
+  export OWNER="$(cfg '.owner.name')" OWNER_GH="$(cfg '.owner.github')" WORK_ROOT
+  export PEOPLE="$(cfg -o=json '.people' | jq -r 'to_entries | map("\(.value) (@\(.key))") | join(", ") | if . == "" then "your teammates" else . end')"
+  export HOUSE="$(house "$1")"
+  [[ -n "$HOUSE" ]] || HOUSE="(none)"
+}
+
+# notes_for <owner/repo#n>...: what trusted people said about these in chat (bin/chat-watch), oldest first.
+notes_for() {
+  local r out=""
+  for r in "$@"; do
+    local repo="${r%%#*}" f
+    f="$BRAIN_STATE/notes/${repo/\//__}__${r##*#}.md"
+    [[ -f "$f" ]] && out+="$(cat "$f")"$'\n'
+  done
+  printf '%s' "${out:-(none)}"
+}
+
 paused() {
   [[ -f "$BRAIN_LOCAL/PAUSE" ]] || [[ "$(cfg '.paused')" == "true" ]]
 }

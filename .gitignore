@@ -2,3 +2,4 @@
 .DS_Store
 secrets.env
 bin/hub
+__pycache__/

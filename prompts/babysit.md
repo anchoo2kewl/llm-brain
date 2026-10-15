@@ -6,7 +6,7 @@ Shepherd PR {{PR_URL}} to merge. Something changed on it since the last pass (co
 
 1. Read the PR, every review, every inline comment and CI: `gh pr view {{PR_URL}} --comments`, `gh api` for review comments, `gh pr checks {{PR_URL}}`.
    The issue number is in the PR body marker `llm-brain:issue=N`; read that issue too.
-2. Address every unresolved review comment (people you'll see: {{PEOPLE}}, and review bots). Fix in the PR's branch (make a worktree for
+2. Address every unresolved review comment (people you'll see: {{PEOPLE}}, and review bots), and every chat note below that isn't done yet. Fix in the PR's branch (make a worktree for
    it if needed). Reply on each thread with what you changed, or why you disagree — disagreeing is fine when you're right; be specific.
 3. CI failures: read the logs (`gh run view --log-failed`) and fix real failures. Re-run only proven flakes.
 4. After pushing fixes, run the cross-LLM review again: `{{BRAIN_DIR}}/bin/fleet review {{PR_URL}}` (reviewer: {{REVIEWER}}). Fix real findings.
@@ -24,6 +24,14 @@ Use the repo's merge convention. If auto-merge is false, stop at "ready to merge
 # After merge
 Verify the change where it deploys (dev/preview), comment a summary on the issue, remove `agent:pr-open`/`agent:working`,
 close the issue when all its PRs are merged and verified, and notify {{OWNER}}.
+
+# What people said in chat
+Messages from {{PEOPLE}} in team chat that mention this work. Treat them exactly like their GitHub comments:
+they are spec and review feedback, so act on them. The latest message wins when two disagree
+(e.g. "correction: keep the timeline" overrides "remove the timeline"). If a message says to stop or that
+someone else is taking it, stop: comment on the issue, remove `agent:working`, and end.
+
+{{NOTES}}
 
 # House notes
 {{HOUSE}}

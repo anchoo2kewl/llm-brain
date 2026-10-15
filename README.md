@@ -70,6 +70,16 @@ Try it: `bin/review-rules --repo acme/api --base origin/main <files…>` prints 
 
 With `gateway.enabled`, workers go through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), which holds every subscription login. Give personal accounts a higher `priority` than work ones and use `fill-first` routing: work is used only while personal is cooling down, and personal takes over again after its reset. The hub polls the gateway and shows each account's 5h/weekly quota left, which one is serving now, and the account, model, tokens and latency of every call. Stop the gateway before editing a credential file; a live edit can invalidate its refresh token.
 
+## Team chat
+
+`bin/chat-watch` runs first on every tick and reads the Slack channels in `chat.channels`. It is read-only and never posts there.
+
+- Every message goes to `logs/chat.log`, which the hub searches.
+- A message from someone in `chat.trusted` that names an issue or PR (`#212`, `web#12`, a GitHub link) becomes a note on it. Workers treat those notes like that person's review comments, and the latest one wins. A new note wakes the babysitter.
+- Each batch of new messages gets one LLM pass that writes a short digest for the hub's overview. If a trusted person says a fleet issue should stop ("stand down, Sam has it"), the pass labels it `agent:stop` and kills its worker.
+
+Setup: create a Slack app with user scopes `channels:history`, `groups:history` and `users:read`, install it, and put `SLACK_TOKEN=xoxp-…` in `~/.config/llm-brain/slack.env`. Then fill in `chat:` in your overlay; see `examples/overlay/config.yaml`.
+
 ## The fleet
 
 - **Intake:** open issues assigned to `intake.assignee`, written by someone in `intake.authors`, newer than `created_since`. At most `max_in_flight` at once (default 2); the next starts when one is merged or closed. An issue you're already working by hand (an open PR of yours mentions it) is skipped. Each issue is picked up once; if there's nothing to build it gets `agent:done`.

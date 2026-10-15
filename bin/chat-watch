@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""chat-watch [--once] [--dry-run] [--backfill-hours N]
+
+Reads the chat channels in `chat.channels` (Slack today), every fleet tick.
+  - every message      -> logs/chat.log (the hub indexes and searches it)
+  - from `chat.trusted` -> a note on each issue/PR it mentions (notes/<owner>__<repo>__<n>.md);
+                          implement/babysit workers get those notes as instructions, like review comments
+  - new messages       -> one LLM pass (prompts/chat-insights.md): a short digest for the hub and
+                          actions. Today the only action is `stop`: label agent:stop on a fleet issue
+                          and kill its worker (e.g. "stand down on #840, someone else is taking it").
+Read-only in the channels: it never posts there.
+"""
+import argparse, html, json, os, re, signal, subprocess, sys, time, urllib.parse, urllib.request
+from datetime import datetime
+from pathlib import Path
+
+BRAIN = Path(__file__).resolve().parent.parent
+STATE = Path(os.environ.get("BRAIN_STATE", Path.home() / ".local/state/llm-brain"))
+CHAT = STATE / "chat"
+NOTES = STATE / "notes"
+LOGS = STATE / "logs"
+HOST = os.uname().nodename.split(".")[0]
+
+
+def sh(cmd):
+    return subprocess.run(["bash", "-c", f'source "{BRAIN}/bin/lib.sh"; {cmd}'], capture_output=True, text=True,
+                          env=dict(os.environ, BRAIN_DIR=str(BRAIN))).stdout
+
+
+def cfg(expr):
+    try:
+        return json.loads(sh(f"cfg -o=json '{expr}'") or "null")
+    except json.JSONDecodeError:
+        return None
+
+
+def log(msg):
+    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} [{HOST}] chat: {msg}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------- slack
+
+class Slack:
+    def __init__(self, token):
+        self.token = token
+
+    def get(self, method, **params):
+        url = f"https://slack.com/api/{method}?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        for _ in range(3):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    body = json.load(r)
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    time.sleep(int(e.headers.get("Retry-After", "5")))
+                    continue
+                raise
+            if not body.get("ok"):
+                raise RuntimeError(f"{method}: {body.get('error')}")
+            return body
+        raise RuntimeError(f"{method}: rate limited")
+
+    def pages(self, method, key, **params):
+        cursor = None
+        while True:
+            b = self.get(method, cursor=cursor, limit=200, **params)
+            yield from b.get(key, [])
+            cursor = (b.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                return
+
+
+def load_token():
+    envf = (cfg(".chat.env_file") or "").replace("~", str(Path.home()), 1)
+    tok = os.environ.get("SLACK_TOKEN", "")
+    if not tok and envf and Path(envf).exists():
+        for line in Path(envf).read_text().splitlines():
+            m = re.match(r"\s*(?:export\s+)?SLACK_TOKEN=['\"]?([^'\"\s]+)", line)
+            if m:
+                tok = m.group(1)
+    return tok
+
+
+def clean(text, users):
+    text = re.sub(r"<@(U\w+)(?:\|([^>]+))?>", lambda m: "@" + (m.group(2) or users.get(m.group(1), m.group(1))), text)
+    text = re.sub(r"<#\w+\|([^>]*)>", r"#\1", text)
+    text = re.sub(r"<(https?://[^|>]+)\|([^>]+)>", r"\2 (\1)", text)
+    text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
+    text = re.sub(r"\n?\*?Sent using\*? .*$", "", text.strip())
+    return html.unescape(text).strip()
+
+
+# ---------------------------------------------------------------- refs -> notes
+
+def known_repos():
+    """owner/name of every repo we know: chat.repos, intake repos, the overlay's repos.txt."""
+    repos = set(cfg(".chat.repos") or []) | set(cfg(".intake.repos") or [])
+    ov = sh("overlay_dir").strip()
+    if ov and Path(ov, "repos.txt").exists():
+        for line in Path(ov, "repos.txt").read_text().splitlines():
+            m = re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?\s*$", line)
+            if m:
+                repos.add(f"{m.group(1)}/{m.group(2)}")
+    return sorted(repos)
+
+
+def resolve(short, repos):
+    """'api' -> acme/web-api; fuzzy: exact name, then '-<short>' suffix, then substring; shortest wins."""
+    s = short.lower()
+    for test in (lambda n: n == s, lambda n: n.endswith("-" + s), lambda n: s in n):
+        hits = sorted((r for r in repos if test(r.split("/")[1].lower())), key=len)
+        if hits:
+            return hits[0]
+    return None
+
+
+def refs(text, default_repo, repos):
+    out = set()
+    for o, n, num in re.findall(r"github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\d+)", text):
+        out.add((f"{o}/{n}", int(num)))
+    body = re.sub(r"https?://\S+", " ", text)
+    for short, num in re.findall(r"(?<![\w/])([A-Za-z][\w.-]*)#(\d+)", body):
+        r = resolve(short, repos)
+        if r:
+            out.add((r, int(num)))
+    if default_repo:
+        for num in re.findall(r"(?<![\w/#-])#(\d+)\b", body):
+            out.add((default_repo, int(num)))
+    return out
+
+
+def note_path(repo, num):
+    return NOTES / f"{repo.replace('/', '__')}__{num}.md"
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--once", action="store_true")
+    ap.add_argument("--dry-run", action="store_true", help="read and print; write nothing, act on nothing")
+    ap.add_argument("--backfill-hours", type=float, default=None)
+    a = ap.parse_args()
+    if not cfg(".chat.enabled"):
+        return
+    tok = load_token()
+    if not tok:
+        log("no SLACK_TOKEN (chat.env_file) — skipping")
+        return
+    slack = Slack(tok)
+    for d in (CHAT, NOTES, LOGS):
+        d.mkdir(parents=True, exist_ok=True)
+    sf = CHAT / "state.json"
+    st = json.loads(sf.read_text()) if sf.exists() else {}
+    users = st.setdefault("users", {})
+    trusted = cfg(".chat.trusted") or {}          # slack user id -> github handle
+    people = cfg(".people") or {}                 # github handle -> display name
+    me = cfg(".chat.me") or ""
+    repos = known_repos()
+    backfill = a.backfill_hours if a.backfill_hours is not None else (cfg(".chat.backfill_hours") or 24)
+
+    def name(uid):
+        if uid and uid not in users:
+            try:
+                u = slack.get("users.info", user=uid)["user"]
+                users[uid] = u.get("profile", {}).get("display_name") or u.get("real_name") or u.get("name") or uid
+            except Exception:
+                users[uid] = uid
+        gh = trusted.get(uid)
+        return people.get(gh) or users.get(uid, uid)
+
+    new = []
+    for ch in cfg(".chat.channels") or []:
+        cid, cname, crepo = ch["id"], ch.get("name", ch["id"]), ch.get("repo")
+        cs = st.setdefault("channels", {}).setdefault(cid, {"oldest": f"{time.time() - backfill * 3600:.6f}", "threads": {}})
+        msgs = list(slack.pages("conversations.history", "messages", channel=cid, oldest=cs["oldest"]))
+        if msgs:
+            cs["oldest"] = max(m["ts"] for m in msgs)
+        # thread replies: on any parent we saw in the last week, newer than the last reply we read
+        for m in msgs:
+            if m.get("reply_count"):
+                cs["threads"].setdefault(m["ts"], m["ts"])
+        for ts, seen in list(cs["threads"].items()):
+            if float(ts) < time.time() - 7 * 86400:
+                del cs["threads"][ts]
+                continue
+            try:
+                reps = [r for r in slack.pages("conversations.replies", "messages", channel=cid, ts=ts, oldest=seen)
+                        if r["ts"] != ts and float(r["ts"]) > float(seen)]
+            except RuntimeError:
+                continue
+            msgs += reps
+            if reps:
+                cs["threads"][ts] = max(r["ts"] for r in reps)
+        for m in sorted({m["ts"]: m for m in msgs if m.get("type") == "message" and not m.get("subtype")}.values(),
+                        key=lambda m: float(m["ts"])):
+            uid = m.get("user", "")
+            text = clean(m.get("text", ""), users)
+            if not text:
+                continue
+            new.append({
+                "ts": m["ts"], "at": datetime.fromtimestamp(float(m["ts"])).strftime("%Y-%m-%d %H:%M:%S"),
+                "channel": cname, "who": name(uid), "github": trusted.get(uid, ""), "trusted": uid in trusted,
+                "to_me": bool(me) and f"<@{me}" in m.get("text", ""), "thread": m.get("thread_ts") if m.get("thread_ts") != m["ts"] else None,
+                "text": text, "refs": sorted(f"{r}#{n}" for r, n in refs(text, crepo, repos)),
+            })
+
+    if a.dry_run:
+        print(json.dumps(new, indent=1))
+        return
+    with open(LOGS / "chat.log", "a") as f:
+        for m in new:
+            f.write(f"{m['at']} [{HOST}] #{m['channel']} {m['who']}{' (thread)' if m['thread'] else ''}: {' '.join(m['text'].split())}\n")
+    for m in new:
+        if not m["trusted"]:
+            continue
+        for ref in m["refs"]:
+            repo, num = ref.rsplit("#", 1)
+            with open(note_path(repo, int(num)), "a") as f:
+                f.write(f"### {m['at']} — {m['who']} in #{m['channel']}\n{m['text']}\n\n")
+    sf.write_text(json.dumps(st, indent=1))
+    log(f"{len(new)} new message(s), {sum(m['trusted'] for m in new)} from trusted people")
+    if new and cfg(".chat.insights"):
+        insights(new)
+
+
+def insights(new):
+    run = datetime.now().strftime("%Y%m%d-%H%M%S")
+    work = CHAT / "runs" / run
+    work.mkdir(parents=True, exist_ok=True)
+    status = STATE / "status.json"
+    st = json.loads(status.read_text()) if status.exists() else {}
+    fleet = {"owned": [{"url": i.get("url"), "title": i.get("title")} for i in st.get("owned", [])],
+             "prs": [{"url": p.get("url"), "title": p.get("title")} for p in st.get("prs", [])]}
+    (work / "messages.json").write_text(json.dumps(new, indent=1))
+    (work / "fleet.json").write_text(json.dumps(fleet, indent=1))
+    prev = CHAT / "digest.json"
+    env = dict(os.environ, BRAIN_DIR=str(BRAIN), MESSAGES=json.dumps(new, indent=1), FLEET=json.dumps(fleet, indent=1),
+               PREV_DIGEST=(json.loads(prev.read_text()).get("digest", "") if prev.exists() else "(none)"))
+    pf = work / "prompt.md"
+    pf.write_text(subprocess.run(["bash", "-c", f'source "{BRAIN}/bin/lib.sh"; prompt_env chat-insights; render "{BRAIN}/prompts/chat-insights.md"'],
+                                 capture_output=True, text=True, env=env).stdout)
+    provider = cfg(".chat.provider") or "claude"
+    logf = LOGS / f"chat-insights.{run}.log"
+    with open(logf, "w") as out:
+        subprocess.run(["gtimeout", "15m", str(BRAIN / "bin/llm-run"), provider, "review", str(work), str(pf), "llm-brain-chat"],
+                       stdout=out, stderr=subprocess.STDOUT, env=dict(os.environ, LLM_MODEL=cfg(".chat.model") or ""))
+    text = logf.read_text()
+    m = re.search(r"^INSIGHTS (\{.*\})\s*$", text, re.M)
+    if not m:
+        log(f"insights: no INSIGHTS line (see {logf.name})")
+        return
+    try:
+        res = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        log(f"insights: bad JSON (see {logf.name})")
+        return
+    prev.write_text(json.dumps({"at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), "digest": res.get("digest", ""),
+                                "asks": res.get("asks", []), "log": logf.name}, indent=1))
+    for act in res.get("actions", []):
+        if act.get("type") == "stop":
+            stop(act)
+
+
+def stop(act):
+    """Only issues the fleet owns, and only on a trusted person's word (the prompt says so; we re-check ownership)."""
+    repo, num = act.get("repo", ""), int(act.get("number") or 0)
+    if not repo or not num:
+        return
+    labels = cfg("[.labels.claimed, .labels.pr_open]") or []
+    have = subprocess.run(["gh", "issue", "view", str(num), "-R", repo, "--json", "labels", "--jq", "[.labels[].name]"],
+                          capture_output=True, text=True).stdout
+    if not any(l in (json.loads(have or "[]")) for l in labels):
+        log(f"stop {repo}#{num}: not a fleet issue — ignoring")
+        return
+    subprocess.run(["gh", "issue", "edit", str(num), "-R", repo, "--add-label", cfg(".labels.stop")], capture_output=True)
+    subprocess.run(["gh", "issue", "comment", str(num), "-R", repo, "--body",
+                    f"🤖 llm-brain fleet: stopping here. {act.get('why', '')}".strip()], capture_output=True)
+    pf = STATE / "runs" / f"issue-{num}.pid"
+    if pf.exists():
+        try:
+            os.kill(int(pf.read_text()), signal.SIGTERM)
+        except (ProcessLookupError, ValueError, PermissionError):
+            pass
+    log(f"stopped {repo}#{num}: {act.get('why', '')}")
+    sh(f"notify {json.dumps(f'stopped {repo}#{num}: ' + act.get('why', ''))}")
+
+
+if __name__ == "__main__":
+    main()

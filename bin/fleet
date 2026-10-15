@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fleet — the issue → PR → merge loop.
 #
-#   fleet tick              dispatch + babysit once (what launchd runs)
+#   fleet tick              chat-watch + dispatch + babysit + review-prs once (what launchd runs)
 #   fleet dispatch          claim agent-ready issues and start implement workers
 #   fleet babysit           start a babysit worker for every marker PR with new activity
 #   fleet review-prs        review every PR that requests me (once per head commit, until it approves)
@@ -13,16 +13,6 @@
 #   fleet providers         show implementer / reviewer resolution
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-
-WORK_ROOT="${FLEET_WORK_ROOT:-$(cfg_path '.work_root')}"
-
-# Variables every prompt can use: who we work for, who the people are, and the overlay's house notes.
-prompt_env() { # prompt_env <prompt-name>
-  export OWNER="$(cfg '.owner.name')" OWNER_GH="$(cfg '.owner.github')" WORK_ROOT
-  export PEOPLE="$(cfg -o=json '.people' | jq -r 'to_entries | map("\(.value) (@\(.key))") | join(", ") | if . == "" then "your teammates" else . end')"
-  export HOUSE="$(house "$1")"
-  [[ -n "$HOUSE" ]] || HOUSE="(none)"
-}
 
 spawn() { # spawn <key> <provider> <mode> <timeout> <prompt-file>
   local key="$1" provider="$2" mode="$3" timeout="$4" prompt_file="$5"
@@ -110,7 +100,7 @@ cmd_dispatch() {
     claim_issue "$repo" "$num" || continue
     local pf="$BRAIN_STATE/runs/issue-$num.prompt"
     prompt_env implement
-    REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
+    NOTES="$(notes_for "$repo#$num")" REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
       BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" \
       render "$BRAIN_DIR/prompts/implement.md" >"$pf"
@@ -125,20 +115,26 @@ fleet_prs() { # JSON array of my open PRs whose body carries the fleet marker
   for owner in $(cfg '.pr_owners[]'); do
     gh search prs --owner "$owner" --author "@me" --state open "llm-brain" --match body \
       --json url,number,repository,updatedAt,body --limit 100
-  done | jq -s --arg m "$marker" 'add // [] | map(select(.body | contains($m)) | del(.body))'
+  done | jq -s --arg m "$marker" 'add // [] | map(select(.body | contains($m))
+      | . + {issue: (.body | capture("llm-brain:issue=(?<n>[0-9]+)").n // null)} | del(.body))'
 }
 
 cmd_babysit() {
   paused && { log "paused"; return; }
-  local row url key fp_file new_fp
+  local row url key fp_file new_fp issue refs
   fleet_prs | jq -c '.[]' | while read -r row; do
     url="$(jq -r .url <<<"$row")"
     key="pr-$(jq -r '.repository.name + "-" + (.number|tostring)' <<<"$row")"
     worker_running "$key" && continue
+    issue="$(jq -r '.issue // empty' <<<"$row")"; refs="$(jq -r '.repository.nameWithOwner + "#" + (.number|tostring)' <<<"$row")"
+    [[ -n "$issue" ]] && refs="$refs $(cfg '.intake.repos[0]')#$issue"
+    if [[ -n "$issue" ]] && gh issue view "$issue" -R "$(cfg '.intake.repos[0]')" --json labels --jq '[.labels[].name]' | grep -q "\"$(cfg '.labels.stop')\""; then
+      continue                                                 # someone said stop (label or chat)
+    fi
     # Fingerprint = head sha + review/comment/check state. Unchanged -> nothing to do.
     new_fp="$(gh pr view "$url" --json headRefOid,reviews,comments,statusCheckRollup,mergeStateStatus,reviewDecision \
       | jq -c '{h:.headRefOid, r:(.reviews|length), c:(.comments|length), d:.reviewDecision, m:.mergeStateStatus,
-                ci:[.statusCheckRollup[]? | (.conclusion // .state // .status)] | sort}')"
+                ci:[.statusCheckRollup[]? | (.conclusion // .state // .status)] | sort}')$(notes_for $refs | md5 -q)"
     fp_file="$BRAIN_STATE/prs/$key.fp"
     [[ -f "$fp_file" && "$(cat "$fp_file")" == "$new_fp" ]] && continue
     # Wait while CI is still running unless there is human/bot feedback to act on.
@@ -146,7 +142,7 @@ cmd_babysit() {
     echo "$new_fp" >"$fp_file"
     local pf="$BRAIN_STATE/runs/$key.prompt"
     prompt_env babysit
-    PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
+    NOTES="$(notes_for $refs)" PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
       render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
     spawn "$key" "$(implementer)" write "$(cfg '.limits.babysit_timeout')" "$pf"
@@ -267,8 +263,9 @@ cmd_snapshot() {
     --argjson prs "$prs" --argjson reviews "$reviews" \
     --argjson workers "$(printf '%s\n' "${workers[@]+"${workers[@]}"}" | jq -s '.')" \
     --arg tail "$(tail -40 "$BRAIN_STATE/logs/fleet.log" 2>/dev/null)" \
+    --argjson chat "$(cat "$BRAIN_STATE/chat/digest.json" 2>/dev/null || echo null)" \
     '{host:$host, at:$at, paused:$paused, roles:{implementer:$impl, internal_reviewer:$rev, pr_reviewer:$prov},
-      max_in_flight:$max, owned:$owned, queue:$queue, prs:$prs, reviews:$reviews, workers:$workers, log:$tail}' >"$tmp"
+      max_in_flight:$max, owned:$owned, queue:$queue, prs:$prs, reviews:$reviews, workers:$workers, log:$tail, chat:$chat}' >"$tmp"
   mv "$tmp" "$BRAIN_STATE/status.json"
 }
 
@@ -298,7 +295,7 @@ cmd_labels() {
 }
 
 case "${1:-}" in
-  tick) log "tick"; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
+  tick) log "tick"; "$BRAIN_DIR/bin/chat-watch" 2>>"$BRAIN_STATE/logs/fleet.log" || true; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
   snapshot) cmd_snapshot ;;
   review-prs) cmd_review_prs ;;
   review-pr) shift; ONLY_PR="$1" cmd_review_prs ;;

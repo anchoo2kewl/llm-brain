@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 
 provider="$1" mode="$2" cwd="$3" prompt_file="$4" name="${5:-llm-brain}"
 prompt="$(cat "$prompt_file")"
-model="$(cfg ".providers.$provider.model")"
+model="${LLM_MODEL:-$(cfg ".providers.$provider.model")}"
 cd "$cwd"
 
 # Route through the account gateway when it is enabled and reachable.

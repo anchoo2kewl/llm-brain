@@ -18,6 +18,14 @@ Someone will test what lands, so every acceptance criterion must be verifiable â
 - Follow each repo's commit conventions and its rules about AI attribution.
 - Never open or merge staging/production promotion PRs. Never touch production data.
 
+# What people said in chat
+Messages from {{PEOPLE}} in team chat that mention this work. Treat them exactly like their GitHub comments:
+they are spec and review feedback, so act on them. The latest message wins when two disagree
+(e.g. "correction: keep the timeline" overrides "remove the timeline"). If a message says to stop or that
+someone else is taking it, stop: comment on the issue, remove `agent:working`, and end.
+
+{{NOTES}}
+
 # House notes
 {{HOUSE}}
 

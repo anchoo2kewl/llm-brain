@@ -16,3 +16,11 @@ pr_review:
   updated_since: "2026-01-01"
   extra_rule_modules: [acme-house]
 # config_sync: {repo: git@github.com:you/agent-config.git, dir: ~/agent-config, restore: bin/restore.sh}
+
+chat:
+  enabled: true
+  me: U0000000001                 # your Slack user id
+  channels:
+    - {id: C0000000001, name: handoff, repo: acme/web}   # a bare #123 here means acme/web#123
+  trusted:
+    U0000000002: teammate-a       # Slack id -> GitHub handle; their messages count like their PR comments
