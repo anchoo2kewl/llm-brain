@@ -367,7 +367,7 @@ func (c *Control) Adopt(ctx context.Context, s store.Session, perm string, bypas
 	if s.UUID == "" || s.ParentUUID != "" {
 		return 0, bad("this transcript can't be resumed (no session id, or a subagent)")
 	}
-	if a, err := c.S.AgentSessionByProvider(ctx, s.Host, s.UUID); err == nil {
+	if a, err := c.S.AgentSessionByProvider(ctx, s.Host, s.Provider, s.UUID); err == nil {
 		return a.ID, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return 0, err
@@ -386,13 +386,16 @@ func (c *Control) Adopt(ctx context.Context, s store.Session, perm string, bypas
 	if _, err := c.liveHost(ctx, s.Host); err != nil {
 		return 0, err
 	}
-	a := store.AgentSession{Host: s.Host, Cwd: cwd, Provider: s.Provider, Model: "", Perm: p, BypassOK: p == PermBypass && bypass,
-		ProviderSession: s.UUID, Status: "idle", Adopted: true, Title: title(s.DisplayTitle())}
-	id, _, err := c.S.CreateAgentSession(ctx, a, nil)
+	a := store.AgentSession{Host: s.Host, Cwd: cwd, Provider: s.Provider, Perm: p, BypassOK: p == PermBypass && bypass,
+		ProviderSession: s.UUID, Title: title(s.DisplayTitle())}
+	// Atomic: two first messages at once still make one row (and one resume at a time, via QueueTurn).
+	id, created, err := c.S.AdoptAgentSession(ctx, a)
 	if err != nil {
 		return 0, err
 	}
-	c.logf("agent: adopted %s session %s on %s as session %d", s.Provider, s.UUID, s.Host, id)
+	if created {
+		c.logf("agent: adopted %s session %s on %s as session %d", s.Provider, s.UUID, s.Host, id)
+	}
 	return id, nil
 }
 

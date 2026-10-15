@@ -645,7 +645,7 @@ func (s *Server) sessionAgent(w http.ResponseWriter, r *http.Request) {
 	}{S: sess, Live: s.Agents.Ctl.HostLive(ctx, sess.Host), Other: agent.ProviderName(agent.Other(sess.Provider)),
 		Resume: agent.ResumeCommand(sess.Provider, sess.Cwd, sess.UUID), Err: r.URL.Query().Get("err")}
 	data.Resumable = agent.KnownProvider(sess.Provider) && sess.UUID != "" && sess.ParentUUID == "" && sess.Cwd != ""
-	if a, err := s.Store.AgentSessionByProvider(ctx, sess.Host, sess.UUID); err == nil {
+	if a, err := s.Store.AgentSessionByProvider(ctx, sess.Host, sess.Provider, sess.UUID); err == nil {
 		data.Agent = &a
 		data.CanSend = a.ReviewOf > 0 && !a.Busy() && strings.TrimSpace(a.LastResult) != ""
 	}

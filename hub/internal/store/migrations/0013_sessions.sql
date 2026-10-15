@@ -20,13 +20,16 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   adopted          INTEGER NOT NULL DEFAULT 0, -- started outside the hub, continued from it
   scratch          INTEGER NOT NULL DEFAULT 0, -- a chat in its own scratch folder under the host's state dir
   turns            INTEGER NOT NULL DEFAULT 0,
+  current_cmd      INTEGER NOT NULL DEFAULT 0, -- the turn command that may move this session's status
   last_result      TEXT NOT NULL DEFAULT '',  -- the last turn's final answer (a review's findings)
   error            TEXT NOT NULL DEFAULT '',
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS agent_sessions_updated ON agent_sessions (updated_at);
-CREATE INDEX IF NOT EXISTS agent_sessions_ps ON agent_sessions (host, provider_session);
+-- One agent session per CLI session: continuing a transcript twice finds the same row.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_sessions_provider ON agent_sessions (host, provider, provider_session) WHERE provider_session != '';
+CREATE INDEX IF NOT EXISTS agent_sessions_review ON agent_sessions (review_of, id);
 
 -- The command queue. Host agents pull their host's queued commands (GET /api/agent/commands) and report
 -- back; the hub's own agent reads the table directly. Rows are kept: this is also the command log.

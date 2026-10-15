@@ -75,25 +75,9 @@ func (h *LocalHub) Report(ctx context.Context, id int64, r Report) error {
 	default:
 		return fmt.Errorf("bad status %q", r.Status)
 	}
-	c, err := h.S.Command(ctx, id)
-	if err != nil {
-		return err
-	}
-	if c.Status == "cancelled" {
-		return nil
-	}
 	r.Result = parse.Truncate(r.Result, 256<<10)
 	r.Error = parse.Truncate(r.Error, 8<<10)
 	body, _ := json.Marshal(r)
-	if err := h.S.FinishCommand(ctx, id, r.Status, string(body)); err != nil {
-		return err
-	}
-	if r.Final() {
-		h.logf("agent: command %d on %s %s%s", id, c.Host, r.Status, errSuffix(r.Error))
-	}
-	if c.Kind != KindTurn || c.AgentID == 0 {
-		return nil
-	}
 	u := store.AgentUpdate{ProviderSession: r.SessionID, Cwd: r.Cwd}
 	zero, empty := 0, ""
 	switch r.Status {
@@ -114,7 +98,14 @@ func (h *LocalHub) Report(ctx context.Context, id int64, r Report) error {
 		msg := "stopped"
 		u.Status, u.PID, u.Error = "stopped", &zero, &msg
 	}
-	return h.S.UpdateAgentSession(ctx, c.AgentID, u)
+	c, applied, err := h.S.ApplyReport(ctx, id, r.Status, string(body), u)
+	if err != nil {
+		return err
+	}
+	if applied && r.Final() {
+		h.logf("agent: command %d on %s %s%s", id, c.Host, r.Status, errSuffix(r.Error))
+	}
+	return nil
 }
 
 func errSuffix(e string) string {
