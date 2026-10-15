@@ -617,3 +617,14 @@ func (s *Store) LatestRunByKey(ctx context.Context, host, key string) (int64, er
 	}
 	return id, err
 }
+
+// RunLogTail is the last n characters of a run's log, cut in the database so a long log isn't copied out
+// to show a few lines.
+func (s *Store) RunLogTail(ctx context.Context, id int64, n int) (string, error) {
+	var tail string
+	err := s.DB.QueryRowContext(ctx, `SELECT substr(log, max(1, length(log) - ? + 1)) FROM runs WHERE id = ?`, n, id).Scan(&tail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return tail, err
+}
