@@ -1,0 +1,30 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+<div class="top"><div><h1>New chat</h1><p class="mut">Pick who to talk to and write. Agents work in a folder with tools; plain chats just talk.</p></div><div class="meta"><a href="/chats">← chats</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+<form method="post" action="/chats/new" class="newchat-form">
+<label class="pick"><span>Chat with</span>
+<select name="with" id="with" required>{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.F.With}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
+{{if .GwErr}}<p class="warn small">Plain chat: {{.GwErr}}. Agent chats still work; they fall back to each CLI's own login.</p>{{end}}
+{{if not .Groups}}<p class="bad">Nothing to chat with: no host has a live session agent and the gateway isn't answering.</p>{{end}}
+<details class="block" id="options" data-agent-only {{if or .F.Folder .F.WtSlug .F.Model}}open{{end}}><summary>Options <span class="mut small">for agent chats: host, folder, model, mode</span></summary>
+<div class="grid2">
+<label>Host<select name="host">{{range .Hosts}}<option value="{{.Host}}" {{if eq .Host $.F.Host}}selected{{end}} {{if not .Live}}disabled{{end}}>{{.Host}}{{if not .Live}} (offline){{end}}{{if .Providers}} · {{range $i, $p := .Providers}}{{if $i}}, {{end}}{{$p}}{{end}}{{end}}</option>{{end}}</select></label>
+<label>Folder<select name="folder"><option value="">a new scratch folder (no project)</option>{{range .Hosts}}{{if .Live}}<optgroup label="{{.Host}}">{{$h := .Host}}{{range .Folders}}{{$v := printf "%s|%s" $h .Path}}<option value="{{$v}}" {{if eq $v $.F.Folder}}selected{{end}}>{{home .Path}}{{if .Branch}} ({{.Branch}}){{end}}</option>{{end}}</optgroup>{{end}}{{end}}</select></label>
+<label>Model<input name="model" value="{{.F.Model}}" placeholder="the CLI's default" autocomplete="off"></label>
+<label>Mode<select name="perm"><option value="default">default (read-only in scratch, edits in a folder)</option>
+<option value="plan" {{if eq .F.Perm "plan"}}selected{{end}}>read-only (plan / read-only sandbox)</option>
+<option value="acceptEdits" {{if eq .F.Perm "acceptEdits"}}selected{{end}}>edits allowed (acceptEdits / workspace-write)</option>
+<option value="bypass" {{if eq .F.Perm "bypass"}}selected{{end}}>bypass approvals and sandbox</option></select></label>
+<label class="check"><input type="checkbox" name="bypass" value="1" {{if .F.Bypass}}checked{{end}}> allow bypass for this session</label>
+<label>New worktree<input name="wt_slug" value="{{.F.WtSlug}}" placeholder="name, e.g. fix-pager (optional)" autocomplete="off"></label>
+<label>…from base<input name="wt_base" value="{{.F.WtBase}}" placeholder="origin/main" autocomplete="off"></label>
+<label class="wide">Prompt variables<textarea name="vars" rows="2" placeholder="NAME=value, one per line, for {{"{{NAME}}"}} in the prompt">{{.F.Vars}}</textarea></label>
+</div></details>
+<div class="composer">
+<textarea name="prompt" rows="5" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line" required autofocus>{{.F.Prompt}}</textarea>
+<div class="row">{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}<a class="small" href="/prompts">prompt library</a>
+<span class="grow"></span><button type="submit" class="primary">Start chat</button></div>
+</div>
+</form>
+<script src="/static/agents.js" defer></script>
+{{end}}

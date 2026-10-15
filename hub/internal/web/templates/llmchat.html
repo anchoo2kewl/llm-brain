@@ -1,0 +1,18 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+<div class="top"><div><p class="eyebrow">Plain chat · through the account gateway</p><h1 class="title">{{.C.Title}}</h1></div><div class="meta"><a href="/chats">all chats</a> · <a class="btn primary" href="/chats/new">+ New chat</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+<div class="transcript convo" id="llmconvo">
+{{range .Msgs}}{{if eq .Role "user"}}<div class="msg user"><div class="who">you</div><div class="txt">{{.Content}}</div></div>
+{{else}}<div class="msg assistant" {{if eq .ID $.Streaming}}id="streaming" data-src="/llms/{{$.C.ID}}/events?msg={{.ID}}"{{end}}><div class="who">{{.Model}}{{if eq .Status "error"}} <span class="bad">error</span>{{end}}{{if eq .ID $.Streaming}} <span class="typing"><i></i><i></i><i></i></span>{{end}}</div>
+{{if eq .ID $.Streaming}}<div class="txt live">{{.Content}}</div>{{else}}<div class="md">{{.HTML}}</div>{{end}}
+{{if .Error}}<p class="bad small err-msg">{{.Error}}</p>{{else}}<p class="bad small err-msg" hidden></p>{{end}}</div>{{end}}{{end}}
+</div>
+<div class="composer" id="composer">
+{{if .GwErr}}<p class="warn small">The account gateway isn't answering ({{.GwErr}}). Replies will fail until it is back.</p>{{end}}
+<form method="post" action="/llms/{{.C.ID}}/send" class="send">
+<textarea name="prompt" rows="3" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line" required {{if .Streaming}}disabled{{end}}></textarea>
+<div class="row"><label class="small">Model <select name="model" aria-label="Model">{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.C.Model}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
+<span class="grow"></span><button type="submit" class="primary" {{if .Streaming}}disabled{{end}}>Send</button></div>
+</form></div>
+<script src="/static/agents.js" defer></script>
+{{end}}

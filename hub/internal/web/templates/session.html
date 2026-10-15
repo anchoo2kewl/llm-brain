@@ -19,6 +19,7 @@
 </div>
 {{if .HasLater}}<p class="pager"><a href="/sessions/{{.S.ID}}?after={{.LastID}}">later messages →</a> · <a href="/sessions/{{.S.ID}}">latest</a></p>{{end}}
 {{if not .Items}}<div class="empty">No messages.</div>{{end}}
+<div id="agentctl" data-src="/sessions/{{.S.ID}}/agent"></div><script src="/static/agents.js" defer></script>
 <p class="mut small" id="livestate">{{if and .S.Live (not .HasLater)}}live — updating{{end}}</p>
 {{end}}
 {{define "grouped"}}{{range groupTools .}}{{if .Run}}<details class="toolrun"><summary>{{.Summary}}</summary>{{range .Run}}{{template "item" .}}{{end}}</details>{{else}}{{template "item" .One}}{{end}}{{end}}{{end}}
