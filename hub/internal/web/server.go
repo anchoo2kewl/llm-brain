@@ -44,7 +44,7 @@ type Server struct {
 	Index    *search.Index // nil: search scans the store
 	Chat     *chat.Poller  // nil: the Slack settings page can't connect or list channels
 	Insights *insights.Cache
-	Agents   *Sessions     // nil: no session control or chats (sessions.go)
+	Agents   *Sessions // nil: no session control or chats (sessions.go)
 
 	pages map[string]*template.Template
 }
@@ -91,7 +91,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/slack/token", s.tailnetOnly(s.slackToken))
 	mux.HandleFunc("GET /api/chat/messages", s.tailnetOnly(s.chatMessagesAPI))
 	mux.HandleFunc("GET /api/chat/me", s.tailnetOnly(s.chatMeAPI))
-	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/static/logo.svg", http.StatusMovedPermanently) })
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/static/logo.svg", http.StatusMovedPermanently)
+	})
 	s.registerInsights(mux)
 	s.sessionRoutes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })

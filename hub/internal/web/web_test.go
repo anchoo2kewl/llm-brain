@@ -21,7 +21,7 @@ func TestAllowedPeer(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1:5000":        true,
 		"[::1]:5000":            true,
-		"100.64.1.2:1":      true,
+		"100.64.1.2:1":          true,
 		"100.127.255.255:1":     true,
 		"100.128.0.1:1":         false,
 		"192.168.1.10:1":        false,
