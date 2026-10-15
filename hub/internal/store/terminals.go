@@ -230,7 +230,7 @@ func (s *Store) SetAgentPlaces(ctx context.Context, host, home string, places []
 	return err
 }
 
-// AgentPlaces is a host's home and the folders in it ('' and nil before its agent reports them).
+// AgentPlaces is a host's home and the folders in it (” and nil before its agent reports them).
 func (s *Store) AgentPlaces(ctx context.Context, host string) (string, []string, error) {
 	var home, places string
 	err := s.DB.QueryRowContext(ctx, `SELECT home, places FROM agent_places WHERE host = ?`, host).Scan(&home, &places)

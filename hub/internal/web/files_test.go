@@ -71,6 +71,23 @@ func TestFilesEndToEnd(t *testing.T) {
 	if code, _ := get("/hosts/studio/ls?path=" + url.QueryEscape("/etc")); code == 200 {
 		t.Fatal("listed a folder outside home")
 	}
+	// Keys behind a link, and credential names anywhere, are refused too.
+	_ = os.MkdirAll(filepath.Join(home, "dotfiles", "aws"), 0o700)
+	_ = os.WriteFile(filepath.Join(home, "dotfiles", "aws", "credentials"), []byte("secret"), 0o600)
+	_ = os.WriteFile(filepath.Join(home, "dotfiles", "aws", "config"), []byte("secret"), 0o600)
+	_ = os.Symlink(filepath.Join(home, "dotfiles", "aws"), filepath.Join(home, ".aws"))
+	_ = os.WriteFile(filepath.Join(home, "docs", ".env.local"), []byte("secret"), 0o600)
+	for _, p := range []string{"~/.aws/config", "~/dotfiles/aws/config", "~/docs/.env.local"} {
+		if code, b := get("/hosts/studio/download?path=" + url.QueryEscape(p)); code == 200 || strings.Contains(string(b), "secret") {
+			t.Fatalf("served %s: %d %q", p, code, b)
+		}
+	}
+	// Another site's link can't make the Mac send a file.
+	req0, _ := http.NewRequest(http.MethodGet, rig.ts.URL+"/hosts/studio/ls?path=~", nil)
+	req0.Header.Set("Sec-Fetch-Site", "cross-site")
+	if resp, err := rig.cl.Do(req0); err != nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-site ls: %v", err)
+	}
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)

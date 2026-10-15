@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
@@ -57,11 +58,41 @@ type Listing struct {
 	More    bool        `json:"more,omitempty"`
 }
 
-// secretDirs are never listed or served, even under home.
-var secretDirs = map[string]bool{".ssh": true, ".aws": true, ".gnupg": true, ".kube": true, ".docker": true, ".netrc": true,
-	".config/llm-brain": true, ".config/gh": true, ".config/gcloud": true, "Library/Keychains": true}
+// secretDirs are never listed or served, even under home, whether asked for directly or through a link.
+var secretDirs = []string{".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".config/llm-brain", ".config/gh", ".config/gcloud",
+	".config/op", ".config/elastio", ".codex", ".claude", ".password-store", "Library/Keychains", "Library/Application Support/1Password"}
 
-// HomePath resolves p (absolute or ~/...) to a real path in the home folder, refusing the key folders.
+// secretFile: names that hold credentials wherever they are.
+func secretFile(name string) bool {
+	n := strings.ToLower(name)
+	switch n {
+	case ".env", ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".claude.json", "credentials", "token.txt", "auth.json":
+		return true
+	}
+	for _, p := range []string{".env.", "id_rsa", "id_ed25519", "id_ecdsa"} {
+		if strings.HasPrefix(n, p) {
+			return true
+		}
+	}
+	for _, x := range []string{".env", ".pem", ".key", ".p12", ".pfx", ".keychain", ".keychain-db", ".kdbx"} {
+		if strings.HasSuffix(n, x) {
+			return true
+		}
+	}
+	return false
+}
+
+func underSecret(rel string) (string, bool) {
+	for _, d := range secretDirs {
+		if rel == d || strings.HasPrefix(rel, d+"/") {
+			return d, true
+		}
+	}
+	return "", false
+}
+
+// HomePath resolves p (absolute or ~/...) to a real path in the home folder, refusing the key folders and
+// credential files, checked on both the path asked for and where it really leads.
 func HomePath(p string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -74,25 +105,37 @@ func HomePath(p string) (string, error) {
 	if p == "" {
 		p = "~"
 	}
-	p = expandHome(p)
+	p = filepath.Clean(expandHome(p))
 	if !filepath.IsAbs(p) || strings.ContainsRune(p, 0) {
 		return "", ErrTraversal
 	}
-	real, err := filepath.EvalSymlinks(filepath.Clean(p))
+	real, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", p, os.ErrNotExist)
 	}
 	if real != realHome && !strings.HasPrefix(real, realHome+string(filepath.Separator)) {
 		return "", fmt.Errorf("%s is not in your home folder", p)
 	}
-	rel, _ := filepath.Rel(realHome, real)
-	for d := range secretDirs {
-		if rel == d || strings.HasPrefix(rel, d+"/") {
-			return "", fmt.Errorf("%s holds keys; the hub won't serve it", "~/"+d)
+	var rels []string
+	for _, pair := range [][2]string{{home, p}, {realHome, p}, {realHome, real}} {
+		if r, err := filepath.Rel(pair[0], pair[1]); err == nil && !strings.HasPrefix(r, "..") {
+			rels = append(rels, r)
 		}
 	}
-	if b := filepath.Base(real); b == ".env" || strings.HasSuffix(b, ".env") || strings.HasSuffix(b, ".pem") || strings.HasSuffix(b, ".key") {
-		return "", fmt.Errorf("%s looks like a secret; the hub won't serve it", b)
+	for _, rel := range rels {
+		if d, bad := underSecret(rel); bad {
+			return "", fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
+		}
+	}
+	// A link elsewhere in home that points into a key folder (~/dotfiles/aws behind ~/.aws) is caught above
+	// by the real path; a key folder that is itself a link is caught by resolving each one.
+	for _, d := range secretDirs {
+		if t, err := filepath.EvalSymlinks(filepath.Join(home, d)); err == nil && (real == t || strings.HasPrefix(real, t+string(filepath.Separator))) {
+			return "", fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
+		}
+	}
+	if secretFile(filepath.Base(p)) || secretFile(filepath.Base(real)) {
+		return "", fmt.Errorf("%s looks like a credential; the hub won't serve it", filepath.Base(p))
 	}
 	return real, nil
 }
@@ -190,7 +233,8 @@ func (e *Executor) fileGet(ctx context.Context, r FileReq) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(real)
+	// O_NONBLOCK: opening a FIFO must not hang; anything but a regular file is refused once open.
+	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}
@@ -201,6 +245,12 @@ func (e *Executor) fileGet(ctx context.Context, r FileReq) error {
 	}
 	if st.IsDir() {
 		return errors.New("that's a folder")
+	}
+	if !st.Mode().IsRegular() {
+		return errors.New("not a regular file")
+	}
+	if err := syscall.SetNonblock(int(f.Fd()), false); err != nil {
+		return err
 	}
 	return e.post(ctx, r.Token, "application/octet-stream", f, st.Size(), map[string]string{"X-File-Name": filepath.Base(real), "X-File-Path": real})
 }
@@ -234,10 +284,15 @@ func (e *Executor) filePut(ctx context.Context, r FileReq) (string, error) {
 	if !ValidSlug(r.Into) {
 		return "", fmt.Errorf("bad upload folder %q", r.Into)
 	}
-	dir := filepath.Join(e.uploadsDir(), r.Into, time.Now().Format("20060102-150405"))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	base := filepath.Join(e.uploadsDir(), r.Into)
+	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
+	dir, err := os.MkdirTemp(base, time.Now().Format("20060102-150405")+"-") // one per upload: pasted image.png twice is fine
+	if err != nil {
+		return "", err
+	}
+	_ = os.Chmod(dir, 0o755)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.fileURL(r.Token), nil)
 	if err != nil {
 		return "", err
