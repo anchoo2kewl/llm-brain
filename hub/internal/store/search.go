@@ -90,7 +90,7 @@ func (s *Store) MessagesAfter(ctx context.Context, after int64, limit int) ([]In
 // MaxID is the highest id in a table, for progress.
 func (s *Store) MaxID(ctx context.Context, table string) (int64, error) {
 	switch table {
-	case "messages", "events", "sessions", "runs", "chat_messages":
+	case "messages", "events", "sessions", "runs", "chat_messages", "llm_messages":
 	default:
 		return 0, sql.ErrNoRows
 	}

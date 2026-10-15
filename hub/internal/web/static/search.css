@@ -1,4 +1,4 @@
 /* search results: highlighted terms and result-type pills (kept apart from style.css) */
 .snip mark{background:color-mix(in srgb,var(--warn) 28%,transparent);color:inherit;border-radius:3px;padding:0 1px}
-.pill.sx-message{color:var(--acc)}.pill.sx-session{color:var(--ok)}.pill.sx-run{color:var(--warn)}.pill.sx-event{color:var(--mut)}.pill.sx-chat{color:var(--ok)}
+.pill.sx-message{color:var(--acc)}.pill.sx-session{color:var(--ok)}.pill.sx-run{color:var(--warn)}.pill.sx-event{color:var(--mut)}.pill.sx-chat{color:var(--ok)}.pill.sx-llm{color:var(--acc)}
 .sx-help code{font-size:12px;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:0 4px}

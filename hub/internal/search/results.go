@@ -26,7 +26,7 @@ type Request struct {
 
 // Hit is one result, ready to show.
 type Hit struct {
-	Type     string // message | session | run | event | chat
+	Type     string // message | session | run | event | chat | llm
 	ID       int64
 	Host     string
 	Provider string
@@ -96,7 +96,7 @@ func (x *Index) Search(ctx context.Context, r Request) (*Result, error) {
 // Hydrate loads the rows behind index document ids, in the given order, and builds their results. Ids
 // whose rows no longer exist come back as stale.
 func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) ([]Hit, []string, error) {
-	var mids, sids, rids, eids, cids []int64
+	var mids, sids, rids, eids, cids, lids []int64
 	for _, id := range ids {
 		t, n, ok := parseDocID(id)
 		if !ok {
@@ -113,6 +113,8 @@ func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) 
 			eids = append(eids, n)
 		case "c":
 			cids = append(cids, n)
+		case "l":
+			lids = append(lids, n)
 		}
 	}
 	byID := map[string]Hit{}
@@ -150,6 +152,13 @@ func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) 
 	}
 	for _, c := range cs {
 		byID[docID("c", c.ID)] = chatHit(c, terms)
+	}
+	ls, err := st.LLMMessagesByID(ctx, lids)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, m := range ls {
+		byID[docID("l", m.ID)] = llmHit(m, terms)
 	}
 	out := make([]Hit, 0, len(ids))
 	var stale []string
@@ -246,6 +255,15 @@ func chatHit(c store.ChatMessage, terms []HTerm) Hit {
 	}
 	return Hit{Type: "chat", ID: c.ID, Host: c.Source, Provider: c.Source, Time: c.At, Title: ChatTitle(c), Label: label,
 		Link: ChatLink(c), Snippet: Snippet(c.Text, terms)}
+}
+
+func llmHit(m store.LLMIndexMessage, terms []HTerm) Hit {
+	who := "you"
+	if m.Role == "assistant" {
+		who = m.Model
+	}
+	return Hit{Type: "llm", ID: m.ID, Host: "gateway", Provider: m.Model, Time: m.CreatedAt, Title: m.Title, Label: "plain chat · " + who,
+		Link: fmt.Sprintf("/llms/%d#l%d", m.ChatID, m.ID), Snippet: Snippet(m.Content, terms)}
 }
 
 func joinWith(sep string, parts ...string) string {

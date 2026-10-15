@@ -563,7 +563,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		Pct              int
 		PrevURL, NextURL string
 	}{page: page{Title: "Search", Nav: "search", Q: q}, Host: qv.Get("host"), Type: qv.Get("type"), Sort: qv.Get("sort"),
-		Types: []string{"message", "session", "run", "event", "chat"}}
+		Types: []string{"message", "session", "run", "event", "chat", "llm"}}
 	data.Hosts, _ = s.Store.Distinct(r.Context(), "sessions", "host")
 	if q != "" || data.Type != "" {
 		start := time.Now()

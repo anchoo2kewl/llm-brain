@@ -110,7 +110,7 @@ func TestChatStreamsAndSwitchesModels(t *testing.T) {
 			t.Errorf("request %s missing %s", last, want)
 		}
 	}
-	if found, _ := st.LLMChats(ctx, "world", 10); len(found) != 1 {
+	if found, _ := st.LLMChats(ctx, "world", 10, true); len(found) != 1 {
 		t.Errorf("search: %v", found)
 	}
 }

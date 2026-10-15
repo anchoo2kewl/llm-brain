@@ -18,6 +18,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/llm"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
@@ -337,5 +338,33 @@ func TestPromptLibrary(t *testing.T) {
 	}
 	if code, _ := r.post(t, "/prompts/1/delete", nil, ""); code != http.StatusSeeOther {
 		t.Fatal(code)
+	}
+}
+
+// With the index built, the chat list finds plain chats by message text through it, and so does /search.
+func TestPlainChatSearchUsesIndex(t *testing.T) {
+	r := newSessRig(t)
+	idx, err := search.Open("", r.st, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	r.srv.Index = idx
+	if code, loc := r.post(t, "/chats/new", url.Values{"with": {"plain:gpt-5"}, "prompt": {"tell me about zeppelins"}}, ""); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, loc)
+	}
+	r.chats.Wait()
+	if err := idx.Sync(context.Background()); err != nil || !idx.Ready() {
+		t.Fatalf("index: %v %v", err, idx.Ready())
+	}
+	// "world" is only in the reply (not the title), so only the index can find it.
+	if _, body, _ := r.get(t, "/chats?q=world"); !strings.Contains(body, `href="/llms/1"`) {
+		t.Error("chat list search missed the reply text")
+	}
+	if _, body, _ := r.get(t, "/search?q=world+type:llm"); !strings.Contains(body, `/llms/1#l2`) {
+		t.Error("global search missed the plain chat")
+	}
+	if _, body, _ := r.get(t, "/llms/1"); !strings.Contains(body, `id="l2"`) {
+		t.Error("search links point at a missing anchor")
 	}
 }
