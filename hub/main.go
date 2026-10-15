@@ -50,6 +50,8 @@ func main() {
 		err = serve(ctx, lg, os.Args[2:])
 	case "ship":
 		err = ship(ctx, lg, os.Args[2:])
+	case "memory":
+		err = memoryCmd(ctx, lg, os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	default:
@@ -61,7 +63,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hub serve [flags] | hub ship --to http://<hub>:8787 [flags] | hub version")
+	fmt.Fprintln(os.Stderr, "usage: hub serve [flags] | hub ship --to http://<hub>:8787 [flags] | hub memory import [flags] | hub version")
 	os.Exit(2)
 }
 
@@ -134,6 +136,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	slackEnv := fs.String("slack-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/slack.env"), "file holding SLACK_TOKEN, read only when the hub has no Slack token yet")
 	chatInterval := fs.Duration("chat-interval", 2*time.Minute, "how often to read Slack; 0 disables chat")
 	chatBackfill := fs.Duration("chat-backfill", 24*time.Hour, "how far back a newly watched conversation is read")
+	mem := addMemoryFlags(fs)
 	_ = fs.Parse(args)
 	for _, kv := range strings.Split(*people, ",") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok {
@@ -206,6 +209,8 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	go (&agent.Updater{S: st, Log: lg}).Run(ctx, time.Minute) // the daily tool update, when it's on
 	srv.Push = &web.Push{S: st, Log: lg}
 	go srv.RunEvents(ctx, 5*time.Second) // the live stream (badges, inbox) and push notifications
+	srv.Memory = mem.service(st, lg)
+	go srv.Memory.Run(ctx, 15*time.Second) // forward new memories to TaskAI
 	var ex *agent.Executor
 	exDone := make(chan struct{})
 	if c.agent {

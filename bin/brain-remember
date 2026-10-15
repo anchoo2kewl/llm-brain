@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# brain-remember <kind> <title> <body> [--issue N] [--pr N] [--files a,b] [--confidence low|medium|high] [--repo owner/name]
+#
+# Saves a lesson to the shared agent memory, for every agent after you. kind: fact | decision | gotcha |
+# runbook | handoff. Keep it small and verbatim: the lesson, not the story. Never a secret: the hub refuses
+# anything that looks like a credential. A near-duplicate in the same scope replaces the older memory.
+#   brain-remember gotcha "RDS refuses IAM tokens on replication" "Use the password user for the replica slot." --issue 12
+set -uo pipefail
+
+(( $# >= 3 )) || { sed -n '2,7p' "$0" >&2; exit 2; }
+kind="$1" title="$2" body="$3"; shift 3
+repo="${BRAIN_REPO:-}" issue="${BRAIN_ISSUE:-0}" pr="${BRAIN_PR:-0}" files="" conf=""
+while (( $# )); do
+  case "$1" in
+    --repo) repo="$2"; shift ;;
+    --issue) issue="${2#\#}"; shift ;;
+    --pr) pr="${2#\#}"; shift ;;
+    --files) files="$2"; shift ;;
+    --confidence) conf="$2"; shift ;;
+    *) echo "brain-remember: unknown argument $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+hub="${BRAIN_HUB_URL:-}"
+if [[ -z "$hub" ]] && command -v yq >/dev/null 2>&1; then
+  # shellcheck source=lib.sh
+  source "$(dirname "$0")/lib.sh" 2>/dev/null && hub="$(cfg '.memory.hub_url // .hub_url // ""' 2>/dev/null)"
+fi
+hub="${hub:-http://127.0.0.1:8787}"
+if [[ -z "$repo" ]]; then
+  url="$(git remote get-url origin 2>/dev/null)"
+  [[ "$url" =~ github\.com[:/]([^/]+/[^/]+)$ ]] && repo="${BASH_REMATCH[1]%.git}"
+fi
+folder="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+agent="${BRAIN_AGENT:-${CLAUDECODE:+claude-code}}"; agent="${agent:-$(basename "${SHELL:-sh}")}"
+
+body_json="$(jq -n --arg kind "$kind" --arg title "$title" --arg body "$body" --arg repo "$repo" --arg folder "$folder" \
+  --argjson issue "${issue:-0}" --argjson pr "${pr:-0}" --arg files "$files" --arg conf "$conf" \
+  --arg agent "$agent" --arg provider "${BRAIN_PROVIDER:-}" --arg host "$(hostname -s)" --arg session "${BRAIN_SESSION:-}" \
+  '{kind:$kind, title:$title, body:$body, confidence:$conf,
+    scope:{repo:$repo, issue:$issue, pr:$pr, folder:$folder, files:($files | split(",") | map(select(. != "")))},
+    author:{agent:$agent, provider:$provider, host:$host, session:$session}}')" || exit 2
+out="$(curl -sS -m 10 -H 'Content-Type: application/json' --data-binary "$body_json" -w '\n%{http_code}' "$hub/api/memory")" || {
+  echo "brain-remember: hub $hub unreachable" >&2; exit 1; }
+code="${out##*$'\n'}"; out="${out%$'\n'*}"
+case "$code" in
+  200|201) jq -r '"memory \(.memory.id): \(.outcome)" + (if .supersedes then " (replaces \(.supersedes))" else "" end)' <<<"$out" ;;
+  *) echo "brain-remember: $(jq -r '.error // .' <<<"$out" 2>/dev/null || echo "$out")" >&2; exit 1 ;;
+esac

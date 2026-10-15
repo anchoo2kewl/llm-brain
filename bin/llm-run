@@ -12,6 +12,15 @@ prompt="$(cat "$prompt_file")"
 model="${LLM_MODEL:-$(cfg ".providers.$provider.model")}"
 cd "$cwd"
 
+# Shared memory: add what other agents learned about this repo/issue and who else is on it, and how to save a
+# lesson. It fails open: no hub or no memory leaves the prompt as it was.
+if [[ "$(cfg '.memory.enabled')" == "true" ]]; then
+  export BRAIN_PROVIDER="$provider" BRAIN_AGENT="$name"
+  mem="$(BRAIN_HUB_URL="${BRAIN_HUB_URL:-$(cfg '.memory.hub_url // .hub_url')}" "$BRAIN_DIR/bin/brain-context" --k "$(cfg '.memory.k // 8')" 2>/dev/null || true)"
+  [[ -n "$mem" ]] && prompt+=$'\n\n'"$mem"
+  prompt+=$'\n\n'"When you learn something non-obvious the next agent here would need (a gotcha, a decision and why, how to run or test something), save it with \`$BRAIN_DIR/bin/brain-remember <fact|decision|gotcha|runbook|handoff> \"<title>\" \"<the lesson>\" [--files a,b]\`. Keep it small and verbatim, never a secret. If you stop before the work is done, save a handoff."
+fi
+
 # Route through the account gateway when it is enabled and reachable.
 GW=""
 if [[ "$(cfg '.gateway.enabled')" == "true" ]]; then

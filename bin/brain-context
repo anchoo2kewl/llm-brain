@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# brain-context [--repo owner/name] [--issue N] [--pr N] [--cwd DIR] [--files a,b] [--q words] [--k N] [--json]
+#
+# Prints the shared-memory context pack for this work as markdown: what other agents learned about this repo,
+# issue, PR and files, and who else is working on it right now. For prompts, CLAUDE.md and AGENTS.md:
+#   brain-context >> AGENTS.md          brain-context --issue 12 --files api/router.go
+# Defaults: the repo is the cwd's GitHub origin; issue/PR come from $BRAIN_ISSUE / $BRAIN_PR, else the branch
+# name (17446-fix, issue-12). The hub is $BRAIN_HUB_URL, else the fleet config's memory.hub_url / hub_url.
+# It fails open: no hub, no memory, a slow answer → prints nothing and exits 0. It never blocks a run.
+set -uo pipefail
+
+repo="${BRAIN_REPO:-}" issue="${BRAIN_ISSUE:-}" pr="${BRAIN_PR:-}" cwd="$PWD" files="" q="" k="${BRAIN_MEMORY_K:-8}" fmt=md
+while (( $# )); do
+  case "$1" in
+    --repo) repo="$2"; shift ;;
+    --issue) issue="${2#\#}"; shift ;;
+    --pr) pr="${2#\#}"; shift ;;
+    --cwd) cwd="$2"; shift ;;
+    --files) files="$2"; shift ;;
+    --q) q="$2"; shift ;;
+    --k) k="$2"; shift ;;
+    --json) fmt=json ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) echo "brain-context: unknown argument $1" >&2; exit 0 ;;
+  esac
+  shift
+done
+
+hub="${BRAIN_HUB_URL:-}"
+if [[ -z "$hub" ]] && command -v yq >/dev/null 2>&1; then
+  # shellcheck source=lib.sh
+  source "$(dirname "$0")/lib.sh" 2>/dev/null && hub="$(cfg '.memory.hub_url // .hub_url // ""' 2>/dev/null)"
+fi
+hub="${hub:-http://127.0.0.1:8787}"
+
+if [[ -z "$repo" ]]; then
+  url="$(git -C "$cwd" remote get-url origin 2>/dev/null)"
+  [[ "$url" =~ github\.com[:/]([^/]+/[^/]+)$ ]] && repo="${BASH_REMATCH[1]%.git}"
+fi
+if [[ -z "$issue$pr" ]]; then
+  branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  [[ "$branch" =~ (^|[/_-])(issue[-_]?|gh[-_]?)?([0-9]{1,7})($|[/_-]) ]] && issue="${BASH_REMATCH[3]}"
+fi
+folder="$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || echo "$cwd")"
+
+args=(--data-urlencode "repo=$repo" --data-urlencode "issue=$issue" --data-urlencode "pr=$pr" --data-urlencode "folder=$folder"
+      --data-urlencode "files=$files" --data-urlencode "q=$q" --data-urlencode "k=$k")
+[[ -n "${BRAIN_SESSION:-}" ]] && args+=(--data-urlencode "self=$BRAIN_SESSION")
+[[ "$fmt" == md ]] && args+=(--data-urlencode "format=md")
+curl -fsS -m "${BRAIN_MEMORY_TIMEOUT:-3}" -G "${args[@]}" "$hub/api/memory/context" 2>/dev/null
+exit 0
