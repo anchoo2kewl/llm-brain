@@ -638,7 +638,7 @@ type sessFile struct {
 }
 
 func (s *Server) sessionFiles(ctx context.Context, sess store.Session) []sessFile {
-	fs, err := s.Store.SessionFiles(ctx, sess.ID)
+	fs, err := s.Store.SessionFiles(ctx, sess)
 	if err != nil {
 		return nil
 	}

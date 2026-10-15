@@ -119,3 +119,12 @@ func TestFilesEndToEnd(t *testing.T) {
 		t.Fatalf("cross-site upload: %v %v", err, resp.StatusCode)
 	}
 }
+
+func TestLocalPath(t *testing.T) {
+	for p, want := range map[string]bool{"/sessions/1181": true, "/files?q=x": true, "//evil.example": false, `/\evil.example/`: false,
+		"https://evil.example": false, "sessions/1": false, "/a\r\nLocation: x": false} {
+		if got := localPath(p); got != want {
+			t.Errorf("localPath(%q) = %v", p, got)
+		}
+	}
+}

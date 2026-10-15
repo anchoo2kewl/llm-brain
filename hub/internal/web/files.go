@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -269,7 +270,7 @@ func (s *Server) keepFromHost(ctx context.Context, host, path, source string) (i
 // hostKeep copies a file from the host into the hub's assets without downloading it.
 func (s *Server) hostKeep(w http.ResponseWriter, r *http.Request) {
 	id, err := s.keepFromHost(r.Context(), r.PathValue("host"), r.FormValue("path"), "keep")
-	if back := r.FormValue("back"); strings.HasPrefix(back, "/") && !strings.HasPrefix(back, "//") { // a plain form on a page
+	if back := r.FormValue("back"); localPath(back) { // a plain form on a page
 		s.back(w, r, back, err)
 		return
 	}
@@ -300,29 +301,57 @@ func (s *Server) harvestOnce(ctx context.Context) {
 	if s.Agents == nil {
 		return
 	}
-	v, _ := s.Store.Setting(ctx, keyHarvest)
-	after, _ := strconv.ParseInt(v, 10, 64)
-	docs, last, err := s.Store.WrittenDocs(ctx, after, 200)
+	// 1. New documents written since the cursor go on the queue; the cursor always moves on.
+	for {
+		v, _ := s.Store.Setting(ctx, keyHarvest)
+		after, _ := strconv.ParseInt(v, 10, 64)
+		docs, last, err := s.Store.WrittenDocs(ctx, after, 500)
+		if err != nil {
+			s.Log.Printf("files: harvest: %v", err)
+			return
+		}
+		if err := s.Store.QueueAssets(ctx, docs); err != nil {
+			s.Log.Printf("files: harvest queue: %v", err)
+			return
+		}
+		if last <= after {
+			break
+		}
+		_ = s.Store.SetSettings(ctx, map[string]string{keyHarvest: strconv.FormatInt(last, 10)})
+	}
+	// 2. Copy what's due, per item: an offline Mac or a slow copy only delays its own files.
+	due, err := s.Store.DueAssets(ctx, 50)
 	if err != nil {
 		s.Log.Printf("files: harvest: %v", err)
 		return
 	}
-	done := last
-	for _, d := range docs {
+	for _, d := range due {
+		if ctx.Err() != nil {
+			return
+		}
 		if !s.Agents.Ctl.HostLive(ctx, d[0]) {
-			done = -1 // retry the batch next time (a copy kept twice is stored once)
-			break
+			_ = s.Store.RetryAsset(ctx, d[0], d[1], s.Store.AssetTries(ctx, d[0], d[1]))
+			continue
 		}
-		if _, err := s.keepFromHost(ctx, d[0], d[1], "auto"); err != nil && ctx.Err() == nil {
-			s.Log.Printf("files: keep %s:%s: %v", d[0], d[1], err) // gone already, or a credential: skip it
+		_, err := s.keepFromHost(ctx, d[0], d[1], "auto")
+		switch {
+		case err == nil || permanent(err):
+			_ = s.Store.DoneAsset(ctx, d[0], d[1])
+		default:
+			_ = s.Store.RetryAsset(ctx, d[0], d[1], s.Store.AssetTries(ctx, d[0], d[1]))
 		}
 	}
-	if done < 0 || ctx.Err() != nil {
-		return
+}
+
+// permanent: a copy that will never work (the file is gone, outside home, a credential, a folder).
+func permanent(err error) bool {
+	m := err.Error()
+	for _, x := range []string{"no such file", "not in your home folder", "won't serve", "that's a folder", "not a regular file", "file does not exist"} {
+		if strings.Contains(m, x) {
+			return true
+		}
 	}
-	if done > after {
-		_ = s.Store.SetSettings(ctx, map[string]string{keyHarvest: strconv.FormatInt(done, 10)})
-	}
+	return false
 }
 
 func (s *Server) assetsPage(w http.ResponseWriter, r *http.Request) {
@@ -502,4 +531,13 @@ func (s *Server) agentFileGet(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, t.file)
+}
+
+// localPath: a path on this hub, safe to redirect to (no scheme, no host, no backslashes browsers read as /).
+func localPath(p string) bool {
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.ContainsAny(p, "\\\r\n") {
+		return false
+	}
+	u, err := url.Parse(p)
+	return err == nil && u.Scheme == "" && u.Host == "" && u.User == nil
 }
