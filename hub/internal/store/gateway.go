@@ -75,6 +75,9 @@ func (s *Store) SaveGatewayAccounts(ctx context.Context, accts []GatewayAccount)
 			return err
 		}
 	}
+	if err := recordQuotaHistory(ctx, tx, accts, time.Now()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
