@@ -91,6 +91,32 @@ func underSecret(rel string) (string, bool) {
 	return "", false
 }
 
+// checkSecret refuses key folders and credential files for a path, lexically (as asked) and through links:
+// a key folder that is itself a link counts by its target too.
+func checkSecret(p string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	realHome, _ := filepath.EvalSymlinks(home)
+	for _, h := range []string{home, realHome} {
+		if r, err := filepath.Rel(h, p); err == nil && !strings.HasPrefix(r, "..") {
+			if d, bad := underSecret(r); bad {
+				return fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
+			}
+		}
+	}
+	for _, d := range secretDirs {
+		if t, err := filepath.EvalSymlinks(filepath.Join(home, d)); err == nil && (p == t || strings.HasPrefix(p, t+string(filepath.Separator))) {
+			return fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
+		}
+	}
+	if secretFile(filepath.Base(p)) {
+		return fmt.Errorf("%s looks like a credential; the hub won't serve it", filepath.Base(p))
+	}
+	return nil
+}
+
 // HomePath resolves p (absolute or ~/...) to a real path in the home folder, refusing the key folders and
 // credential files, checked on both the path asked for and where it really leads.
 func HomePath(p string) (string, error) {
@@ -116,26 +142,11 @@ func HomePath(p string) (string, error) {
 	if real != realHome && !strings.HasPrefix(real, realHome+string(filepath.Separator)) {
 		return "", fmt.Errorf("%s is not in your home folder", p)
 	}
-	var rels []string
-	for _, pair := range [][2]string{{home, p}, {realHome, p}, {realHome, real}} {
-		if r, err := filepath.Rel(pair[0], pair[1]); err == nil && !strings.HasPrefix(r, "..") {
-			rels = append(rels, r)
-		}
+	if err := checkSecret(p); err != nil {
+		return "", err
 	}
-	for _, rel := range rels {
-		if d, bad := underSecret(rel); bad {
-			return "", fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
-		}
-	}
-	// A link elsewhere in home that points into a key folder (~/dotfiles/aws behind ~/.aws) is caught above
-	// by the real path; a key folder that is itself a link is caught by resolving each one.
-	for _, d := range secretDirs {
-		if t, err := filepath.EvalSymlinks(filepath.Join(home, d)); err == nil && (real == t || strings.HasPrefix(real, t+string(filepath.Separator))) {
-			return "", fmt.Errorf("~/%s holds keys; the hub won't serve it", d)
-		}
-	}
-	if secretFile(filepath.Base(p)) || secretFile(filepath.Base(real)) {
-		return "", fmt.Errorf("%s looks like a credential; the hub won't serve it", filepath.Base(p))
+	if err := checkSecret(real); err != nil {
+		return "", err
 	}
 	return real, nil
 }

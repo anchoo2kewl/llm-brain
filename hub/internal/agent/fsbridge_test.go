@@ -48,7 +48,27 @@ func TestFSSession(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "escape.txt")); err == nil {
 		t.Fatal("wrote outside the root")
 	}
-	if r := f.handle(fsReq{Op: "find"}); len(r.Files) != 3 { // escape.txt, src/a.go, src/new.go (.env hidden)
+	// A credential name or a key folder is refused even for a new file, and a deleted file is a conflict.
+	_ = os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	ks := &fsSession{root: home, watched: map[string]string{}}
+	if w := ks.handle(fsReq{Op: "write", Path: ".ssh/authorized_keys", Content: str("x")}); w.Error == "" {
+		t.Fatal("wrote into ~/.ssh")
+	}
+	_ = os.Symlink(filepath.Join(root, "src", "a.go"), filepath.Join(root, ".env.local"))
+	if r := f.handle(fsReq{Op: "read", Path: ".env.local"}); r.Error == "" {
+		t.Fatal("read through a credential-named link")
+	}
+	gone := f.handle(fsReq{Op: "read", Path: "src/new.go"})
+	_ = os.Remove(filepath.Join(root, "src", "new.go"))
+	if w := f.handle(fsReq{Op: "write", Path: "src/new.go", Content: str("x"), Base: gone.SHA}); !w.Conflict {
+		t.Fatalf("deleted file recreated silently: %+v", w)
+	}
+	_ = os.WriteFile(filepath.Join(root, "latin1.txt"), []byte{'c', 'a', 'f', 0xe9}, 0o644)
+	if r := f.handle(fsReq{Op: "read", Path: "latin1.txt"}); !r.Binary {
+		t.Fatal("non-UTF-8 file offered for editing")
+	}
+	_ = os.Remove(filepath.Join(root, "latin1.txt"))
+	if r := f.handle(fsReq{Op: "find"}); len(r.Files) != 2 { // escape.txt, src/a.go, src/new.go (.env hidden)
 		t.Fatalf("find: %+v", r.Files)
 	}
 	// Watch: a change on disk is reported once.

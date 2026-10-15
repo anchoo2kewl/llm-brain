@@ -136,7 +136,11 @@
   function close(path) {
     var f = files[path];
     if (!f) return;
-    if (isDirty(f)) save(path); // never lose an edit: save on close
+    if (isDirty(f) || f.saving) { // never lose an edit: save first, close once it's clean
+      f.closing = true;
+      if (!f.saving) save(path);
+      return;
+    }
     f.tab.remove();
     setTimeout(function () { f.model.dispose(); }, 2000);
     delete files[path];
@@ -159,13 +163,14 @@
     say("saving " + path + "…");
     call("write", { path: path, content: content, base: f.sha }).then(function (r) {
       f.saving = false;
-      if (r.conflict) { conflict(path, r); return; }
+      if (r.conflict) { f.closing = false; conflict(path, r); return; } // keep the tab: the person decides
       f.sha = r.sha;
       f.saved = version;
       f.tab.classList.toggle("dirty", isDirty(f));
       say("saved " + path.split("/").pop() + " · " + new Date().toLocaleTimeString());
-      if (isDirty(f)) dirty(path); // typed more while it was saving
-    }).catch(function (e) { f.saving = false; say("couldn't save " + path + ": " + e.message); f.timer = setTimeout(function () { save(path); }, 3000); });
+      if (isDirty(f)) { dirty(path); return; } // typed more while it was saving
+      if (f.closing) close(path);
+    }).catch(function (e) { f.saving = false; f.closing = false; say("couldn't save " + path + ": " + e.message + " · retrying"); f.timer = setTimeout(function () { save(path); }, 3000); });
   }
   function watch() { if (ws && ws.readyState === 1) call("watch", { paths: Object.keys(files) }).catch(function () {}); }
 

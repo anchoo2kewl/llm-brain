@@ -239,6 +239,7 @@
         s.empty.hidden = false;
         fillEmpty(s, i);
       }
+      if (s.id !== id && s.hideEditors) s.hideEditors(); // another terminal here: its editor isn't this one's
       s.id = id;
       paintSlot(i);
     }
@@ -263,19 +264,22 @@
     var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i };
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     title.title = "Click to rename";
-    title.addEventListener("click", function (e) { e.stopPropagation(); if (s.id && infos[s.id]) rename(s.id, title); });
+    title.addEventListener("click", function (e) { e.stopPropagation(); if (title.getAttribute("contenteditable") !== "true" && s.id && infos[s.id]) rename(s.id, title); });
     zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
     // </>: the editor on this pane's folder, over the terminal; again to go back. One editor per pane, kept
     // while it's open so switching back and forth is instant.
-    var ed = null;
+    // One editor per folder, kept (hidden) when the pane moves on, so unsaved work is never navigated away.
+    s.editors = {};
+    s.hideEditors = function () { Object.keys(s.editors).forEach(function (k) { s.editors[k].hidden = true; }); code.classList.remove("on"); };
     code.onclick = function (e) {
       e.stopPropagation();
       var t = s.id && infos[s.id];
-      if (ed && !ed.hidden) { ed.hidden = true; code.classList.remove("on"); return; }
       if (!t) return;
       var src = "/edit?embed=1&host=" + encodeURIComponent(t.host) + "&root=" + encodeURIComponent(t.cwd);
-      if (!ed) { ed = document.createElement("iframe"); ed.className = "ws-editor"; ed.title = "Editor"; root.appendChild(ed); }
-      if (ed.dataset.src !== src) { ed.src = src; ed.dataset.src = src; }
+      var ed = s.editors[src];
+      if (ed && !ed.hidden) { s.hideEditors(); return; }
+      s.hideEditors();
+      if (!ed) { ed = document.createElement("iframe"); ed.className = "ws-editor"; ed.title = "Editor"; ed.src = src; root.appendChild(ed); s.editors[src] = ed; }
       ed.hidden = false; code.classList.add("on");
     };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
