@@ -167,54 +167,51 @@ type TermSeen struct {
 //   - ones it has that the hub thinks are starting, ended or failed are live again (an open whose report
 //     was lost, or a restart's lost-command check), unless they ended after since (a kill the listing predates).
 func (s *Store) SyncTerminals(ctx context.Context, host string, seen []TermSeen, since string) (ended, revived int, err error) {
-	have := map[int64]string{}
-	for _, t := range seen {
-		have[t.ID] = t.Cwd
-	}
-	ts, err := s.hostTerminals(ctx, host)
-	if err != nil {
-		return 0, 0, err
-	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := Now()
-	for _, t := range ts {
-		cwd, there := have[t.ID]
-		switch {
-		case t.Status == "live" && !there && t.LiveAt < since:
-			if _, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'ended', updated_at = ?, ended_at = ? WHERE id = ? AND status = 'live'`,
-				now, now, t.ID); err != nil {
-				return 0, 0, err
-			}
-			ended++
-		case t.Status != "live" && there && (t.EndedAt == "" || t.EndedAt < since):
-			if _, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'live', error = '', updated_at = ?, live_at = ?, ended_at = '',
-				cwd = CASE WHEN ? != '' THEN ? ELSE cwd END WHERE id = ?`, now, now, cwd, cwd, t.ID); err != nil {
-				return 0, 0, err
-			}
+	have := map[int64]bool{}
+	for _, t := range seen {
+		have[t.ID] = true
+		// The predicates re-check the state in the write itself, so a report that lands meanwhile wins.
+		res, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'live', error = '', updated_at = ?, live_at = ?, ended_at = '',
+			cwd = CASE WHEN ? != '' THEN ? ELSE cwd END
+			WHERE id = ? AND host = ? AND status != 'live' AND (ended_at = '' OR ended_at < ?)`, now, now, t.Cwd, t.Cwd, t.ID, host, since)
+		if err != nil {
+			return 0, 0, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
 			revived++
 		}
 	}
-	return ended, revived, tx.Commit()
-}
-
-// hostTerminals: the host's terminals worth reconciling (the newest few hundred).
-func (s *Store) hostTerminals(ctx context.Context, host string) ([]Terminal, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? ORDER BY id DESC LIMIT 500`, host)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM terminals WHERE host = ? AND status = 'live' AND live_at < ?`, host, since)
 	if err != nil {
-		return nil, err
+		return 0, 0, err
 	}
-	defer rows.Close()
-	var out []Terminal
+	var gone []int64
 	for rows.Next() {
-		t, err := scanTerm(rows)
-		if err != nil {
-			return nil, err
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, 0, err
 		}
-		out = append(out, t)
+		if !have[id] {
+			gone = append(gone, id)
+		}
 	}
-	return out, rows.Err()
+	rows.Close()
+	for _, id := range gone {
+		res, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'ended', updated_at = ?, ended_at = ?
+			WHERE id = ? AND status = 'live' AND live_at < ?`, now, now, id, since)
+		if err != nil {
+			return 0, 0, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			ended++
+		}
+	}
+	return ended, revived, tx.Commit()
 }
