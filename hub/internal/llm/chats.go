@@ -182,6 +182,12 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 		}
 	}
 	budget := maxFileBytes
+	built := map[int64][]Part{} // newest first, so the message being answered gets the budget first
+	for i := len(ms) - 1; i >= 0; i-- {
+		if full[ms[i].ID] {
+			built[ms[i].ID] = c.parts(ms[i].Content, atts[ms[i].ID], &budget)
+		}
+	}
 	var hist []Message
 	for _, m := range ms {
 		if m.ID == rid || (m.Role == "assistant" && (m.Status != "done" || m.Content == "")) {
@@ -189,7 +195,7 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 		}
 		if m.Role == "user" && len(atts[m.ID]) > 0 {
 			if full[m.ID] {
-				hist = append(hist, Message{Role: m.Role, Content: c.parts(m.Content, atts[m.ID], &budget)})
+				hist = append(hist, Message{Role: m.Role, Content: built[m.ID]})
 			} else {
 				hist = append(hist, Message{Role: m.Role, Content: m.Content + "\n" + named(atts[m.ID])})
 			}
