@@ -16,10 +16,13 @@
     if (t) { clearTimeout(note.t); note.t = setTimeout(function () { note.hidden = true; }, 6000); }
   }
   // wire(el, host, into, onPaths): drag-over highlight, drop, and paste of files on el.
-  window.hubDrop = function (el, host, into, onPaths) {
+  // host may be a function, for a form whose Mac can still change.
+  window.hubDrop = function (el, hostArg, into, onPaths) {
     function take(files) {
       files = Array.prototype.slice.call(files || []);
       if (!files.length) return false;
+      var host = typeof hostArg === "function" ? hostArg() : hostArg;
+      if (!host) { say("Pick a Mac first."); return true; }
       say("Uploading " + files.map(function (f) { return f.name || "image"; }).join(", ") + " to " + host + "…");
       upload(host, into, files).then(function (rs) {
         var bad = rs.filter(function (j) { return j.error; });
