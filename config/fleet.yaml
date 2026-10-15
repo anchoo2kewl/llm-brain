@@ -106,18 +106,16 @@ notify:
   slack_self_dm: false          # DM the owner on merge / block (needs a Slack tool in the worker)
   macos: true
 
-# Team chat (Slack). Every tick, bin/chat-watch reads these channels (read-only, it never posts there).
-# Messages from `trusted` people that name an issue/PR become notes the workers must act on, like
-# review comments; an LLM pass writes a short digest for the hub and can stop a fleet issue when
-# a trusted person says so. Token: a Slack user token (xoxp-…) in env_file as SLACK_TOKEN=…
+# Team chat. The hub holds the Slack connection and picks what to watch (channels, all your DMs,
+# mentions of you anywhere) at /settings/slack; bin/chat-watch reads new messages from the hub every
+# tick. Messages from `trusted` people that name an issue/PR become notes the workers act on, like
+# review comments; an LLM pass writes a short digest and can stop a fleet issue when a trusted person says so.
 chat:
   enabled: false
-  env_file: ~/.config/llm-brain/slack.env
-  me: ""                        # your Slack user id, to spot @-mentions
-  channels: []                  # e.g. [{id: C0123456789, name: handoff, repo: acme/web}]  repo = what a bare #123 means
-  trusted: {}                   # Slack user id -> GitHub handle (a key of `people`), e.g. {U0123ABCD: teammate-a}
+  hub_url: http://127.0.0.1:8787
+  trusted: {}                   # Slack user id -> GitHub handle (a key of `people`), e.g. {U0000000002: teammate-a}
+  channel_repos: {}             # channel name -> repo a bare #123 means there, e.g. {handoff: acme/web}
   repos: []                     # extra repos for short refs like web#12 (intake repos and the overlay's repos.txt are always known)
-  backfill_hours: 24            # how far back the first run reads
   insights: true
   provider: claude
   model: ""                     # e.g. sonnet: a quick model is plenty for a digest

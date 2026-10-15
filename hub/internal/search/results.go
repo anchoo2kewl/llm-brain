@@ -26,7 +26,7 @@ type Request struct {
 
 // Hit is one result, ready to show.
 type Hit struct {
-	Type     string // message | session | run | event
+	Type     string // message | session | run | event | chat
 	ID       int64
 	Host     string
 	Provider string
@@ -96,7 +96,7 @@ func (x *Index) Search(ctx context.Context, r Request) (*Result, error) {
 // Hydrate loads the rows behind index document ids, in the given order, and builds their results. Ids
 // whose rows no longer exist come back as stale.
 func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) ([]Hit, []string, error) {
-	var mids, sids, rids, eids []int64
+	var mids, sids, rids, eids, cids []int64
 	for _, id := range ids {
 		t, n, ok := parseDocID(id)
 		if !ok {
@@ -111,6 +111,8 @@ func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) 
 			rids = append(rids, n)
 		case "e":
 			eids = append(eids, n)
+		case "c":
+			cids = append(cids, n)
 		}
 	}
 	byID := map[string]Hit{}
@@ -141,6 +143,13 @@ func Hydrate(ctx context.Context, st *store.Store, ids []string, terms []HTerm) 
 	}
 	for _, e := range es {
 		byID[docID("e", e.ID)] = eventHit(e, terms)
+	}
+	cs, err := st.ChatMessagesByID(ctx, cids)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, c := range cs {
+		byID[docID("c", c.ID)] = chatHit(c, terms)
 	}
 	out := make([]Hit, 0, len(ids))
 	var stale []string
@@ -215,6 +224,28 @@ func eventHit(e store.IndexEvent, terms []HTerm) Hit {
 		h.Title = "fleet.log · " + k[1]
 	}
 	return h
+}
+
+// ChatTitle names a conversation: #channel, or the people in a DM.
+func ChatTitle(c store.ChatMessage) string {
+	if c.ConvKind == "dm" || c.ConvKind == "group_dm" {
+		return c.ConvName
+	}
+	return "#" + c.ConvName
+}
+
+// ChatLink is a chat message's place on the chat page.
+func ChatLink(c store.ChatMessage) string {
+	return "/chat?src=" + url.QueryEscape(c.ConvID) + "&until=" + url.QueryEscape(c.At) + "#c" + fmt.Sprint(c.ID)
+}
+
+func chatHit(c store.ChatMessage, terms []HTerm) Hit {
+	label := c.UserName
+	if c.MentionsMe {
+		label += " · mentions you"
+	}
+	return Hit{Type: "chat", ID: c.ID, Host: c.Source, Provider: c.Source, Time: c.At, Title: ChatTitle(c), Label: label,
+		Link: ChatLink(c), Snippet: Snippet(c.Text, terms)}
 }
 
 func joinWith(sep string, parts ...string) string {

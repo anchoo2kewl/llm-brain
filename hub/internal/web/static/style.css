@@ -108,3 +108,17 @@ pre{font-size:13px;line-height:1.65;padding:16px}.msg{padding:14px 18px}.txt{lin
 @media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.inspect-grid{grid-template-columns:1fr}.wrapw{padding-left:20px;padding-right:20px}.route strong{font-size:17px}}
 @media(max-width:640px){.wrapw{padding-left:14px;padding-right:14px}main.wrapw{padding-top:20px}h1{font-size:25px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tile{padding:14px}.panel{padding:16px}.route{grid-template-columns:1fr}.route li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}.route strong{margin:0}.bar .wrapw{gap:8px}.bar nav{order:3;width:100%}.bar{position:static}.gsearch{margin:0}.kv{grid-template-columns:1fr}.capacity-number span{display:block}td,th{padding:10px 12px}.section-nav a{padding:6px 8px}}
 @media(max-width:640px){.wrap table{min-width:640px}.wrap{scrollbar-width:auto}}
+/* chat */
+.chat-count{margin:-8px 0 12px}
+.chat{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
+.chat-sources{display:flex;flex-direction:column;gap:2px;position:sticky;top:90px}
+.chat-sources a{display:flex;justify-content:space-between;gap:8px;padding:7px 11px;border-radius:8px;color:var(--fg);overflow-wrap:anywhere}
+.chat-sources a.on{background:var(--card);color:var(--acc);font-weight:600}
+.chat-thread{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;min-width:0}
+.chat-msg{padding:4px 0;scroll-margin-top:100px}.chat-msg:target{background:color-mix(in srgb,var(--acc) 8%,transparent);border-radius:6px}
+.chat-msg .who{text-transform:none;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.chat-msg.mention .who strong{color:var(--warn)}
+.chat-replies{border-left:3px solid var(--line);margin:6px 0 0 4px;padding-left:12px}
+.chat-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px;margin-bottom:8px}
+.chat-picker label{overflow-wrap:anywhere}
+@media(max-width:800px){.chat{grid-template-columns:1fr}.chat-sources{position:static;flex-direction:row;flex-wrap:wrap}}

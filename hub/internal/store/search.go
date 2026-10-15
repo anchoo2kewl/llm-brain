@@ -9,7 +9,7 @@ import (
 // Rows for the search index: read in id order, a page at a time, so the single connection is never held for
 // long. And lookups by id, to turn index hits into results.
 
-// MarkDirty records that a session ("s") or run ("r") changed and must be re-indexed. Call it inside the
+// MarkDirty records that a session ("s"), run ("r") or chat message ("c") changed and must be re-indexed. Call it inside the
 // transaction that changed the row.
 func MarkDirty(ctx context.Context, x interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -90,7 +90,7 @@ func (s *Store) MessagesAfter(ctx context.Context, after int64, limit int) ([]In
 // MaxID is the highest id in a table, for progress.
 func (s *Store) MaxID(ctx context.Context, table string) (int64, error) {
 	switch table {
-	case "messages", "events", "sessions", "runs":
+	case "messages", "events", "sessions", "runs", "chat_messages":
 	default:
 		return 0, sql.ErrNoRows
 	}

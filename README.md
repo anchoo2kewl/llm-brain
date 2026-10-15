@@ -72,13 +72,13 @@ With `gateway.enabled`, workers go through [CLIProxyAPI](https://github.com/rout
 
 ## Team chat
 
-`bin/chat-watch` runs first on every tick and reads the Slack channels in `chat.channels`. It is read-only and never posts there.
+The hub holds the Slack connection. At `/settings/slack` you paste a token and pick what to watch: channels, all your DMs and group DMs, and mentions of you anywhere. It stores every message and makes it searchable at `/chat`. It is read-only and never posts.
 
-- Every message goes to `logs/chat.log`, which the hub searches.
+`bin/chat-watch` runs first on every fleet tick and reads the new messages from the hub:
 - A message from someone in `chat.trusted` that names an issue or PR (`#212`, `web#12`, a GitHub link) becomes a note on it. Workers treat those notes like that person's review comments, and the latest one wins. A new note wakes the babysitter.
-- Each batch of new messages gets one LLM pass that writes a short digest for the hub's overview. If a trusted person says a fleet issue should stop ("stand down, Sam has it"), the pass labels it `agent:stop` and kills its worker.
+- Each batch gets one LLM pass that writes a short digest for the overview. If a trusted person says a fleet issue should stop ("stand down, Sam has it"), it labels the issue `agent:stop` and kills its worker.
 
-Setup: create a Slack app with user scopes `channels:history`, `groups:history` and `users:read`, install it, and put `SLACK_TOKEN=xoxp-…` in `~/.config/llm-brain/slack.env`. Then fill in `chat:` in your overlay; see `examples/overlay/config.yaml`.
+Setup: create a Slack app with the user scopes `channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read search:read`, install it, and paste the `xoxp-…` token at `/settings/slack`. You can also put `SLACK_TOKEN=…` in `~/.config/llm-brain/slack.env`. Then fill in `chat:` in your overlay; see `examples/overlay/config.yaml`.
 
 ## The fleet
 
@@ -100,13 +100,17 @@ Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite
 - **Runs:** every worker with its prompt, live log, status, PR/issue link and its own conversation.
 - **Sessions:** every `~/.claude/projects/**.jsonl` and `~/.codex/sessions/**.jsonl` as a readable, live transcript.
 - **Search:** a bleve full-text index over messages, thinking, tool calls and output, sessions, run logs and events — a few ms per query. Syntax: `words`, `"phrase"`, `deploy*`, `-word`, code tokens as typed (`app#835`, `a/b.go`, uuids, `snake_case`), filters `host:` `type:` `provider:` `kind:` `tool:` `role:` `status:` `session:` `after:` `before:` (also `7d`, `today`).
+- **Chat:** Slack, read-only — the hub only calls read methods and never posts. Connect on `/settings/slack` by pasting a user token (or put `SLACK_TOKEN=` in `~/.config/llm-brain/slack.env`; it seeds the hub's database once). The token is never shown again or returned by any API; the page shows the account and any missing scopes.
+  - What it watches: the channels you tick, optionally all your DMs and group DMs, and optionally mentions of you anywhere. It reads them every 2 minutes (`--chat-interval`) and backfills 24 h for a new conversation (`--chat-backfill`).
+  - Where it shows up: `/chat` groups messages by source and thread, and search takes `type:chat channel: from: mentions:me`.
+  - Fleet scripts read `GET /api/chat/messages?after=<id>` and `GET /api/chat/me`.
 
 Ingestion is incremental and idempotent: a byte offset per file advances in the same transaction as its rows; the hub re-scans every 10 s.
 
 ```
 make -C hub build     # -> bin/hub (darwin/arm64, no CGO)
 make -C hub check     # go vet + go test
-bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--people login=Name,...] [--gateway URL]
+bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--people login=Name,...] [--gateway URL] [--slack-env PATH] [--chat-interval 2m|0]
 bin/hub ship --to http://<hub-host>:8787 [--once]
 ```
 

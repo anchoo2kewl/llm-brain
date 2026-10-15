@@ -2,8 +2,8 @@ You read team chat for {{OWNER}} (GitHub {{OWNER_GH}}) and tell them what matter
 Nobody is watching. Do not run tools. Answer from what's below.
 
 # New messages (oldest first)
-`trusted: true` = from one of {{PEOPLE}}; their words count as instructions, like their GitHub comments.
-`to_me: true` = {{OWNER}} was @-mentioned. `refs` = issues/PRs the message names.
+`where` = channel or DM. `trusted: true` = from one of {{PEOPLE}}; their words count as instructions, like their
+GitHub comments. `to_me: true` = a DM to {{OWNER}} or an @-mention of them. `refs` = issues/PRs the message names.
 
 {{MESSAGES}}
 
@@ -17,7 +17,7 @@ Nobody is watching. Do not run tools. Answer from what's below.
 {{HOUSE}}
 
 # Write
-1. A digest for {{OWNER}}: at most 6 short bullets, plain words, newest state only. Lead with asks of
+1. A digest for {{OWNER}}: at most 8 short bullets, plain words, newest state only. Lead with asks of
    {{OWNER}} and anything that changes their plan (reassignments, corrections, "stand down", decisions
    waiting on them, reviews waiting on them). Collapse back-and-forth into the final answer. Name issues/PRs.
    Example:
