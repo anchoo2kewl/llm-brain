@@ -26,7 +26,7 @@ func TestSessionFilesAndWrittenDocs(t *testing.T) {
 	add(3, "Read", `{"file_path":"/Users/me/elastio/notes.md"}`)
 	add(4, "apply_patch", `{"input":"*** Begin Patch\n*** Add File: /Users/me/out.csv\n+a\n*** Update File: /Users/me/elastio/repo/x.go\n*** End Patch"}`)
 	add(5, "Edit", `{"file_path":"/Users/me/elastio/report.md","old_string":"x","new_string":"y"}`)
-	add(6, "Write", `{"file_path":"/Users/me/big.pdf","content":"cut short by ingestion…`) // truncated JSON
+	add(6, "Write", `{"file_path":"/Users/me/big.pdf","content":"cut short by ingestion…`)  // truncated JSON
 	add(7, "apply_patch", `*** Begin Patch\n*** Add File: docs/plan.md\n+x\n*** End Patch`) // relative to cwd
 	addIn(t, s, 8, 1, "Write", `{"file_path":"/Users/me/sub.md","content":"x"}`)            // a subagent's file
 	fs, err := s.SessionFiles(ctx, Session{ID: 7, Host: "studio", UUID: "u7"})

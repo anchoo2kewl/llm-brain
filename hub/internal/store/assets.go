@@ -213,9 +213,19 @@ func (s *Store) QueueAssets(ctx context.Context, items [][2]string) error {
 	return nil
 }
 
-// DueAssets: queued copies whose retry time has come, oldest attempts first.
-func (s *Store) DueAssets(ctx context.Context, limit int) ([][2]string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT host, path FROM asset_queue WHERE next_at <= ? ORDER BY tries, next_at LIMIT ?`, Now(), limit)
+// DueAssets: queued copies on the given (live) hosts whose retry time has come, oldest attempts first.
+// Copies for other hosts wait without using up their tries.
+func (s *Store) DueAssets(ctx context.Context, hosts []string, limit int) ([][2]string, error) {
+	if len(hosts) == 0 {
+		return nil, nil
+	}
+	args := []any{Now()}
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT host, path FROM asset_queue WHERE next_at <= ? AND host IN (?`+strings.Repeat(", ?", len(hosts)-1)+`)
+		ORDER BY tries, next_at LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
