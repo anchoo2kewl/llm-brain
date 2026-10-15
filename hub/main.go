@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anchoo2kewl/llm-brain/hub/internal/chat"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/gateway"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
@@ -95,6 +96,9 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	noScan := fs.Bool("no-scan", false, "serve only; don't ingest this machine's files")
 	gwURL := fs.String("gateway", "http://127.0.0.1:8317", "account gateway (CLIProxyAPI) base URL; '' disables")
 	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY")
+	slackEnv := fs.String("slack-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/slack.env"), "file holding SLACK_TOKEN, read only when the hub has no Slack token yet")
+	chatInterval := fs.Duration("chat-interval", 2*time.Minute, "how often to read Slack; 0 disables chat")
+	chatBackfill := fs.Duration("chat-backfill", 24*time.Hour, "how far back a newly watched conversation is read")
 	_ = fs.Parse(args)
 	for _, kv := range strings.Split(*people, ",") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok {
@@ -133,6 +137,24 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 			}
 		}
 		go idx.Run(ctx, 30*time.Second)
+	}
+	if *chatInterval > 0 {
+		if seeded, err := chat.SeedToken(ctx, st, *slackEnv); err != nil {
+			lg.Printf("chat: %v", err)
+		} else if seeded {
+			lg.Printf("chat: Slack token taken from %s", *slackEnv)
+		}
+		cp := &chat.Poller{Store: st, Log: lg, Backfill: *chatBackfill}
+		if srv.Index != nil {
+			idx := srv.Index
+			cp.OnWrite = func(ctx context.Context) {
+				if err := idx.Sync(ctx); err != nil && ctx.Err() == nil {
+					lg.Printf("search index: %v", err)
+				}
+			}
+		}
+		srv.Chat = cp
+		go cp.Run(ctx, *chatInterval)
 	}
 	h := srv.Handler()
 

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anchoo2kewl/llm-brain/hub/internal/chat"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
@@ -40,6 +41,7 @@ type Server struct {
 	Host     string
 	Log      *log.Logger
 	Index    *search.Index // nil: search scans the store
+	Chat     *chat.Poller  // nil: the Slack settings page can't connect or list channels
 
 	pages map[string]*template.Template
 }
@@ -80,6 +82,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /messages/{id}/raw", s.messageRaw)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /hosts", s.hosts)
+	mux.HandleFunc("GET /chat", s.chatPage)
+	mux.HandleFunc("GET /settings/slack", s.slackSettings)
+	mux.HandleFunc("POST /settings/slack", s.tailnetOnly(s.slackSave))
+	mux.HandleFunc("POST /settings/slack/token", s.tailnetOnly(s.slackToken))
+	mux.HandleFunc("GET /api/chat/messages", s.tailnetOnly(s.chatMessagesAPI))
+	mux.HandleFunc("GET /api/chat/me", s.tailnetOnly(s.chatMeAPI))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /api/ship/offsets", s.tailnetOnly(s.shipOffsets))
 	mux.HandleFunc("POST /api/ship/chunk", s.tailnetOnly(s.shipChunk))
@@ -224,6 +232,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Quotas     []store.QuotaObservation
 		Gateway    []store.GatewayAccount
 		GwRequests []store.GatewayRequest
+		Chat       store.ChatCounts
+		ChatOn     bool
 		Now        time.Time
 	}{page: page{Title: "Overview", Nav: "overview"}, Now: time.Now()}
 	st, err := readStatus(filepath.Join(s.StateDir, "status.json"))
@@ -251,6 +261,11 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	errs = append(errs, e)
 	data.RecentRuns, e = s.Store.Runs(ctx, store.RunFilter{Limit: 10})
 	errs = append(errs, e)
+	data.Chat, e = s.Store.ChatCounts(ctx, time.Now().Add(-24*time.Hour))
+	errs = append(errs, e)
+	if tok, _ := s.Store.Setting(ctx, store.KeySlackToken); tok != "" || data.Chat.Total > 0 {
+		data.ChatOn = true
+	}
 	if err := errors.Join(errs...); err != nil {
 		s.fail(w, err)
 		return
@@ -538,7 +553,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		Pct              int
 		PrevURL, NextURL string
 	}{page: page{Title: "Search", Nav: "search", Q: q}, Host: qv.Get("host"), Type: qv.Get("type"), Sort: qv.Get("sort"),
-		Types: []string{"message", "session", "run", "event"}}
+		Types: []string{"message", "session", "run", "event", "chat"}}
 	data.Hosts, _ = s.Store.Distinct(r.Context(), "sessions", "host")
 	if q != "" || data.Type != "" {
 		start := time.Now()

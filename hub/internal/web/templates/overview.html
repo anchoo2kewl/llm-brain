@@ -4,6 +4,7 @@
 {{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>
 
 <nav class="section-nav" aria-label="Overview sections"><a href="#chat">Chat</a><a href="#capacity">Usage &amp; capacity</a><a href="#models">LLMs</a><a href="#routing">Routing</a><a href="#agents">Live agents</a><a href="#pipeline">Issue pipeline</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a></nav>
+{{if .ChatOn}}<p class="chat-count small"><a href="/chat">From chat: {{.Chat.Total}} messages in 24h{{if .Chat.Mentions}} · {{.Chat.Mentions}} mention you{{end}} →</a></p>{{end}}
 {{with .Status}}<div class="grid">
 <div class="tile"><b>{{len .Owned}}/{{.MaxInFlight}}</b><span>issues in flight</span></div>
 <div class="tile"><b>{{.Queued}}</b><span>queued</span></div>

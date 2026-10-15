@@ -14,6 +14,6 @@
 <div class="snip">{{.Snippet}}</div>
 </div>{{else}}<div class="empty">Nothing matches.</div>{{end}}
 {{if or .PrevURL .NextURL}}<p class="pager">{{if .PrevURL}}<a href="{{.PrevURL}}">← previous</a>{{end}}{{if and .PrevURL .NextURL}} · {{end}}{{if .NextURL}}<a href="{{.NextURL}}">next →</a>{{end}}</p>{{end}}
-{{else}}<p class="mut small sx-help">Searches every message (text, thinking, tool calls and output), session (title, directory, branch), run (key, target, prompt, log) and fleet.log event.
-All words must match. <code>"exact phrase"</code> · <code>deploy*</code> · <code>-word</code> · <code>host:</code> <code>type:</code> <code>provider:</code> <code>kind:</code> <code>tool:</code> <code>role:</code> <code>status:</code> <code>session:</code> <code>after:2026-10-01</code> <code>before:</code></p>{{end}}
+{{else}}<p class="mut small sx-help">Searches every message (text, thinking, tool calls and output), session (title, directory, branch), run (key, target, prompt, log), fleet.log event and chat message.
+All words must match. <code>"exact phrase"</code> · <code>deploy*</code> · <code>-word</code> · <code>host:</code> <code>type:</code> <code>provider:</code> <code>kind:</code> <code>tool:</code> <code>role:</code> <code>status:</code> <code>session:</code> <code>after:2026-10-01</code> <code>before:</code> · chat: <code>type:chat</code> <code>channel:</code> <code>from:</code> <code>mentions:me</code></p>{{end}}
 {{end}}

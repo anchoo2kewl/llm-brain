@@ -19,6 +19,7 @@ import (
 //	app2#835 web-app-api a/b.go 3f2a…-uuid snake_case   code tokens, matched whole or as a run of parts
 //	host:studio type:run provider:codex kind:tool_use tool:bash role:user status:failed
 //	session:<id or uuid>  after:2026-10-01 before:2026-10-14
+//	type:chat channel:general from:teammate-a mentions:me      chat messages
 //
 // Values of the same filter are ORed (type:run type:event); filter values may be quoted.
 
@@ -48,12 +49,14 @@ var filterFields = map[string]string{
 	"host": "host", "type": "type", "provider": "provider", "kind": "kind", "tool": "tool", "role": "role",
 	"status": "status", "session": "session", "after": "after", "before": "before",
 	"since": "after", "until": "before", "is": "type", "in": "type",
+	"channel": "channel", "from": "from", "mentions": "mentions",
 }
 
 var typeAlias = map[string]string{
 	"message": "message", "messages": "message", "msg": "message", "msgs": "message",
 	"session": "session", "sessions": "session", "conversation": "session", "conversations": "session",
 	"run": "run", "runs": "run", "event": "event", "events": "event", "log": "event",
+	"chat": "chat", "slack": "chat",
 }
 
 func (p *Parsed) Empty() bool {
@@ -181,6 +184,10 @@ func (p *Parsed) filter(field, v string, loc *time.Location) {
 		}
 	case "host", "session":
 		p.addFilter(field, v)
+	case "channel":
+		p.addFilter(field, strings.ToLower(strings.TrimPrefix(v, "#")))
+	case "from", "mentions":
+		p.addFilter(field, strings.ToLower(strings.TrimPrefix(v, "@")))
 	default:
 		p.addFilter(field, strings.ToLower(v))
 	}

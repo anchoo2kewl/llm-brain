@@ -1,0 +1,34 @@
+{{define "content"}}
+<div class="top"><div><p class="eyebrow">Chat</p><h1>Slack</h1><p class="mut">The hub reads Slack with your user token. It only calls read methods and never posts.</p></div>
+<div class="meta"><a href="/chat">← chat</a></div></div>
+{{if .Saved}}<p class="ok">Saved.</p>{{end}}
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+
+<section class="panel">
+<div class="panel-heading"><h2>Account</h2>{{with .Account}}{{if .Connected}}<span class="pill ok">connected</span>{{else}}<span class="pill warn">not connected</span>{{end}}{{end}}</div>
+{{with .Account}}{{if .Connected}}<p>Connected as <strong>@{{.UserName}}</strong> in <strong>{{.Team}}</strong>.</p>{{end}}{{end}}
+{{if and .HasToken (not .Account.Connected)}}<p class="warn">A token is stored but hasn't been checked yet (the poller checks it on its next cycle).</p>{{end}}
+{{if .Missing}}<p class="warn">The token is missing scopes: {{range $i, $s := .Missing}}{{if $i}}, {{end}}<code>{{$s}}</code>{{end}}. Add them to the Slack app's user scopes and reinstall it.</p>{{end}}
+{{if .LastPoll}}<p class="mut small">Last read {{ago .LastPoll}}{{if .LastError}} · <span class="bad">{{.LastError}}</span>{{end}}</p>{{end}}
+<form method="post" action="/settings/slack/token" class="filters" autocomplete="off">
+<label for="token" class="small">{{if .HasToken}}Replace token{{else}}User token{{end}}</label>
+<input id="token" type="password" name="token" placeholder="xoxp-…" autocomplete="off" spellcheck="false">
+<button type="submit">{{if .HasToken}}Replace token{{else}}Connect{{end}}</button>
+</form>
+<p class="mut small">The token is stored in the hub database. It is never shown here or returned by any API.</p>
+</section>
+
+<section class="panel">
+<div class="panel-heading"><h2>What to watch</h2></div>
+<form method="post" action="/settings/slack">
+<h3>Channels</h3>
+{{if .ListErr}}<p class="bad small">Couldn't list channels: {{.ListErr}}</p>{{end}}
+{{if .Channels}}<div class="chat-picker">{{range .Channels}}<label><input type="checkbox" name="ch" value="{{.ID}}|{{.Kind}}|{{.Name}}" {{if .On}}checked{{end}}> {{if eq .Kind "private"}}🔒{{else}}#{{end}}{{.Name}}</label>{{end}}</div>
+{{else}}<p class="mut">{{if .Account.Connected}}No channels you're a member of.{{else}}Connect a token to pick channels.{{end}}</p>{{end}}
+<h3>Also</h3>
+<label><input type="checkbox" name="dms" value="1" {{if .WatchDMs}}checked{{end}}> All my DMs and group DMs</label><br>
+<label><input type="checkbox" name="mentions" value="1" {{if .WatchMentions}}checked{{end}}> Mentions of me anywhere</label>
+<p><button type="submit">Save</button></p>
+</form>
+</section>
+{{end}}

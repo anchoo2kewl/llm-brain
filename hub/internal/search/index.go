@@ -1,6 +1,6 @@
 // Package search is the hub's full-text index: bleve (scorch, pure Go) beside the Turso store, which has no
-// FTS here. Every message, session, run and fleet.log event is a document. The index follows the store by
-// watermark: messages and events are append-only, so the index remembers the highest id it has of each
+// FTS here. Every message, session, run, fleet.log event and chat message is a document. The index follows the store by
+// watermark: messages, events and chat messages are append-only, so the index remembers the highest id it has of each
 // table (in the same bleve batch as the documents, so the two never disagree); sessions and runs change in
 // place, so the ingest transaction that changes one queues it in search_dirty. A crash or restart re-indexes
 // only what's past the watermarks, and document ids are the row ids, so nothing is indexed twice.
@@ -29,7 +29,7 @@ import (
 )
 
 // version names the mapping and analyzer. An index built with another version is rebuilt from scratch.
-const version = "2"
+const version = "3"
 
 var (
 	keyVersion = []byte("version")
@@ -39,7 +39,7 @@ var (
 func wmKey(table string) []byte { return []byte("wm:" + table) }
 
 // tables in the order a build walks them: the small ones first, so sessions and runs are searchable early.
-var tables = []string{"sessions", "runs", "events", "messages"}
+var tables = []string{"sessions", "runs", "events", "chat_messages", "messages"}
 
 type Index struct {
 	st  *store.Store
@@ -79,7 +79,7 @@ func newMapping() mapping.IndexMapping {
 	dm := bleve.NewDocumentStaticMapping()
 	dm.AddFieldMappingsAt("body", text())
 	dm.AddFieldMappingsAt("title", text())
-	for _, k := range []string{"type", "host", "provider", "kind", "role", "tool", "status", "session", "suuid"} {
+	for _, k := range []string{"type", "host", "provider", "kind", "role", "tool", "status", "session", "suuid", "channel", "from", "mentions"} {
 		dm.AddFieldMappingsAt(k, kw())
 	}
 	t := bleve.NewDateTimeFieldMapping()
@@ -338,6 +338,18 @@ func (x *Index) indexPage(ctx context.Context, table string) (int, error) {
 			last = s.ID
 		}
 		n = len(ss)
+	case "chat_messages":
+		cs, err := x.st.ChatMessagesAfter(ctx, after, x.PageSize)
+		if err != nil {
+			return 0, err
+		}
+		for _, c := range cs {
+			if err := b.Index(docID("c", c.ID), chatDoc(c)); err != nil {
+				return 0, err
+			}
+			last = c.ID
+		}
+		n = len(cs)
 	case "runs":
 		rs, err := x.st.RunsAfter(ctx, after, x.PageSize)
 		if err != nil {
@@ -362,7 +374,7 @@ func (x *Index) indexPage(ctx context.Context, table string) (int, error) {
 	return n, nil
 }
 
-// indexDirty re-indexes the sessions and runs that changed since they were last indexed.
+// indexDirty re-indexes the sessions, runs and chat messages that changed since they were last indexed.
 func (x *Index) indexDirty(ctx context.Context) error {
 	const limit = 500
 	for pass := 0; pass < 20; pass++ {
@@ -370,13 +382,15 @@ func (x *Index) indexDirty(ctx context.Context) error {
 		if err != nil || len(ds) == 0 {
 			return err
 		}
-		var sids, rids []int64
+		var sids, rids, cids []int64
 		for _, d := range ds {
 			switch d.Kind {
 			case "s":
 				sids = append(sids, d.ID)
 			case "r":
 				rids = append(rids, d.ID)
+			case "c":
+				cids = append(cids, d.ID)
 			}
 		}
 		b := x.bx.NewBatch()
@@ -395,6 +409,15 @@ func (x *Index) indexDirty(ctx context.Context) error {
 		}
 		for _, r := range rs {
 			if err := b.Index(docID("r", r.ID), runDoc(r)); err != nil {
+				return err
+			}
+		}
+		cs, err := x.st.ChatMessagesByID(ctx, cids)
+		if err != nil {
+			return err
+		}
+		for _, c := range cs {
+			if err := b.Index(docID("c", c.ID), chatDoc(c)); err != nil {
 				return err
 			}
 		}
@@ -491,6 +514,19 @@ func runDoc(r store.Run) map[string]any {
 func eventDoc(e store.IndexEvent) map[string]any {
 	d := map[string]any{"type": "event", "host": strings.ToLower(e.Host), "kind": e.Level, "body": e.Text}
 	setTime(d, e.TS)
+	return d
+}
+
+func chatDoc(c store.ChatMessage) map[string]any {
+	d := map[string]any{
+		"type": "chat", "provider": c.Source, "kind": c.ConvKind,
+		"channel": strings.ToLower(c.ConvName), "from": strings.ToLower(c.UserName),
+		"title": c.ConvName, "body": joinNonEmpty(c.Text, c.UserName),
+	}
+	if c.MentionsMe {
+		d["mentions"] = "me"
+	}
+	setTime(d, c.At)
 	return d
 }
 

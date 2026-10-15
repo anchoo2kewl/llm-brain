@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="top"><h1>{{.Title}}</h1><div class="meta">{{with .Account}}{{if .Connected}}Slack · @{{.UserName}} in {{.Team}} · read-only{{else}}Slack not connected{{end}}{{end}} · <a href="/settings/slack">settings</a></div></div>
+<form class="filters" method="get" action="/search">
+<input type="hidden" name="type" value="chat">
+<input type="search" name="q" placeholder="Search chat: words, &quot;a phrase&quot;, channel:general from:teammate-a mentions:me" aria-label="Search chat">
+<select name="sort"><option value="new">newest</option><option value="">best match</option></select>
+<button type="submit">Search</button>
+</form>
+<div class="chat">
+<nav class="chat-sources" aria-label="Chat sources">
+{{range .Sources}}<a href="/chat?src={{.Key}}" {{if .On}}class="on"{{end}}><span>{{.Name}}</span><span class="pill" title="messages in the last 24h">{{.Count}}</span></a>{{end}}
+</nav>
+<div class="chat-main">
+{{if not .Account.Connected}}<div class="empty">No Slack account connected yet. <a href="/settings/slack">Connect one →</a></div>{{end}}
+{{if .Until}}<p class="mut small">Showing messages up to {{clock .Until}} · <a href="/chat?src={{.Src}}">newest</a></p>{{end}}
+{{range .Threads}}<div class="chat-thread">
+{{with .Parent}}{{template "chatmsg" .}}{{else}}<p class="mut small">reply in an earlier thread</p>{{end}}
+{{if .Replies}}<div class="chat-replies">{{range .Replies}}{{template "chatmsg" .}}{{end}}</div>{{end}}
+</div>{{else}}<div class="empty">No messages here yet.</div>{{end}}
+{{if .Older}}<p class="pager"><a href="{{.Older}}">older →</a></p>{{end}}
+</div>
+</div>
+{{end}}
+
+{{define "chatmsg"}}<div class="chat-msg{{if .MentionsMe}} mention{{end}}" id="c{{.ID}}">
+<div class="who"><strong>{{if .UserName}}{{.UserName}}{{else}}unknown{{end}}</strong>
+{{if .Where}}<a class="mut small" href="/chat?src={{.ConvID}}">{{.Where}}</a>{{end}}
+<a class="mut small ts" href="#c{{.ID}}" title="{{.At}}">{{clock .At}}</a>
+{{if .MentionsMe}}<span class="pill warn">mentions you</span>{{end}}
+{{if .Permalink}}<a class="small" href="{{.Permalink}}" rel="noreferrer" target="_blank">Slack ↗</a>{{end}}</div>
+<div class="txt">{{.Text}}</div>
+</div>{{end}}

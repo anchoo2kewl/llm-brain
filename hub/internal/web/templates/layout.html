@@ -11,6 +11,7 @@
     <a href="/" {{if eq .Nav "overview"}}class="on"{{end}}>Overview</a>
     <a href="/runs" {{if eq .Nav "runs"}}class="on"{{end}}>Runs</a>
     <a href="/sessions" {{if eq .Nav "sessions"}}class="on"{{end}}>Sessions</a>
+    <a href="/chat" {{if eq .Nav "chat"}}class="on"{{end}}>Chat</a>
     <a href="/hosts" {{if eq .Nav "hosts"}}class="on"{{end}}>Hosts</a>
   </nav>
   <form class="gsearch" action="/search" method="get"><input type="search" name="q" value="{{if eq .Nav "search"}}{{.Q}}{{end}}" placeholder="Search conversations…" aria-label="Search conversations"></form>
