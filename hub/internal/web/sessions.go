@@ -99,11 +99,15 @@ func (s *Server) back(w http.ResponseWriter, r *http.Request, to string, err err
 			s.Log.Printf("sessions: %v", err)
 			msg = "internal error"
 		}
+		path, frag, _ := strings.Cut(to, "#")
 		sep := "?"
-		if strings.Contains(to, "?") {
+		if strings.Contains(path, "?") {
 			sep = "&"
 		}
-		to += sep + "err=" + url.QueryEscape(msg)
+		to = path + sep + "err=" + url.QueryEscape(msg)
+		if frag != "" {
+			to += "#" + frag
+		}
 	}
 	http.Redirect(w, r, to, http.StatusSeeOther)
 }

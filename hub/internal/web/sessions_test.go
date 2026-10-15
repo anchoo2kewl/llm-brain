@@ -214,6 +214,9 @@ func TestPlainChat(t *testing.T) {
 	if len(ms) != 4 || ms[3].Model != "claude-sonnet-4-5" || ms[3].Status != "done" {
 		t.Fatalf("%+v", ms)
 	}
+	if _, loc := r.post(t, "/llms/1/send", url.Values{"prompt": {"x"}}, ""); loc != "/llms/1?err=pick+a+model#composer" {
+		t.Errorf("error redirect: %s", loc)
+	}
 	// Plain chats are in the chat list and its search.
 	if _, body, _ := r.get(t, "/chats?q=world"); !strings.Contains(body, `href="/llms/1"`) {
 		t.Error("search missed the plain chat")
@@ -295,6 +298,13 @@ func TestPromptLibrary(t *testing.T) {
 	}
 	if a, _ := r.st.AgentSession(context.Background(), 1); a.Title != "Fix #12 in app" {
 		t.Fatalf("%+v", a)
+	}
+	// Errors land before the #fragment.
+	if code, loc := r.post(t, "/agents/1/send", url.Values{"prompt": {""}}, ""); code != http.StatusSeeOther || !strings.HasPrefix(loc, "/agents/1?err=") {
+		t.Errorf("empty follow-up: %d %s", code, loc)
+	}
+	if code, loc := r.post(t, "/llms/999/send", url.Values{"prompt": {"x"}, "model": {"gpt-5"}}, ""); code != http.StatusNotFound {
+		t.Errorf("send to a missing chat: %d %s", code, loc)
 	}
 	if code, _ := r.post(t, "/prompts/1/delete", nil, ""); code != http.StatusSeeOther {
 		t.Fatal(code)
