@@ -31,7 +31,9 @@ type NowRow struct {
 	Where  string
 	Link   string
 	Since  string
-	Ext    bool // started outside the hub
+	Ext    bool   // started outside the hub
+	Close  string // POST here to end it ('' when it can't be ended from the hub)
+	Label  string // the Close button's words
 }
 
 func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
@@ -52,7 +54,8 @@ func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
 			st = "idle"
 		}
 		rows = append(rows, NowRow{Kind: "terminal", State: st, Title: orUntitled(t.Title), Detail: t.Provider, Host: t.Host,
-			Where: homeShort(t.Cwd), Link: "/terminals/" + itoa(t.ID), Since: firstNonEmpty(t.LiveAt, t.CreatedAt)})
+			Where: homeShort(t.Cwd), Link: "/terminals/" + itoa(t.ID), Since: firstNonEmpty(t.LiveAt, t.CreatedAt),
+			Close: "/terminals/" + itoa(t.ID) + "/kill", Label: "Close terminal"})
 	}
 	tasks, err := s.Store.AgentSessions(ctx, 100)
 	errs = append(errs, err)
@@ -69,7 +72,8 @@ func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
 			st = "idle"
 		}
 		rows = append(rows, NowRow{Kind: "task", State: st, Title: orUntitled(a.Title), Detail: a.Provider + " · " + a.Status,
-			Host: a.Host, Where: homeShort(a.Cwd), Link: "/agents/" + itoa(a.ID), Since: a.UpdatedAt})
+			Host: a.Host, Where: homeShort(a.Cwd), Link: "/agents/" + itoa(a.ID), Since: a.UpdatedAt,
+			Close: "/agents/" + itoa(a.ID) + "/stop", Label: "Stop task"})
 	}
 	runs, err := s.Store.RunningRuns(ctx)
 	errs = append(errs, err)
@@ -85,8 +89,12 @@ func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
 		if linked[x.ID] || termSess[x.Host+"|"+x.UUID] || taskSess[x.Host+"|"+x.UUID] {
 			continue
 		}
-		rows = append(rows, NowRow{Kind: "session", State: "working", Title: x.DisplayTitle(), Detail: x.Provider, Host: x.Host,
-			Where: homeShort(x.Cwd), Link: "/sessions/" + itoa(x.ID), Since: x.FirstAt, Ext: true})
+		row := NowRow{Kind: "session", State: "working", Title: x.DisplayTitle(), Detail: x.Provider, Host: x.Host,
+			Where: homeShort(x.Cwd), Link: "/sessions/" + itoa(x.ID), Since: x.FirstAt, Ext: true}
+		if closable(x) {
+			row.Close, row.Label = "/sessions/"+itoa(x.ID)+"/close", "Close session"
+		}
+		rows = append(rows, row)
 	}
 	ups, err := s.Store.ToolUpdates(ctx, 10)
 	errs = append(errs, err)

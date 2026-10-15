@@ -1,6 +1,8 @@
 {{define "content"}}{{with .S}}
 <div class="top"><h1 class="title">{{if .Live}}<span class="dot" title="live"></span> {{end}}<span data-rename="/sessions/{{.ID}}/rename">{{.DisplayTitle}}</span></h1>
-<div class="meta">{{.Provider}} · {{.Host}}{{if .Live}} · <span class="ok">live</span>{{end}}</div></div>
+<div class="meta">{{.Provider}} · {{.Host}}{{if .Live}} · <span class="ok">live</span>{{end}}
+{{if canClose}}<span class="sessclose" id="sessclose">{{if $.TermID}}{{template "close" (closeArgs (printf "/terminals/%d/kill" $.TermID) (printf "/sessions/%d" .ID) "Close terminal" "This is a hub terminal; closing ends it.")}}{{else}}{{template "sessclose" .}}{{end}}</span>{{end}}</div></div>
+{{if $.CloseErr}}<p class="bad small">Close failed: {{$.CloseErr}}</p>{{end}}
 {{template "stats-strip" $.Stats}}
 <dl class="kv">
 <dt>Directory</dt><dd>{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</dd>

@@ -76,3 +76,4 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-slot-title[contenteditable=true]{outline:1px solid var(--acc);background:var(--bg);padding:0 4px;max-width:60%}
 .ws-editor{position:absolute;left:0;right:0;top:29px;bottom:0;width:100%;height:calc(100% - 29px);border:0;background:var(--bg);z-index:3}
 .ws-editor[hidden]{display:none}.ws-btn.on{color:var(--acc)}
+.ws-close.armed{opacity:1;color:var(--bad);font-weight:600}.ws-close:hover{color:var(--bad)}

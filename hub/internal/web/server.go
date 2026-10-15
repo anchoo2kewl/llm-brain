@@ -59,12 +59,17 @@ func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger
 	if err != nil {
 		return nil, err
 	}
+	fm := template.FuncMap{}
+	for k, v := range funcs {
+		fm[k] = v
+	}
+	fm["canClose"] = func() bool { return srv.Agents != nil } // session control is on: Close works
 	for _, n := range names {
 		base := filepath.Base(n)
 		if base == "layout.html" || base == "parts.html" {
 			continue
 		}
-		t, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/parts.html", n)
+		t, err := template.New("").Funcs(fm).ParseFS(templateFS, "templates/layout.html", "templates/parts.html", n)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", n, err)
 		}
@@ -497,6 +502,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	if q.Get("embed") != "1" {
 		s.markSeen(ctx, "s:"+strconv.FormatInt(id, 10))
 	}
+	var termID int64
+	if s.Agents != nil && closable(sess) {
+		if t, ok := s.terminalOf(ctx, sess); ok {
+			termID = t.ID
+		}
+	}
 	var subs []store.Session
 	var parentID int64
 	if sess.ParentUUID == "" {
@@ -517,8 +528,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		Stats      *insights.SessionStats
 		Files      []sessFile
 		CanFetch   bool
+		CloseErr   string // why the last Close failed
+		TermID     int64  // the open hub terminal running it: Close ends that terminal
 	}{page{Title: sess.DisplayTitle(), Nav: "sessions", Embed: q.Get("embed") == "1"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id),
-		s.sessionFiles(ctx, sess), s.Agents != nil})
+		s.sessionFiles(ctx, sess), s.Agents != nil, s.closeError(ctx, sess), termID})
 }
 
 // sessionMore returns transcript items after an id as an HTML fragment, for live sessions.
