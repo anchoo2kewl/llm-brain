@@ -22,20 +22,32 @@
     } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false }; }
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* private mode */ } }
-  function count() { return narrow.matches || st.zoom ? 1 : COUNTS[st.layout]; }
+  function logical() { return narrow.matches ? 1 : COUNTS[st.layout]; } // panes in the layout
+  function count() { return st.zoom ? 1 : logical(); }                 // panes on screen
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
   // ------------------------------------------------------------ terminals
 
-  function attach(info) {
-    if (panes[info.id] || !(info.status === "live" || info.status === "starting")) return;
-    if (Object.keys(panes).length >= MAX_ATTACHED) return;
+  function drop(id) { if (panes[id]) { panes[id].dispose(); delete panes[id]; } }
+  // attach connects a terminal; at the cap, force evicts one that isn't on screen.
+  function attach(info, force) {
+    if (!info || panes[info.id] || !(info.status === "live" || info.status === "starting")) return;
+    if (Object.keys(panes).length >= MAX_ATTACHED) {
+      if (!force) return;
+      var off = Object.keys(panes).filter(function (id) { return st.slots.slice(0, logical()).indexOf(+id) < 0; });
+      if (!off.length) return;
+      drop(off[off.length - 1]);
+    }
     var p = new window.TermPane({
       id: info.id, host: info.host, status: info.status, parent: park, visible: false,
       isFocused: function () { return document.hasFocus() && st.slots[st.focus] === info.id; },
-      onSay: function (t) { var s = slotOf(info.id); if (s >= 0) slotEls[s].msg.textContent = t; },
-      onState: function () { paintItem(info.id); paintSlot(slotOf(info.id)); badge(); },
-      onStatus: function (s) { if (s.status) { info.status = s.status; info.error = s.error; paintItem(info.id); } }
+      onSay: function (t) { var s = shownAt(info.id); if (s >= 0 && slotEls[s]) slotEls[s].msg.textContent = t; },
+      onState: function () { paintItem(info.id); paintSlot(shownAt(info.id)); badge(); },
+      onStatus: function (s) {
+        if (!s.status) return;
+        info.status = s.status; info.error = s.error; paintItem(info.id);
+        if (s.status === "ended" || s.status === "failed") setTimeout(function () { drop(info.id); }, 0); // frees its slot in the cap
+      }
     });
     p.term.textarea && p.term.textarea.addEventListener("focus", function () { var s = slotOf(info.id); if (s >= 0 && s !== st.focus) focusSlot(s, true); });
     panes[info.id] = p;
@@ -53,8 +65,10 @@
         attach(t);
       });
       Object.keys(infos).forEach(function (id) {
-        if (!seen[id]) { delete infos[id]; if (panes[id]) { panes[id].dispose(); delete panes[id]; } }
+        if (!seen[id]) { delete infos[id]; drop(id); }
+        else if (infos[id].status === "ended" || infos[id].status === "failed") drop(id);
       });
+      if (!slotEls.length) layout(); // slots exist before any pane reports into them
       if (!st.slots.length || st.slots.every(function (s) { return !infos[s]; })) { // first visit: fill with the newest open ones
         st.slots = order.filter(function (id) { return panes[id]; }).slice(0, COUNTS[st.layout]);
       }
@@ -139,12 +153,13 @@
 
   // ------------------------------------------------------------ panes
 
-  function slotOf(id) { for (var i = 0; i < count(); i++) if (st.slots[i] === id) return i; return -1; }
+  function slotOf(id) { for (var i = 0; i < logical(); i++) if (st.slots[i] === id) return i; return -1; } // its pane in the layout
+  function shownAt(id) { var i = slotOf(id); return st.zoom ? (i === st.focus ? 0 : -1) : i; }       // the slot it's drawn in
   function layout() {
     var n = count();
     grid.setAttribute("data-layout", narrow.matches || st.zoom ? "1" : st.layout);
     document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-layout") === st.layout); });
-    if (st.focus >= n) st.focus = 0;
+    if (st.focus >= logical()) st.focus = 0;
     while (slotEls.length < n) slotEls.push(makeSlot(slotEls.length));
     slotEls.forEach(function (s, i) { s.root.hidden = i >= n; });
     // Zoomed: show the focused pane's terminal in slot 0.
@@ -183,19 +198,19 @@
     root.append(head, body, msg, empty);
     grid.appendChild(root);
     var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, open: open, i: i };
-    root.addEventListener("mousedown", function () { if (s.i !== st.focus && !st.zoom) focusSlot(s.i, false); });
+    root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
   }
   function fillEmpty(s, i) {
     s.empty.textContent = "";
-    var free = order.filter(function (id) { return panes[id] && st.slots.slice(0, count()).indexOf(id) < 0; });
+    var free = order.filter(function (id) { return infos[id] && (infos[id].status === "live" || infos[id].status === "starting") && st.slots.slice(0, logical()).indexOf(id) < 0; });
     s.empty.appendChild(el("p", "mut", free.length ? "Pick a terminal for pane " + (i + 1) + ":" : "Every terminal is already on screen."));
     free.slice(0, 8).forEach(function (id) {
       var b = el("button", "chip", (infos[id].title || "terminal " + id).slice(0, 60));
       b.type = "button";
-      b.onclick = function () { st.slots[i] = id; st.focus = i; layout(); focusSlot(i, true); };
+      b.onclick = function () { attach(infos[id], true); st.slots[i] = id; st.focus = i; layout(); focusSlot(i, true); };
       s.empty.appendChild(b);
     });
     var nb = el("button", "primary small", "+ New terminal here");
@@ -216,8 +231,10 @@
     s.root.classList.toggle("waiting", stt === "waiting");
   }
   function focusSlot(i, focusTerm) {
+    var moved = st.focus !== i;
     st.focus = i;
-    slotEls.forEach(function (s, j) { s.root.classList.toggle("focus", st.zoom || j === i); });
+    if (st.zoom && moved) layout(); // zoomed: the one pane on screen follows the focus
+    slotEls.forEach(function (s, j) { s.root.classList.toggle("focus", st.zoom ? j === 0 : j === i); });
     var id = st.slots[i];
     if (id && panes[id]) { panes[id].markSeen(); if (focusTerm) panes[id].focus(); }
     save();
@@ -228,14 +245,14 @@
   function show(id) {
     var at = slotOf(id);
     if (at >= 0 && !st.zoom) { focusSlot(at, true); return; }
-    if (!panes[id]) attach(infos[id]);
+    if (!panes[id]) attach(infos[id], true);
     if (!panes[id]) return;
     st.slots[st.focus] = id;
     layout();
     focusSlot(st.focus, true);
   }
   function toggleZoom() { st.zoom = !st.zoom; layout(); focusSlot(st.focus, true); }
-  function setLayout(l) { st.layout = l; st.zoom = false; layout(); focusSlot(Math.min(st.focus, count() - 1), true); }
+  function setLayout(l) { st.layout = l; st.zoom = false; layout(); focusSlot(Math.min(st.focus, logical() - 1), true); }
   function step(d) { // previous / next terminal in the focused pane
     var live = order.filter(function (id) { return panes[id]; });
     if (!live.length) return;
@@ -248,11 +265,11 @@
   function shortcut(e) { // xterm's key hook and the page's: true = let the terminal have it
     if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
     var k = e.key, n = /^Digit([1-9])$/.exec(e.code);
-    if (n) { var i = +n[1] - 1; if (i < count()) focusSlot(i, true); }
+    if (n) { var i = +n[1] - 1; if (i < logical()) focusSlot(i, true); }
     else if (k === "ArrowLeft") step(-1);
     else if (k === "ArrowRight") step(1);
-    else if (k === "ArrowUp") focusSlot((st.focus - 1 + count()) % count(), true);
-    else if (k === "ArrowDown") focusSlot((st.focus + 1) % count(), true);
+    else if (k === "ArrowUp") focusSlot((st.focus - 1 + logical()) % logical(), true);
+    else if (k === "ArrowDown") focusSlot((st.focus + 1) % logical(), true);
     else if (k === "Enter") toggleZoom();
     else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
     else if (k === "N" || k === "n") openNew();
