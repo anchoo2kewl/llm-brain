@@ -218,13 +218,13 @@ func TestSearch(t *testing.T) {
 	// Message ids: 1 user prompt, 2 tool_use, 3 tool_result (session 1); 4 codex prompt (session 2).
 	cases := map[string][]string{
 		"deploy":                    {"m1", "s1"}, // the session's title is its first prompt
-		"deploy web-app-api":     {"m1", "s1"},
+		"deploy web-app-api":        {"m1", "s1"},
 		"deploy nothere":            nil,
 		`"kubectl get pods"`:        {"m2"},
 		`"get kubectl"`:             nil,
 		"deploy*":                   {"m1", "m4", "s1", "s2"},
 		"app2#835":                  {"m1", "s1"},
-		"web-app":                {"e1", "m1", "r1", "s1"}, // a run of parts inside longer tokens
+		"web-app":                   {"e1", "m1", "r1", "s1"}, // a run of parts inside longer tokens
 		"internal/web/server.go":    {"m3"},
 		"web/server":                {"m3"},
 		"tenant_id":                 {"m3"},

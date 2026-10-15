@@ -280,7 +280,7 @@ type Message struct {
 		Name string `json:"name"`
 	} `json:"bot_profile"`
 	// search.messages only:
-	Permalink string `json:"permalink"`
+	Permalink string      `json:"permalink"`
 	Channel   *MsgChannel `json:"channel"`
 }
 
