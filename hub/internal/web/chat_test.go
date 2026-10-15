@@ -108,7 +108,7 @@ func TestChatPagesNeverShowToken(t *testing.T) {
 		!strings.Contains(b, "acme.slack.com/archives/C0000000001/p1792012200000100") || !strings.Contains(b, "mentions you") {
 		t.Errorf("chat page: %s", b)
 	}
-	if b := get(t, ts.URL+"/"); !strings.Contains(b, "From chat: 2 messages in 24h") && !strings.Contains(b, "From chat: 0 messages in 24h") {
+	if b := get(t, ts.URL+"/"); !strings.Contains(b, "From Slack: 2 messages in 24h") && !strings.Contains(b, "From Slack: 0 messages in 24h") {
 		t.Errorf("overview has no chat count")
 	}
 }

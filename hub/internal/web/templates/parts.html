@@ -63,3 +63,9 @@
 <div><b>{{if .Responses}}{{span .First .Last}}{{else}}—{{end}}</b><span>{{.Responses}} model responses</span></div>
 <div>{{spark .Spark "Tokens over the conversation" "s0"}}<span>tokens over time{{with .Models}} · {{joinStr . ", "}}{{end}}</span></div>
 </div>{{with .TopTools}}<p class="mut small">Top tools: {{range $i, $t := .}}{{if $i}} · {{end}}{{$t.Tool}} ×{{$t.Calls}}{{if $t.Errors}} <span class="bad">({{$t.Errors}} failed)</span>{{end}}{{end}}</p>{{end}}{{end}}{{end}}
+
+{{define "newtabs"}}<nav class="newtabs" aria-label="What to start">
+<a href="/terminals/new" {{if eq . "terminal"}}class="on" aria-current="page"{{end}}><b>Terminal</b><span>Claude Code or Codex on the command line</span></a>
+<a href="/chats/new?kind=agent" {{if eq . "agent"}}class="on" aria-current="page"{{end}}><b>Task</b><span>one job at a time in a folder, with review</span></a>
+<a href="/chats/new?kind=model" {{if eq . "model"}}class="on" aria-current="page"{{end}}><b>Model chat</b><span>talk to any model, no tools</span></a>
+</nav>{{end}}

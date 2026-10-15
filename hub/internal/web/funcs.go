@@ -308,7 +308,7 @@ var funcs = template.FuncMap{
 	},
 	"expired": func(unix int64) bool { return unix > 0 && time.Now().Unix() >= unix },
 	"ago":     ago, "clock": clock, "duration": duration, "trunc": trunc, "snippet": snippet, "who": who,
-	"statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
+	"kindLabel": kindLabel, "statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
 	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
 	"agentLabels": func(i Issue) []string {
 		var out []string
@@ -337,4 +337,17 @@ var funcs = template.FuncMap{
 	"inc":    func(i int64) int64 { return i + 1 },
 	"dec":    func(i int64) int64 { return i - 1 },
 	"isLong": func(s string) bool { return len(s) > 1200 || strings.Count(s, "\n") > 24 },
+}
+
+// kindLabel names a chat row's kind the way the "+ New" page does.
+func kindLabel(k string) string {
+	switch k {
+	case "terminal":
+		return "Terminal"
+	case "agent":
+		return "Task"
+	case "plain":
+		return "Model chat"
+	}
+	return k
 }

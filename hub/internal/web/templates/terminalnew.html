@@ -1,5 +1,7 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/term.css">
-<div class="top"><div><h1>New terminal</h1><p class="mut">Claude Code or Codex on the command line, in a folder you pick, with every permission. It keeps running in tmux after you close the page.</p></div><div class="meta"><a href="/chats/new">← plain chat instead</a></div></div>
+<div class="top"><div><h1>New terminal</h1></div></div>
+{{template "newtabs" "terminal"}}
+<p class="mut">The CLI itself, live in your browser, in a folder you pick, with every permission. It keeps running in tmux after you close the page.</p>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if not .Hosts}}<p class="bad">No Mac has a session agent yet (run <code>hub serve</code> or <code>hub ship</code> there).</p>{{end}}
 <form method="post" action="/terminals/new" class="newchat-form termform">

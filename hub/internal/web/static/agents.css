@@ -30,3 +30,16 @@ button:disabled{opacity:.5;cursor:default}
 code.copy{user-select:all;background:var(--code);padding:2px 6px;border-radius:6px;font-size:12px;overflow-wrap:anywhere}
 .eyebrow{margin:0 0 4px}
 @media (max-width:640px){.convo .msg{max-width:100%}.composer{position:static}}
+/* "+ New": the chooser page, the tabs on each form, and the kind chips on /chats */
+.choose{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:14px;margin-top:8px}
+.choose a{display:flex;flex-direction:column;gap:8px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--fg)}
+.choose a:hover{border-color:var(--acc);text-decoration:none}
+.choose b{font-size:18px}.choose span{color:var(--mut);line-height:1.45}.choose em{font-style:normal;font-size:12px;color:var(--acc);margin-top:auto}
+.newtabs{display:flex;gap:4px;padding:4px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin:4px 0 18px;flex-wrap:wrap}
+.newtabs a{flex:1 1 160px;display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:9px;color:var(--fg)}
+.newtabs a span{font-size:12px;color:var(--mut)}
+.newtabs a:hover{text-decoration:none;background:var(--bg)}
+.newtabs a.on{background:var(--acc);color:var(--bg)}.newtabs a.on span{color:var(--bg);opacity:.85}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+.chips a{padding:4px 11px;border:1px solid var(--line);border-radius:999px;color:var(--mut);font-size:13px}
+.chips a.on{border-color:var(--acc);color:var(--acc);font-weight:600}.chips a:hover{text-decoration:none;color:var(--fg)}

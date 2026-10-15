@@ -1,15 +1,13 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">
-<div class="top"><div><h1>New chat</h1><p class="mut">Pick who to talk to and write. Agents work in a folder with tools; plain chats just talk.</p></div><div class="meta"><a href="/chats">← chats</a></div></div>
-<link rel="stylesheet" href="/static/term.css">
-<div class="startpick"><a class="on" href="/chats/new"><b>Chat</b><span class="mut small">Talk to a model, or give Claude/Codex one task at a time in a folder.</span></a>
-<a href="/terminals/new"><b>Terminal →</b><span class="mut small">Claude Code or Codex on the command line in any folder, every permission, runs until you end it.</span></a></div>
+<div class="top"><div><h1>{{if eq .F.Kind "model"}}New model chat{{else}}New task{{end}}</h1></div></div>
+{{template "newtabs" .F.Kind}}
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
-<form method="post" action="/chats/new" class="newchat-form">
-<label class="pick"><span>Chat with</span>
+<form method="post" action="/chats/new" class="newchat-form"><input type="hidden" name="kind" value="{{.F.Kind}}">
+<label class="pick"><span>{{if eq .F.Kind "model"}}Model{{else}}Who does it{{end}}</span>
 <select name="with" id="with" required>{{range .Groups}}<optgroup label="{{.Label}}">{{range .Opts}}<option value="{{.Value}}" {{if eq .Value $.F.With}}selected{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}</select></label>
-{{if .GwErr}}<p class="warn small">Plain chat: {{.GwErr}}. Agent chats still work; they fall back to each CLI's own login.</p>{{end}}
+{{if .GwErr}}<p class="warn small">Model chats are unavailable: {{.GwErr}}.</p>{{end}}
 {{if not .Groups}}<p class="bad">Nothing to chat with: no host has a live session agent and the gateway isn't answering.</p>{{end}}
-<details class="block" id="options" data-agent-only {{if or .F.Folder .F.WtSlug .F.Model}}open{{end}}><summary>Options <span class="mut small">for agent chats: host, folder, model, mode</span></summary>
+{{if ne .F.Kind "model"}}<details class="block" id="options" data-agent-only {{if or .F.Folder .F.WtSlug .F.Model}}open{{end}}><summary>Options <span class="mut small">which Mac, folder, model, permissions</span></summary>
 <div class="grid2">
 <label>Host<select name="host">{{range .Hosts}}<option value="{{.Host}}" {{if eq .Host $.F.Host}}selected{{end}} {{if not .Live}}disabled{{end}}>{{.Host}}{{if not .Live}} (offline){{end}}{{if .Providers}} · {{range $i, $p := .Providers}}{{if $i}}, {{end}}{{$p}}{{end}}{{end}}</option>{{end}}</select></label>
 <label>Folder<select name="folder"><option value="">a new scratch folder (no project)</option>{{range .Hosts}}{{if .Live}}<optgroup label="{{.Host}}">{{$h := .Host}}{{range .Folders}}{{$v := printf "%s|%s" $h .Path}}<option value="{{$v}}" {{if eq $v $.F.Folder}}selected{{end}}>{{home .Path}}{{if .Branch}} ({{.Branch}}){{end}}</option>{{end}}</optgroup>{{end}}{{end}}</select></label>
@@ -22,11 +20,11 @@
 <label>New worktree<input name="wt_slug" value="{{.F.WtSlug}}" placeholder="name, e.g. fix-pager (optional)" autocomplete="off"></label>
 <label>…from base<input name="wt_base" value="{{.F.WtBase}}" placeholder="origin/main" autocomplete="off"></label>
 <label class="wide">Prompt variables<textarea name="vars" rows="2" placeholder="NAME=value, one per line, for {{"{{NAME}}"}} in the prompt">{{.F.Vars}}</textarea></label>
-</div></details>
+</div></details>{{end}}
 <div class="composer">
 <textarea name="prompt" rows="5" data-enter-send placeholder="Message — Enter to send, Shift+Enter for a new line" required autofocus>{{.F.Prompt}}</textarea>
 <div class="row">{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}<a class="small" href="/prompts">prompt library</a>
-<span class="grow"></span><button type="submit" class="primary">Start chat</button></div>
+<span class="grow"></span><button type="submit" class="primary">{{if eq .F.Kind "model"}}Send{{else}}Start task{{end}}</button></div>
 </div>
 </form>
 <script src="/static/agents.js" defer></script>

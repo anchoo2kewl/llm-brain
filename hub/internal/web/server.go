@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /hosts", s.hosts)
 	mux.HandleFunc("GET /chat", s.chatPage)
+	mux.HandleFunc("GET /slack", s.chatPage)
 	mux.HandleFunc("GET /settings/slack", s.slackSettings)
 	mux.HandleFunc("POST /settings/slack", s.tailnetOnly(s.slackSave))
 	mux.HandleFunc("POST /settings/slack/token", s.tailnetOnly(s.slackToken))

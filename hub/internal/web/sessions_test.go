@@ -115,16 +115,28 @@ func (r *sessRig) post(t *testing.T, path string, form url.Values, origin string
 
 func TestNewAgentChatAndPages(t *testing.T) {
 	r := newSessRig(t)
-	for _, p := range []string{"/chats", "/chats/new", "/agents", "/prompts", "/chats?q=x"} {
+	for _, p := range []string{"/chats", "/chats/new", "/agents", "/prompts", "/chats?q=x", "/new", "/chats?kind=terminal", "/slack"} {
 		if code, body, _ := r.get(t, p); code != 200 {
 			t.Fatalf("%s: %d %s", p, code, body)
 		}
 	}
-	_, body, _ := r.get(t, "/chats/new")
-	for _, want := range []string{`value="agent:claude"`, `value="agent:codex"`, `label="Plain chat · Claude"`, `value="plain:gpt-5"`, `studio|` + r.repo} {
+	_, body, _ := r.get(t, "/chats/new?kind=agent")
+	for _, want := range []string{`value="agent:claude"`, `value="agent:codex"`, `studio|` + r.repo} {
 		if !strings.Contains(body, want) {
-			t.Errorf("new chat page missing %s", want)
+			t.Errorf("new task page missing %s", want)
 		}
+	}
+	if strings.Contains(body, `value="plain:`) {
+		t.Error("the task page offers models")
+	}
+	_, mbody, _ := r.get(t, "/chats/new?kind=model")
+	for _, want := range []string{`label="Claude"`, `value="plain:gpt-5"`} {
+		if !strings.Contains(mbody, want) {
+			t.Errorf("new model chat page missing %s", want)
+		}
+	}
+	if strings.Contains(mbody, `value="agent:`) || strings.Contains(mbody, `name="folder"`) {
+		t.Error("the model chat page offers agents or folders")
 	}
 	if strings.Contains(body, `value="agent:gemini"`) {
 		t.Error("offers a CLI no host has")

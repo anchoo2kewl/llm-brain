@@ -14,10 +14,6 @@
 .termform .cli:has(input:checked){border-color:var(--acc);outline:1px solid var(--acc)}
 .termform .cli span{display:flex;flex-direction:column;gap:3px}
 .termform .cli code{font-size:11px;color:var(--mut);overflow-wrap:anywhere}
-.startpick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;margin:12px 0 4px}
-.startpick a{display:block;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--card);color:var(--fg);text-decoration:none}
-.startpick a.on{border-color:var(--acc);outline:1px solid var(--acc)}
-.startpick a b{display:block;margin-bottom:3px}
 @media (max-width:640px){.term{height:60vh}}
 .endbox{position:relative}.endbox summary{list-style:none;cursor:pointer;color:var(--bad);border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:var(--card)}
 .endbox summary::-webkit-details-marker{display:none}
