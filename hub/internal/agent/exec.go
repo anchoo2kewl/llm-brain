@@ -214,7 +214,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 			e.stop(ctx, c)
 		case KindSessionTitle: // inline, in queue order: two renames land in the order they were made
 			e.sessionTitle(ctx, c)
-		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut:
+		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut, KindFSAttach:
 			e.mu.Lock()
 			e.busy[c.ID] = true
 			e.mu.Unlock()
@@ -228,7 +228,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 				}()
 				map[string]func(context.Context, store.Command){
 					KindTermOpen: e.termOpen, KindTermAttach: e.termAttach, KindTermKill: e.termKill,
-					KindTermSend: e.termSend, KindTermCapture: e.termCapture,
+					KindTermSend: e.termSend, KindTermCapture: e.termCapture, KindFSAttach: e.fsAttach,
 					KindFileList: e.fileCmd, KindFileGet: e.fileCmd, KindFilePut: e.fileCmd,
 				}[c.Kind](ctx, c)
 			}(c)

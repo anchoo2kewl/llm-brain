@@ -253,9 +253,10 @@
     var num = el("span", "ws-num", String(i + 1)), dot = el("span", "dot-s"), title = el("span", "ws-slot-title"), meta = el("span", "ws-slot-meta"), badges = el("span", "ws-badges");
     var grow = el("span", "grow");
     var open = el("a", "ws-btn", "↗"); open.title = "Open on its own page"; open.target = "_blank"; open.rel = "noopener";
+    var code = el("button", "ws-btn", "</>"); code.type = "button"; code.title = "Edit this folder's files (toggle)";
     var zoom = el("button", "ws-btn", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
     var clear = el("button", "ws-btn", "✕"); clear.type = "button"; clear.title = "Take it out of this pane (it keeps running)";
-    head.append(num, dot, title, badges, meta, grow, open, zoom, clear);
+    head.append(num, dot, title, badges, meta, grow, code, open, zoom, clear);
     var empty = el("div", "ws-slot-empty");
     root.append(head, body, msg, empty);
     grid.appendChild(root);
@@ -264,6 +265,19 @@
     title.title = "Click to rename";
     title.addEventListener("click", function (e) { e.stopPropagation(); if (s.id && infos[s.id]) rename(s.id, title); });
     zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
+    // </>: the editor on this pane's folder, over the terminal; again to go back. One editor per pane, kept
+    // while it's open so switching back and forth is instant.
+    var ed = null;
+    code.onclick = function (e) {
+      e.stopPropagation();
+      var t = s.id && infos[s.id];
+      if (ed && !ed.hidden) { ed.hidden = true; code.classList.remove("on"); return; }
+      if (!t) return;
+      var src = "/edit?embed=1&host=" + encodeURIComponent(t.host) + "&root=" + encodeURIComponent(t.cwd);
+      if (!ed) { ed = document.createElement("iframe"); ed.className = "ws-editor"; ed.title = "Editor"; root.appendChild(ed); }
+      if (ed.dataset.src !== src) { ed.src = src; ed.dataset.src = src; }
+      ed.hidden = false; code.classList.add("on");
+    };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
   }
