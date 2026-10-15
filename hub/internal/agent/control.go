@@ -256,6 +256,7 @@ func (c *Control) FollowUp(ctx context.Context, id int64, prompt string) error {
 	if a.ReviewOf > 0 {
 		t.Perm, t.Bypass, t.Review = PermPlan, false, &Review{}
 	}
+	t.InHome = t.Perm == PermPlan // a terminal review's follow-ups: its folder may be outside the roots
 	cid, err := c.S.QueueTurn(ctx, store.Command{Host: a.Host, Kind: KindTurn, AgentID: id, Payload: payload(t)})
 	if errors.Is(err, store.ErrBusy) {
 		return bad("a turn is already queued or running; stop it or wait")
