@@ -98,7 +98,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print what's new; write nothing, act on nothing")
     a = ap.parse_args()
-    if not cfg(".chat.enabled"):
+    if not cfg(".chat.enabled") and not a.dry_run:
         return
     for d in (CHAT, NOTES, LOGS):
         d.mkdir(parents=True, exist_ok=True)
