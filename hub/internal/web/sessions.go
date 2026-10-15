@@ -301,7 +301,7 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 		for _, g := range llm.Grouped(ms) {
 			pg := pickGroup{Label: "Plain chat · " + g.Vendor}
 			for _, m := range g.Models {
-				pg.Opts = append(pg.Opts, pickOpt{"plain:" + m.ID, m.ID})
+				pg.Opts = append(pg.Opts, pickOpt{"plain:" + m.ID, llm.Label(m.ID)})
 			}
 			groups = append(groups, pg)
 		}
@@ -777,7 +777,7 @@ func (s *Server) llmPage(w http.ResponseWriter, r *http.Request) {
 	for _, g := range llm.Grouped(models) {
 		pg := pickGroup{Label: g.Vendor}
 		for _, m := range g.Models {
-			pg.Opts = append(pg.Opts, pickOpt{m.ID, m.ID})
+			pg.Opts = append(pg.Opts, pickOpt{m.ID, llm.Label(m.ID)})
 		}
 		groups = append(groups, pg)
 	}

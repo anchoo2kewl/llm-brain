@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -132,17 +134,119 @@ type Group struct {
 	Models []Model
 }
 
-// Grouped orders models Claude, OpenAI, Gemini, Other.
+// Chat reports whether a model can hold a text conversation (not image, audio, embedding or moderation models).
+func Chat(m Model) bool {
+	id := strings.ToLower(m.ID)
+	for _, x := range []string{"image", "dall-e", "embed", "tts", "whisper", "transcribe", "moderation", "audio", "realtime", "auto-review"} {
+		if strings.Contains(id, x) {
+			return false
+		}
+	}
+	return true
+}
+
+var dated = regexp.MustCompile(`-(\d{8}|\d{4}-\d{2}-\d{2})$`)
+
+// version is the model's version as numbers, e.g. claude-opus-4-5-20251101 -> [4 5], gpt-6.1-sol -> [6 1].
+func version(id string) []int {
+	var out []int
+	for _, f := range regexp.MustCompile(`\d+`).FindAllString(dated.ReplaceAllString(id, ""), -1) {
+		n, _ := strconv.Atoi(f)
+		out = append(out, n)
+	}
+	return out
+}
+
+// tier ranks families within a version: the biggest model first; a plain id (gpt-5) sits above its small
+// variants (gpt-5-mini, gpt-5-nano).
+func tier(id string) int {
+	for i, f := range []string{"opus", "sol", "pro", "fable", "sonnet", "terra", "astra", "flash", "haiku", "luna", "mini", "nano"} {
+		if strings.Contains(id, f) {
+			if f == "mini" || f == "nano" || f == "haiku" || f == "luna" || f == "flash" {
+				return 50 + i
+			}
+			return i
+		}
+	}
+	return 40
+}
+
+// newer orders models newest version first, then the biggest family, then undated aliases before dated ids.
+func newer(a, b Model) bool {
+	va, vb := version(strings.ToLower(a.ID)), version(strings.ToLower(b.ID))
+	for i := 0; i < len(va) && i < len(vb); i++ {
+		if va[i] != vb[i] {
+			return va[i] > vb[i]
+		}
+	}
+	if len(va) != len(vb) {
+		return len(va) > len(vb)
+	}
+	if ta, tb := tier(strings.ToLower(a.ID)), tier(strings.ToLower(b.ID)); ta != tb {
+		return ta < tb
+	}
+	da, db := dated.FindString(a.ID), dated.FindString(b.ID)
+	if (da == "") != (db == "") {
+		return da == "" // the alias before its snapshots
+	}
+	if da != db {
+		return strings.ReplaceAll(da, "-", "") > strings.ReplaceAll(db, "-", "") // newest snapshot first
+	}
+	return a.ID < b.ID
+}
+
+// Label is a readable name: claude-opus-5-5 -> Claude Opus 5.5, gpt-6.1-sol -> GPT-6.1 Sol,
+// claude-sonnet-4-5-20250929 -> Claude Sonnet 4.5 (2025-09-29).
+func Label(id string) string {
+	date := ""
+	if m := dated.FindString(id); m != "" {
+		d := strings.ReplaceAll(m[1:], "-", "")
+		date = " (" + d[:4] + "-" + d[4:6] + "-" + d[6:] + ")"
+		id = strings.TrimSuffix(id, m)
+	}
+	parts := strings.Split(id, "-")
+	var words []string
+	var nums []string
+	flush := func() {
+		if len(nums) > 0 {
+			words = append(words, strings.Join(nums, "."))
+			nums = nil
+		}
+	}
+	for i, p := range parts {
+		if _, err := strconv.Atoi(p); err == nil {
+			nums = append(nums, p)
+			continue
+		}
+		flush()
+		switch {
+		case strings.EqualFold(p, "gpt") && i+1 < len(parts):
+			words = append(words, "GPT-"+parts[i+1])
+			parts[i+1] = ""
+		case p == "":
+		default:
+			words = append(words, strings.ToUpper(p[:1])+p[1:])
+		}
+	}
+	flush()
+	return strings.Join(words, " ") + date
+}
+
+// Grouped orders models Claude, OpenAI, Gemini, Other, newest first within each, chat models only.
 func Grouped(ms []Model) []Group {
 	order := []string{"Claude", "OpenAI", "Gemini", "Other"}
 	by := map[string][]Model{}
 	for _, m := range ms {
+		if !Chat(m) {
+			continue
+		}
 		v := Vendor(m)
 		by[v] = append(by[v], m)
 	}
 	var out []Group
 	for _, v := range order {
 		if len(by[v]) > 0 {
+			sort.SliceStable(by[v], func(i, j int) bool { return newer(by[v][i], by[v][j]) })
 			out = append(out, Group{Vendor: v, Models: by[v]})
 		}
 	}
