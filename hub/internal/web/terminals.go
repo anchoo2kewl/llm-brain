@@ -33,6 +33,7 @@ func (s *Server) terminalRoutes(g, p func(string, http.HandlerFunc), mux *http.S
 	g("GET /terminals/{id}/status", s.terminalStatus)
 	g("GET /workspace", s.workspace)
 	g("GET /api/terminals", s.terminalsAPI)
+	g("GET /api/live-sessions", s.liveSessionsAPI)
 	p("POST /terminals/{id}/rename", s.terminalRename)
 	// Driving a terminal from a script or an agent: type / press keys, read the screen.
 	p("POST /api/terminals/{id}/send", s.terminalSend)
@@ -643,4 +644,41 @@ func (s *Server) terminalScreen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"screen": rep.Result})
+}
+
+// liveSessionsAPI: Claude/Codex sessions running anywhere (a terminal on the laptop, an IDE), not just the
+// hub's terminals, for the workspace's "Running elsewhere". Sessions that are a live hub terminal's own
+// (same Mac, folder and CLI) are left out.
+func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ss, err := s.Store.LiveSessions(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	ts, _ := s.Store.Terminals(ctx, "", 200)
+	mine := map[string]bool{}
+	for _, t := range ts {
+		if t.Open() {
+			mine[t.Host+"|"+t.Cwd+"|"+t.Provider] = true
+		}
+	}
+	type liveJSON struct {
+		ID       int64  `json:"id"`
+		Title    string `json:"title"`
+		Host     string `json:"host"`
+		CLI      string `json:"cli"`
+		Cwd      string `json:"cwd"`
+		Updated  string `json:"updated"`
+		Messages int    `json:"messages"`
+	}
+	out := []liveJSON{}
+	for _, x := range ss {
+		if x.ParentUUID != "" || mine[x.Host+"|"+x.Cwd+"|"+x.Provider] {
+			continue
+		}
+		home, _, _ := s.Store.AgentPlaces(ctx, x.Host)
+		out = append(out, liveJSON{x.ID, x.DisplayTitle(), x.Host, agent.TermProviderName(x.Provider), tilde(home, x.Cwd), x.FileMtime, int(x.MessageCount)})
+	}
+	writeJSON(w, http.StatusOK, out)
 }

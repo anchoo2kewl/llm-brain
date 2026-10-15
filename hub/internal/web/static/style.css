@@ -129,3 +129,5 @@ a.newbtn,a.btn.primary{background:var(--acc);color:var(--bg);border-radius:8px;p
 a.newbtn:hover,a.btn.primary:hover{text-decoration:none;opacity:.9}
 .gsearch{margin-left:auto}
 @media(max-width:640px){a.newbtn{order:2;margin-left:auto}.gsearch{order:4}}
+/* a page shown inside the workspace */
+body.embed main.wrapw{max-width:none;padding:6px 12px 12px}body.embed .top h1{font-size:15px}body.embed .stats,body.embed dl.kv,body.embed details.block{display:none}

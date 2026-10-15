@@ -72,6 +72,7 @@
       if (t) t.classList.remove("clamp");
       b.remove();
     });
+    if (document.body.dataset.embed) window.scrollTo(0, document.body.scrollHeight); // the workspace shows the newest
     if (tr.dataset.live === "1") {
       let after = tr.dataset.after || "0";
       let quiet = 0;
