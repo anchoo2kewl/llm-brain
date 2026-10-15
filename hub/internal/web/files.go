@@ -25,8 +25,9 @@ import (
 // the hub hands that request to the waiting browser request (or serves it the upload).
 
 func (s *Server) fileRoutes(g, p func(string, http.HandlerFunc), mux *http.ServeMux) {
-	g("GET /hosts/{host}/ls", s.hostList)
-	g("GET /hosts/{host}/download", s.hostDownload)
+	// sameSite on these GETs too: another site's link must not make a Mac send a file (and the hub keep it).
+	p("GET /hosts/{host}/ls", s.hostList)
+	p("GET /hosts/{host}/download", s.hostDownload)
 	p("POST /hosts/{host}/upload", s.hostUpload)
 	p("POST /hosts/{host}/keep", s.hostKeep)
 	g("GET /files", s.assetsPage)
@@ -41,7 +42,31 @@ const MaxUpload = 200 << 20
 
 type handoff struct {
 	r    *http.Request
+	w    http.ResponseWriter
 	done chan struct{} // closed by the browser side when it has read the body
+}
+
+// body is the agent's upload, read with an idle deadline: a transfer that stalls for a minute, or whose
+// browser went away, ends instead of holding both requests open.
+func (h handoff) body(ctx context.Context) io.Reader {
+	rc := http.NewResponseController(h.w)
+	stop := context.AfterFunc(ctx, func() { _ = rc.SetReadDeadline(time.Now()) })
+	return &idleReader{r: h.r.Body, rc: rc, stop: stop}
+}
+
+type idleReader struct {
+	r    io.Reader
+	rc   *http.ResponseController
+	stop func() bool
+}
+
+func (i *idleReader) Read(p []byte) (int, error) {
+	_ = i.rc.SetReadDeadline(time.Now().Add(time.Minute))
+	n, err := i.r.Read(p)
+	if err != nil {
+		i.stop()
+	}
+	return n, err
 }
 
 type xfer struct {
@@ -142,7 +167,7 @@ func (s *Server) hostList(w http.ResponseWriter, r *http.Request) {
 	}
 	defer close(h.done)
 	var l agent.Listing
-	if err := json.NewDecoder(io.LimitReader(h.r.Body, 8<<20)).Decode(&l); err != nil {
+	if err := json.NewDecoder(io.LimitReader(h.body(r.Context()), 8<<20)).Decode(&l); err != nil {
 		jsonErr(w, http.StatusBadGateway, err)
 		return
 	}
@@ -178,19 +203,19 @@ func (s *Server) hostDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(h.r.ContentLength, 10))
 	}
 	// The hub keeps a copy of everything it hands out, so it stays downloadable from Files.
-	if _, err := s.keepAsset(r.Context(), r.PathValue("host"), h.r, w, "download"); err != nil {
+	if _, err := s.keepAsset(r.Context(), r.PathValue("host"), h, w, "download"); err != nil {
 		s.Log.Printf("files: keep %s: %v", name, err)
 	}
 }
 
 // keepAsset copies the agent's file to dst (nil: nowhere) and into the hub's assets, and records it.
-func (s *Server) keepAsset(ctx context.Context, host string, src *http.Request, dst io.Writer, source string) (int64, error) {
-	name := agent.SafeName(src.Header.Get("X-File-Name"))
-	path := src.Header.Get("X-File-Path")
+func (s *Server) keepAsset(ctx context.Context, host string, h handoff, dst io.Writer, source string) (int64, error) {
+	name := agent.SafeName(h.r.Header.Get("X-File-Name"))
+	path := h.r.Header.Get("X-File-Path")
 	if path == "" {
 		path = name
 	}
-	return s.storeAsset(ctx, host, path, name, src.Body, dst, source)
+	return s.storeAsset(ctx, host, path, name, h.body(ctx), dst, source)
 }
 
 func (s *Server) assetsDir() string { return filepath.Join(s.StateDir, "assets") }
@@ -240,7 +265,7 @@ func (s *Server) hostKeep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer close(h.done)
-	id, err := s.keepAsset(r.Context(), host, h.r, nil, "keep")
+	id, err := s.keepAsset(r.Context(), host, h, nil, "keep")
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err)
 		return
@@ -398,7 +423,7 @@ func (s *Server) agentFilePost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h := handoff{r: r, done: make(chan struct{})}
+	h := handoff{r: r, w: w, done: make(chan struct{})}
 	select {
 	case t.in <- h:
 	case <-t.gone:
