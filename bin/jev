@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# jev — ask Jev (TypeSafe systemOne) typed questions, from any agent on any Mac.
+#
+#   jev decide DECISION.json        yes/no questions; prints p(yes) and writes DECISION.answers.json
+#   jev ask < REQUEST.json          a raw systemOne request ({state, questions}); prints the response
+#   jev check                       is a key available? (never prints it)
+#
+# A decision file is {"title", "state": {...facts...}, "questions": {id: {"question", "yes", "no"}}}.
+# Keep state small (one PR, one hunk, one comment): Jev's window is 32k tokens and a bulk scan burns it.
+#
+# The key: $TYPESAFE_API_KEY, else the fleet config's jev.env_file (default ~/.config/elastio/typesafe.env),
+# else the macOS keychain item jev.keychain (default typesafe-jev-personal). Codex strips *KEY* variables
+# from the commands it runs, so this reads the file itself rather than trusting the environment.
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+key() {
+  [[ -n "${TYPESAFE_API_KEY:-}" ]] && { printf '%s' "$TYPESAFE_API_KEY"; return; }
+  local f k
+  f="$(cfg '.jev.env_file // "~/.config/elastio/typesafe.env"' 2>/dev/null || echo '~/.config/elastio/typesafe.env')"
+  f="${f/#\~/$HOME}"
+  if [[ -r "$f" ]]; then
+    k="$(set -a; . "$f" >/dev/null 2>&1; printf '%s' "${TYPESAFE_API_KEY:-}")"
+    [[ -n "$k" ]] && { printf '%s' "$k"; return; }
+  fi
+  k="$(cfg '.jev.keychain // "typesafe-jev-personal"' 2>/dev/null || echo typesafe-jev-personal)"
+  security find-generic-password -s "$k" -w 2>/dev/null || true
+}
+
+post() { # post <json file>
+  local k base
+  k="$(key)"
+  [[ -n "$k" ]] || die "no Jev key: set TYPESAFE_API_KEY, or put it in ~/.config/elastio/typesafe.env (chmod 600)"
+  base="${TYPESAFE_BASE_URL:-https://api.typesafe.ai}"
+  # The key goes in a header file on stdin's side, not on the command line where ps would show it.
+  curl -sS --fail-with-body -m "${JEV_TIMEOUT:-60}" --retry 3 --retry-all-errors \
+    -H @<(printf 'Authorization: Bearer %s\n' "$k") \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    --data-binary @"$1" "$base/v1/systemone"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  decide)
+    f="${1:?usage: jev decide DECISION.json}"
+    req="$(mktemp)"; trap 'rm -f "$req"' EXIT
+    jq '{model: (env.TYPESAFE_DEFAULT_MODEL // "jev-latest"), state,
+         questions: (.questions | map_values({type: "noul", instructions: .question, criteria: {"true": .yes, "false": .no}}))}' "$f" >"$req"
+    n="$(wc -c <"$req")"
+    (( n / 3 < 32000 )) || die "state is about $((n / 3)) tokens; Jev takes 32k. Send one PR or hunk at a time."
+    resp="$(post "$req")" || die "Jev: $resp"
+    ans="$(jq '.answers | map_values(.noul)' <<<"$resp")"
+    printf '%s\n' "$ans" >"${f%.json}.answers.json"
+    printf '# %s\n' "$(jq -r '.title // "decision"' "$f")"
+    jq -r --argjson a "$ans" '.questions | to_entries[] | "\($a[.key] * 100 | round / 100)  \(.key): \(.value.question)"' "$f"
+    ;;
+  ask)
+    req="$(mktemp)"; trap 'rm -f "$req"' EXIT
+    jq '.model //= (env.TYPESAFE_DEFAULT_MODEL // "jev-latest")' >"$req"
+    post "$req"; echo
+    ;;
+  check)
+    [[ -n "$(key)" ]] && echo "jev: key found" || { echo "jev: no key"; exit 1; }
+    ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

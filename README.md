@@ -107,6 +107,15 @@ One memory every agent reads before it works and writes to as it learns, so a Co
 - **TaskAI:** every memory is also one page in TaskAI's "Agent memory" project (`--memory-project`, found or created on first use), so people can read and search it there. The hub is the outbox: a write lands on the hub first and is forwarded with retries (30 s doubling to an hour). A superseded memory's page is retitled `[superseded]`. The key is `TASKAI_API_KEY` in `~/.config/llm-brain/taskai.env` (or `TASKAI_X_API_KEY` in `secrets.env`); with no key, memories stay on the hub.
 - **Claude's own memories:** `hub memory import [--to http://<hub>:8787]` imports `~/.claude/projects/*/memory/*.md` on that Mac. It is safe to run again: an unchanged file is a no-op, an edited file supersedes its earlier import, and a file an agent has since improved is left alone.
 
+## Jev
+
+`bin/jev` asks Jev (TypeSafe systemOne) typed questions from any agent on any Mac: `bin/jev decide DECISION.json` for
+yes/no decisions (prints p(yes), writes `DECISION.answers.json`), `bin/jev ask < request.json` for raw requests,
+`bin/jev check` to see whether a key is there. It finds the key itself — `$TYPESAFE_API_KEY`, else `jev.env_file`
+(default `~/.config/elastio/typesafe.env`, chmod 600), else the keychain item `jev.keychain` — so hub terminals, fleet
+workers and Codex (which strips `*KEY*` variables from its commands) all reach it. The `jev` skill tells Claude and
+Codex when and how to use it. Keep state small: Jev's window is 32k tokens.
+
 ## Hub (`hub/`)
 
 Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite), server-rendered, no build step. Binds only to 127.0.0.1 and the machine's Tailscale IP; ship requests are accepted only from loopback and 100.64.0.0/10.
