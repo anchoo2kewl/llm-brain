@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -44,9 +45,22 @@ type fsReq struct {
 	ID      int64    `json:"id"`
 	Op      string   `json:"op"`
 	Path    string   `json:"path,omitempty"`
+	To      string   `json:"to,omitempty"` // rename
+	Dir     bool     `json:"dir,omitempty"` // create a folder
 	Content *string  `json:"content,omitempty"`
 	Base    string   `json:"base,omitempty"`
 	Paths   []string `json:"paths,omitempty"`
+	Query   string   `json:"query,omitempty"` // grep
+	Regex   bool     `json:"regex,omitempty"`
+	Case    bool     `json:"case,omitempty"`
+}
+
+// Hit is one find-in-files match.
+type Hit struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Col  int    `json:"col"`
+	Text string `json:"text"`
 }
 
 type fsResp struct {
@@ -62,6 +76,11 @@ type fsResp struct {
 	Path     string      `json:"path,omitempty"`
 	Root     string      `json:"root,omitempty"`
 	More     bool        `json:"more,omitempty"`
+	Hits     []Hit       `json:"hits,omitempty"`
+	Branch   string      `json:"branch,omitempty"`
+	Size     int64       `json:"size,omitempty"`
+	MTime    string      `json:"mtime,omitempty"`
+	Mode     string      `json:"mode,omitempty"`
 }
 
 const (
@@ -98,12 +117,19 @@ func (f *fsSession) resolve(rel string) (string, error) {
 	}
 	p := filepath.Join(f.root, filepath.Clean("/"+rel))
 	real, err := filepath.EvalSymlinks(p)
-	if errors.Is(err, os.ErrNotExist) {
-		dir, err2 := filepath.EvalSymlinks(filepath.Dir(p))
-		if err2 != nil {
-			return "", err
+	if errors.Is(err, os.ErrNotExist) { // a new file (maybe in new folders): resolve the nearest existing parent
+		dir, rest := filepath.Dir(p), filepath.Base(p)
+		for {
+			rd, err2 := filepath.EvalSymlinks(dir)
+			if err2 == nil {
+				real = filepath.Join(rd, rest)
+				break
+			}
+			if !errors.Is(err2, os.ErrNotExist) || filepath.Dir(dir) == dir {
+				return "", err
+			}
+			dir, rest = filepath.Dir(dir), filepath.Join(filepath.Base(dir), rest)
 		}
-		real = filepath.Join(dir, filepath.Base(p))
 	} else if err != nil {
 		return "", err
 	}
@@ -266,6 +292,82 @@ func (f *fsSession) handle(r fsReq) fsResp {
 		f.mu.Unlock()
 	case "hello":
 		out.Root = f.root
+		out.Branch = gitBranchUp(f.root)
+	case "stat":
+		p, err := f.resolve(r.Path)
+		if err != nil {
+			return fail(err)
+		}
+		st, err := os.Stat(p)
+		if err != nil {
+			return fail(err)
+		}
+		out.Size, out.MTime, out.Mode = st.Size(), st.ModTime().UTC().Format(time.RFC3339), st.Mode().String()
+		out.Branch = gitBranchUp(filepath.Dir(p))
+	case "create":
+		p, err := f.resolve(r.Path)
+		if err != nil {
+			return fail(err)
+		}
+		if _, err := os.Lstat(p); err == nil {
+			return fail(errors.New("already exists"))
+		}
+		if r.Dir {
+			err = os.MkdirAll(p, 0o755)
+		} else {
+			if err = os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
+				var fh *os.File
+				if fh, err = os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644); err == nil {
+					err = fh.Close()
+				}
+			}
+		}
+		if err != nil {
+			return fail(err)
+		}
+	case "rename":
+		from, err := f.resolve(r.Path)
+		if err != nil {
+			return fail(err)
+		}
+		to, err := f.resolve(r.To)
+		if err != nil {
+			return fail(err)
+		}
+		if from == f.root {
+			return fail(errors.New("can't rename the folder itself"))
+		}
+		if _, err := os.Lstat(to); err == nil {
+			return fail(errors.New(r.To + " already exists"))
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return fail(err)
+		}
+		if err := os.Rename(from, to); err != nil {
+			return fail(err)
+		}
+	case "delete": // to the Trash, so a slip can be undone from Finder
+		p, err := f.resolve(r.Path)
+		if err != nil {
+			return fail(err)
+		}
+		if p == f.root {
+			return fail(errors.New("can't delete the folder itself"))
+		}
+		home, _ := os.UserHomeDir()
+		trash := filepath.Join(home, ".Trash")
+		if err := os.MkdirAll(trash, 0o700); err != nil {
+			return fail(err)
+		}
+		dest := filepath.Join(trash, filepath.Base(p))
+		if _, err := os.Lstat(dest); err == nil {
+			dest = filepath.Join(trash, fmt.Sprintf("%s %s", filepath.Base(p), time.Now().Format("15.04.05")))
+		}
+		if err := os.Rename(p, dest); err != nil {
+			return fail(err)
+		}
+	case "grep":
+		return f.grep(r, out)
 	default:
 		return fail(fmt.Errorf("unknown op %q", r.Op))
 	}
@@ -387,4 +489,88 @@ func (e *Executor) fsAttach(ctx context.Context, c store.Command) {
 			}
 		}
 	}()
+}
+
+// gitBranchUp is the branch of the repo dir is in (walking up), or "".
+func gitBranchUp(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return gitBranch(d)
+		}
+		if p := filepath.Dir(d); p == d {
+			return ""
+		}
+	}
+}
+
+const (
+	maxHits      = 2000
+	maxGrepFile  = 2 << 20
+	maxGrepFiles = 50000
+)
+
+// grep finds a string (or a regexp) in every text file under the root, Sublime's Find in Files.
+func (f *fsSession) grep(r fsReq, out fsResp) fsResp {
+	if strings.TrimSpace(r.Query) == "" {
+		out.Error = "nothing to find"
+		return out
+	}
+	pat := r.Query
+	if !r.Regex {
+		pat = regexp.QuoteMeta(pat)
+	}
+	if !r.Case {
+		pat = "(?i)" + pat
+	}
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		out.Error = "bad pattern: " + err.Error()
+		return out
+	}
+	seen := 0
+	start := time.Now()
+	_ = filepath.WalkDir(f.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != f.root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") || secretFile(d.Name()) {
+			return nil
+		}
+		if seen++; seen > maxGrepFiles || len(out.Hits) >= maxHits || time.Since(start) > 20*time.Second {
+			out.More = true
+			return filepath.SkipAll
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxGrepFile {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil || strings.ContainsRune(string(b[:min(len(b), 8000)]), 0) || !utf8.Valid(b) {
+			return nil
+		}
+		rel, _ := filepath.Rel(f.root, p)
+		rel = filepath.ToSlash(rel)
+		for i, line := range strings.Split(string(b), "\n") {
+			if loc := re.FindStringIndex(line); loc != nil {
+				text := line
+				if len(text) > 300 {
+					from := max(0, loc[0]-100)
+					text = text[from:min(len(text), from+300)]
+				}
+				out.Hits = append(out.Hits, Hit{Path: rel, Line: i + 1, Col: utf8.RuneCountInString(line[:loc[0]]) + 1, Text: text})
+				if len(out.Hits) >= maxHits {
+					out.More = true
+					return filepath.SkipAll
+				}
+			}
+		}
+		return nil
+	})
+	return out
 }
