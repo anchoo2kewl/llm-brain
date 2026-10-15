@@ -36,8 +36,11 @@
   var ws = null, wanted = true, tries = 0, timer = null;
 
   function say(t) { msg.textContent = t || ""; }
+  var queued = []; // typed before the socket is up: sent once it is (capped, so a dead page can't hoard)
   function send(data) {
-    if (ws && ws.readyState === 1) ws.send(typeof data === "string" ? enc.encode(data) : data);
+    var b = typeof data === "string" ? enc.encode(data) : data;
+    if (ws && ws.readyState === 1) ws.send(b);
+    else if (queued.length < 500) queued.push(b);
   }
   function resize() {
     try { fit.fit(); } catch (e) { return; }
@@ -55,6 +58,7 @@
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
     ws = new WebSocket(proto + location.host + "/terminals/" + id + "/ws?cols=" + term.cols + "&rows=" + term.rows);
     ws.binaryType = "arraybuffer";
+    ws.onopen = function () { var q = queued; queued = []; q.forEach(function (b) { ws.send(b); }); };
     var got = false;
     ws.onmessage = function (ev) {
       if (!got) { got = true; tries = 0; say(""); term.focus(); }
