@@ -6,14 +6,17 @@ PR head `{{HEAD_SHA}}` is checked out in the current directory; base is `{{BASE}
 {{PRIOR}}
 
 # Workflow (open-code-review delegation: OCR selects files and rules, you review)
-1. Context: `gh pr view {{PR_URL}} --comments`, inline threads `gh api repos/{{NWO}}/pulls/{{NUMBER}}/comments`, CI `gh pr checks {{PR_URL}}`,
-   and the linked issue(s). Don't repeat points others already raised.
+1. Context: read `{{EXISTING}}` first. It is everything already said on this PR: every review, inline comment and PR comment,
+   from people and bots, including {{OWNER}}'s earlier reviews. Then the PR (`gh pr view {{PR_URL}}`), CI (`gh pr checks {{PR_URL}}`)
+   and the linked issue(s).
 2. Files: `ocr delegate preview --format json --from {{BASE}} --to HEAD`. Make a checklist of every reviewable file.
 3. Rules: `{{BRAIN_DIR}}/bin/review-rules --repo {{NWO}} --base {{BASE}} <every reviewable file>` — the union of every rule module
    that applies to this change (OWASP security, performance, OCR language rules, the repo's own rules, house rules). Apply them all.
 4. Review each file's diff (`git --no-pager diff --no-color <merge_base>..HEAD -- <path>`), reading surrounding code and the paired
    PR/mock at its head when there's a cross-repo contract. Mark every file reviewed or skipped (with reason).
 5. Keep only findings you verified with a concrete failing scenario and exact `path:line`. Drop speculation, style nits and anything a linter catches.
+6. **Drop everything already said.** Remove any finding that `{{EXISTING}}` already raises, even in other words, on another line,
+   or as part of a bigger point. Same root cause = already said. Post only what nobody has said yet.
 
 # House notes
 {{HOUSE}}
@@ -32,9 +35,15 @@ Write like a senior engineer leaving a quick note to a teammate. Plain words, no
 Each item: what breaks + a concrete example + the fix. For example:
 `api/users.ts:42` — `org_id` comes from the request body, so user A can read org B's users by changing it. Use the org from the session instead.
 Tag security items with their OWASP id, e.g. "(A01)".
-Review body, max ~120 words:
+Don't re-describe the PR: the author and other reviewers already did. No summary of what it does unless nobody has written one.
+
+**Nothing new to add** (everything you found is already raised, or you found nothing): post one line, no sections, no inline comments:
+`Approving. Nothing to add to <who>'s review.` or `Approving. Nothing found.` Files reviewed: X/Y. (If a blocking point someone
+else raised is still open and real, don't repeat it: `Not approving yet: <who>'s point on \`path:line\` is still open.` and use COMMENT.)
+
+Otherwise, review body, max ~100 words:
 ```
-<1–2 sentences: what the PR does + what you verified. For a re-review: "Re-review of <sha8>: <which earlier items are fixed>.">
+<optional, 1 sentence: what you verified that others didn't. For a re-review: "Re-review of <sha8>: <which earlier items are fixed>.">
 
 **Blocking**            (omit section if none)
 - `path:line` — one line. (inline)
@@ -48,7 +57,7 @@ Inline comment per item (Red always inline; Optional inline when on a diff line)
 `**🔴 Blocking** · <bug|security|data|contract|test> — <what breaks, the scenario, the fix>` or
 `**Optional** · <category> — ...`. Use a ```suggestion block when the fix is a small exact edit.
 
-Event: `APPROVE` if there are zero Red items (and CI has no real failure); otherwise `COMMENT`. Never `REQUEST_CHANGES`.
+Event: `APPROVE` if there are zero Red items — yours, or others' still open and real — and CI has no real failure; otherwise `COMMENT`. Never `REQUEST_CHANGES`.
 Post with `gh api repos/{{NWO}}/pulls/{{NUMBER}}/reviews --input <json>`: `{commit_id: "{{HEAD_SHA}}", event, body, comments:[{path, line, side:"RIGHT", body}]}`
 (lines must be in the diff; if the API rejects a line, move that item into the body).
 Don't push, edit files, merge, or comment anywhere else.

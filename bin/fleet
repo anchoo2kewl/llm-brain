@@ -177,6 +177,20 @@ review_queue() {
     add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
 }
 
+# Everything already said on a PR (reviews, inline threads, comments; people and bots), so the review adds only what's new.
+existing_feedback() { # existing_feedback <owner/repo> <number>
+  local nwo="$1" num="$2"
+  echo "## Reviews"
+  gh api "repos/$nwo/pulls/$num/reviews" --paginate \
+    --jq '.[] | select((.body // "") != "") | "### \(.user.login) — \(.state) at \(.submitted_at) (commit \(.commit_id[0:8]))\n\(.body)\n"'
+  echo "## Inline comments"
+  gh api "repos/$nwo/pulls/$num/comments" --paginate \
+    --jq '.[] | "### \(.user.login) on \(.path):\(.line // .original_line) at \(.created_at)\(if .in_reply_to_id then " (reply)" else "" end)\n\(.body)\n"'
+  echo "## PR comments"
+  gh api "repos/$nwo/issues/$num/comments" --paginate \
+    --jq '.[] | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
+}
+
 post_mode() {
   if [[ "$(cfg '.pr_review.post')" == "true" ]]; then
     echo "POST the review to GitHub as described below."
@@ -215,10 +229,11 @@ cmd_review_prs() {
     base="$(jq -r .baseRefName "$dir/pr.json")"; num="$(jq -r .number "$dir/pr.json")"
     git clone -q --filter=blob:none --branch "$(jq -r .headRefName "$dir/pr.json")" "git@github.com:$nwo.git" "$dir/src" \
       && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
+    existing_feedback "$nwo" "$num" >"$dir/existing.md"
     prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
     pf="$dir/prompt.md"
     prompt_env pr-review
-    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" POST_MODE="$(post_mode "$dir")" \
+    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
     SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
