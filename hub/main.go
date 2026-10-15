@@ -27,6 +27,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/chat"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/gateway"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/ingest"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/insights"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/web"
@@ -156,6 +157,9 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 		srv.Chat = cp
 		go cp.Run(ctx, *chatInterval)
 	}
+	srv.Insights = insights.NewCache(st)
+	var backfilled sync.Once // drop reports built from a partial backfill once it finishes; after that the 60 s TTL rules
+	go (&insights.Rollup{Store: st, Log: lg, OnCatchUp: func() { backfilled.Do(srv.Insights.Invalidate) }}).Run(ctx, 15*time.Second)
 	h := srv.Handler()
 
 	var wg sync.WaitGroup
