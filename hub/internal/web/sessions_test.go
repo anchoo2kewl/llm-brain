@@ -196,6 +196,19 @@ func TestNewAgentChatAndPages(t *testing.T) {
 	if a, _ := r.st.AgentSession(context.Background(), 1); a.Status != "running" || a.ProviderSession != "abc" {
 		t.Fatalf("%+v", a)
 	}
+	// While it runs, the conversation shows the end of the turn's log, read as a bounded tail.
+	var lb strings.Builder
+	for i := range 5000 {
+		fmt.Fprintf(&lb, "log line %d\n", i)
+	}
+	if _, err := r.st.DB.Exec(`INSERT INTO runs (host, path, key, kind, started_at, log, log_bytes) VALUES ('studio', '/l', 'agent-1', 'other', ?, ?, ?)`,
+		store.Now(), lb.String(), lb.Len()); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ := r.get(t, "/agents/1/conversation"); !strings.Contains(body, "log line 4999") || strings.Contains(body, "log line 4974\n") ||
+		!strings.Contains(body, "log line 4975") {
+		t.Errorf("live log tail:\n%s", body)
+	}
 	// Folders outside the host's roots are refused before anything is queued.
 	form.Set("folder", "studio|/etc")
 	if code, body := r.post(t, "/chats/new", form, ""); code != 200 || !strings.Contains(body, "not a folder under") {

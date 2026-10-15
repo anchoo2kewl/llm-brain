@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -180,5 +182,28 @@ func TestAdoptIsAtomic(t *testing.T) {
 		if err := st.DB.QueryRow(`SELECT name FROM sqlite_schema WHERE type = 'index' AND name = ?`, ix).Scan(&name); err != nil {
 			t.Errorf("index %s: %v", ix, err)
 		}
+	}
+}
+
+func TestRunLogTail(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	var b strings.Builder
+	for i := range 20000 {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO runs (host, path, key, kind, started_at, log, log_bytes) VALUES ('h', '/l', 'agent-1', 'other', ?, ?, ?)`,
+		Now(), b.String(), b.Len()); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := st.RunLogTail(ctx, 1, 100)
+	if err != nil || len(tail) != 100 || !strings.HasSuffix(tail, "line 19999\n") {
+		t.Fatalf("%q %v", tail, err)
+	}
+	if short, _ := st.RunLogTail(ctx, 1, 1<<30); short != b.String() {
+		t.Fatal("a tail longer than the log isn't the whole log")
+	}
+	if _, err := st.RunLogTail(ctx, 99, 10); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
 	}
 }

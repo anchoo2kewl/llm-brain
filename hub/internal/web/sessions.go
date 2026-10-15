@@ -559,8 +559,11 @@ func (s *Server) conversation(ctx context.Context, a store.AgentSession, session
 		}
 	}
 	if data.Busy && runID > 0 {
-		if text, _, _, err := s.Store.RunLog(ctx, runID); err == nil {
+		if text, err := s.Store.RunLogTail(ctx, runID, 8<<10); err == nil {
 			lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+			if len(text) == 8<<10 && len(lines) > 1 {
+				lines = lines[1:] // the first line is cut off
+			}
 			data.LiveLog = strings.Join(lines[max(0, len(lines)-25):], "\n")
 		}
 	}
