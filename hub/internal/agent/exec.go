@@ -312,8 +312,16 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 	case t.Scratch:
 		cwd, err = NewRoots([]string{e.chatsDir()}).Validate(t.Cwd)
 	case t.InHome && (t.Review != nil || normPerm(t.Perm) == PermPlan):
-		home, _ := os.UserHomeDir()
-		cwd, err = NewRoots([]string{home}).Validate(t.Cwd)
+		// The roots as usual, else anywhere in home, home itself included.
+		if cwd, err = e.Roots.Validate(t.Cwd); err != nil {
+			home, _ := os.UserHomeDir()
+			realHome, _ := filepath.EvalSymlinks(home)
+			if c := filepath.Clean(t.Cwd); c == filepath.Clean(home) || c == realHome {
+				cwd, err = realHome, nil
+			} else {
+				cwd, err = NewRoots([]string{home}).Validate(t.Cwd)
+			}
+		}
 	default:
 		cwd, err = e.Roots.Validate(t.Cwd)
 	}
