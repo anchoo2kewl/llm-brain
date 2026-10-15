@@ -18,6 +18,7 @@ import (
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/llm"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/search"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
@@ -207,7 +208,7 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, agentRow(a))
 	}
 	if s.Agents.Chats != nil {
-		cs, err := s.Store.LLMChats(ctx, q, 200)
+		cs, err := s.plainChats(ctx, q)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -222,6 +223,38 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 		page
 		Rows []chatRow
 	}{page{Title: "Chats", Nav: "chats", Q: q}, rows})
+}
+
+// plainChats finds plain chats for the list: by title and model, and by message text through the search
+// index (or, until it is built, a scan of the newest messages only).
+func (s *Server) plainChats(ctx context.Context, q string) ([]store.LLMChat, error) {
+	indexed := q != "" && s.Index != nil && s.Index.Ready()
+	cs, err := s.Store.LLMChats(ctx, q, 200, q != "" && !indexed)
+	if err != nil || !indexed {
+		return cs, err
+	}
+	res, err := s.Index.Search(ctx, search.Request{Q: q, Type: "llm", Size: 200})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(res.Hits))
+	for _, h := range res.Hits {
+		ids = append(ids, h.ID)
+	}
+	more, err := s.Store.LLMChatsWithMessages(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int64]bool{}
+	for _, c := range cs {
+		seen[c.ID] = true
+	}
+	for _, c := range more {
+		if !seen[c.ID] {
+			cs = append(cs, c)
+		}
+	}
+	return cs, nil
 }
 
 // ---------------------------------------------------------------- new chat

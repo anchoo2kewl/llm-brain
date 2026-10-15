@@ -57,17 +57,41 @@ func (s *Store) LLMChat(ctx context.Context, id int64) (LLMChat, error) {
 	return c, err
 }
 
-// LLMChats lists chats, newest activity first; q filters on the title and the messages.
-func (s *Store) LLMChats(ctx context.Context, q string, limit int) ([]LLMChat, error) {
+// ScanRecent is how many of the newest plain-chat messages a search without the index looks through.
+const ScanRecent = 5000
+
+// LLMChats lists chats, newest activity first. q filters on the title and model, and, with scanContent,
+// on the text of the newest ScanRecent messages (the fallback while the search index isn't ready; with it,
+// message text is found through the index).
+func (s *Store) LLMChats(ctx context.Context, q string, limit int, scanContent bool) ([]LLMChat, error) {
 	query := `SELECT id, title, model, created_at, updated_at FROM llm_chats`
 	var args []any
 	if q = strings.TrimSpace(q); q != "" {
 		like := "%" + strings.NewReplacer("%", "", "_", "").Replace(strings.ToLower(q)) + "%"
-		query += ` WHERE lower(title) LIKE ? OR lower(model) LIKE ? OR id IN (SELECT chat_id FROM llm_messages WHERE lower(content) LIKE ?)`
-		args = append(args, like, like, like)
+		query += ` WHERE lower(title) LIKE ? OR lower(model) LIKE ?`
+		args = append(args, like, like)
+		if scanContent {
+			query += ` OR id IN (SELECT chat_id FROM llm_messages WHERE id > (SELECT COALESCE(max(id), 0) FROM llm_messages) - ?
+				AND lower(content) LIKE ?)`
+			args = append(args, ScanRecent, like)
+		}
 	}
 	query += ` ORDER BY updated_at DESC LIMIT ?`
 	args = append(args, limit)
+	return s.llmChatList(ctx, query, args...)
+}
+
+// LLMChatsWithMessages lists the chats that hold these messages, newest activity first.
+func (s *Store) LLMChatsWithMessages(ctx context.Context, msgIDs []int64) ([]LLMChat, error) {
+	if len(msgIDs) == 0 {
+		return nil, nil
+	}
+	q, args := inList(`SELECT id, title, model, created_at, updated_at FROM llm_chats
+		WHERE id IN (SELECT chat_id FROM llm_messages WHERE id IN `, msgIDs)
+	return s.llmChatList(ctx, q+`) ORDER BY updated_at DESC`, args...)
+}
+
+func (s *Store) llmChatList(ctx context.Context, query string, args ...any) ([]LLMChat, error) {
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -144,12 +168,17 @@ func (s *Store) AddLLMTurn(ctx context.Context, chatID int64, model, text string
 	return id, tx.Commit()
 }
 
-// SetLLMReply records a reply's text and status.
+// SetLLMReply records a reply's text and status. A finished reply is queued for the search index.
 func (s *Store) SetLLMReply(ctx context.Context, id int64, content, status, errMsg string) error {
 	now := Now()
 	if _, err := s.DB.ExecContext(ctx, `UPDATE llm_messages SET content = ?, status = ?, error = ?, updated_at = ? WHERE id = ?`,
 		content, status, errMsg, now, id); err != nil {
 		return err
+	}
+	if status != "streaming" {
+		if err := MarkDirty(ctx, s.DB, "l", id); err != nil {
+			return err
+		}
 	}
 	_, err := s.DB.ExecContext(ctx, `UPDATE llm_chats SET updated_at = ? WHERE id = (SELECT chat_id FROM llm_messages WHERE id = ?)`, now, id)
 	return err
@@ -160,4 +189,43 @@ func (s *Store) FailStaleReplies(ctx context.Context) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE llm_messages SET status = 'error', error = 'interrupted: the hub restarted', updated_at = ?
 		WHERE status = 'streaming'`, Now())
 	return err
+}
+
+// LLMIndexMessage is a plain-chat message with its chat's title, for the search index.
+type LLMIndexMessage struct {
+	LLMMessage
+	Title string
+}
+
+const llmIdxCols = `m.id, m.chat_id, m.role, m.model, m.content, m.status, m.error, m.created_at, c.title`
+
+func (s *Store) llmIdx(ctx context.Context, q string, args ...any) ([]LLMIndexMessage, error) {
+	rows, err := s.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LLMIndexMessage
+	for rows.Next() {
+		var m LLMIndexMessage
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.Role, &m.Model, &m.Content, &m.Status, &m.Error, &m.CreatedAt, &m.Title); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// LLMMessagesAfter pages plain-chat messages in id order (the search index).
+func (s *Store) LLMMessagesAfter(ctx context.Context, after int64, limit int) ([]LLMIndexMessage, error) {
+	return s.llmIdx(ctx, `SELECT `+llmIdxCols+` FROM llm_messages m JOIN llm_chats c ON c.id = m.chat_id
+		WHERE m.id > ? ORDER BY m.id LIMIT ?`, after, limit)
+}
+
+func (s *Store) LLMMessagesByID(ctx context.Context, ids []int64) ([]LLMIndexMessage, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	q, args := inList(`SELECT `+llmIdxCols+` FROM llm_messages m JOIN llm_chats c ON c.id = m.chat_id WHERE m.id IN `, ids)
+	return s.llmIdx(ctx, q, args...)
 }

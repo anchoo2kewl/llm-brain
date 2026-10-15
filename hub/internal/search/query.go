@@ -57,6 +57,7 @@ var typeAlias = map[string]string{
 	"session": "session", "sessions": "session", "conversation": "session", "conversations": "session",
 	"run": "run", "runs": "run", "event": "event", "events": "event", "log": "event",
 	"chat": "chat", "slack": "chat",
+	"llm": "llm", "llms": "llm", "plain": "llm", "plainchat": "llm",
 }
 
 func (p *Parsed) Empty() bool {

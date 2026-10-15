@@ -39,7 +39,8 @@ var (
 func wmKey(table string) []byte { return []byte("wm:" + table) }
 
 // tables in the order a build walks them: the small ones first, so sessions and runs are searchable early.
-var tables = []string{"sessions", "runs", "events", "chat_messages", "messages"}
+// llm_messages (plain chats) came later: an index built before it simply starts that table at watermark 0.
+var tables = []string{"sessions", "runs", "events", "chat_messages", "messages", "llm_messages"}
 
 type Index struct {
 	st  *store.Store
@@ -350,6 +351,20 @@ func (x *Index) indexPage(ctx context.Context, table string) (int, error) {
 			last = c.ID
 		}
 		n = len(cs)
+	case "llm_messages":
+		ls, err := x.st.LLMMessagesAfter(ctx, after, x.PageSize)
+		if err != nil {
+			return 0, err
+		}
+		for _, m := range ls {
+			if d := llmDoc(m); d != nil { // a reply still streaming is indexed when it finishes (search_dirty)
+				if err := b.Index(docID("l", m.ID), d); err != nil {
+					return 0, err
+				}
+			}
+			last = m.ID
+		}
+		n = len(ls)
 	case "runs":
 		rs, err := x.st.RunsAfter(ctx, after, x.PageSize)
 		if err != nil {
@@ -382,7 +397,7 @@ func (x *Index) indexDirty(ctx context.Context) error {
 		if err != nil || len(ds) == 0 {
 			return err
 		}
-		var sids, rids, cids []int64
+		var sids, rids, cids, lids []int64
 		for _, d := range ds {
 			switch d.Kind {
 			case "s":
@@ -391,6 +406,8 @@ func (x *Index) indexDirty(ctx context.Context) error {
 				rids = append(rids, d.ID)
 			case "c":
 				cids = append(cids, d.ID)
+			case "l":
+				lids = append(lids, d.ID)
 			}
 		}
 		b := x.bx.NewBatch()
@@ -419,6 +436,17 @@ func (x *Index) indexDirty(ctx context.Context) error {
 		for _, c := range cs {
 			if err := b.Index(docID("c", c.ID), chatDoc(c)); err != nil {
 				return err
+			}
+		}
+		ls, err := x.st.LLMMessagesByID(ctx, lids)
+		if err != nil {
+			return err
+		}
+		for _, m := range ls {
+			if d := llmDoc(m); d != nil {
+				if err := b.Index(docID("l", m.ID), d); err != nil {
+					return err
+				}
 			}
 		}
 		if err := x.bx.Batch(b); err != nil {
@@ -527,6 +555,18 @@ func chatDoc(c store.ChatMessage) map[string]any {
 		d["mentions"] = "me"
 	}
 	setTime(d, c.At)
+	return d
+}
+
+func llmDoc(m store.LLMIndexMessage) map[string]any {
+	if m.Content == "" || m.Status == "streaming" {
+		return nil
+	}
+	d := map[string]any{
+		"type": "llm", "host": "gateway", "provider": strings.ToLower(m.Model), "kind": m.Role, "role": m.Role,
+		"session": strconv.FormatInt(m.ChatID, 10), "title": m.Title, "body": m.Content,
+	}
+	setTime(d, m.CreatedAt)
 	return d
 }
 
