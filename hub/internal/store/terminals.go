@@ -281,49 +281,22 @@ func (s *Store) RenameSession(ctx context.Context, id int64, name string) error 
 	return err
 }
 
-// TerminalSession is the transcript a hub terminal is running: by the session id the hub gave it (Claude),
-// else the first transcript with the same Mac, folder and CLI that started after the terminal opened and
-// isn't another terminal's.
+// TerminalSession is the transcript a hub terminal is running, by the session id the hub gave it (Claude
+// terminals). Terminals without one aren't matched: a guess could rename someone else's conversation.
 func (s *Store) TerminalSession(ctx context.Context, t Terminal) (Session, error) {
-	if t.SessionUUID != "" {
-		return s.SessionByProviderUUID(ctx, t.Host, t.Provider, t.SessionUUID)
+	if t.SessionUUID == "" {
+		return Session{}, ErrNotFound
 	}
-	return scanSession(s.DB.QueryRowContext(ctx, `SELECT `+sessCols+` FROM sessions s WHERE s.host = ? AND s.cwd = ? AND s.provider = ?
-		AND s.parent_uuid = '' AND s.first_at >= ?
-		AND s.session_uuid NOT IN (SELECT session_uuid FROM terminals WHERE session_uuid != '')
-		ORDER BY s.first_at LIMIT 1`, t.Host, t.Cwd, t.Provider, t.CreatedAt))
+	return s.SessionByProviderUUID(ctx, t.Host, t.Provider, t.SessionUUID)
 }
 
-// SessionTerminal is the open hub terminal running this transcript, if any (the inverse of TerminalSession).
+// SessionTerminal is the hub terminal running this transcript, by session id.
 func (s *Store) SessionTerminal(ctx context.Context, x Session) (Terminal, error) {
-	if x.UUID != "" {
-		t, err := scanTerm(s.DB.QueryRowContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND session_uuid = ?
-			ORDER BY id DESC LIMIT 1`, x.Host, x.UUID))
-		if err == nil || !errors.Is(err, ErrNotFound) {
-			return t, err
-		}
+	if x.UUID == "" {
+		return Terminal{}, ErrNotFound
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND cwd = ? AND provider = ?
-		AND session_uuid = '' AND status IN ('starting', 'live') AND created_at <= ? ORDER BY created_at DESC`, x.Host, x.Cwd, x.Provider, x.FirstAt)
-	if err != nil {
-		return Terminal{}, err
-	}
-	var ts []Terminal
-	for rows.Next() {
-		t, err := scanTerm(rows)
-		if err != nil {
-			rows.Close()
-			return Terminal{}, err
-		}
-		ts = append(ts, t)
-	}
-	rows.Close()
-	for _, t := range ts {
-		if y, err := s.TerminalSession(ctx, t); err == nil && y.ID == x.ID {
-			return t, nil
-		}
-	}
-	return Terminal{}, ErrNotFound
+	return scanTerm(s.DB.QueryRowContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND provider = ? AND session_uuid = ?
+		ORDER BY id DESC LIMIT 1`, x.Host, x.Provider, x.UUID))
 }
 
 // RenameAgentSession sets a task's title.
