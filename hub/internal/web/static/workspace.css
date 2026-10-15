@@ -56,3 +56,18 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 @media (max-width:760px){.ws{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto}.ws-side{border-right:0;border-bottom:1px solid var(--line)}.ws-list{max-height:30vh}.ws-main{height:70dvh}.ws-layouts{display:none}}
 .ws-sect{list-style:none;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);padding:12px 10px 4px;cursor:help}
 .sesspane iframe{width:100%;height:100%;border:0;background:var(--bg)}
+/* where a terminal runs: hub terminals (blue) vs sessions started outside the hub (violet) */
+:root{--ext:#7c3aed}@media (prefers-color-scheme:dark){:root{--ext:#a78bfa}}
+.ws-badges{display:flex;gap:4px;flex-wrap:wrap;margin:3px 0 0 15px}.ws-slot-head .ws-badges{margin:0;flex:none}
+.bdg{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:4px;padding:1px 5px;line-height:1.5;border:1px solid transparent}
+.bdg.hub{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+.bdg.ext{background:var(--ext);color:#fff}
+.bdg.host{color:var(--mut);border-color:var(--line)}
+.bdg.ro{color:var(--ext);border-color:color-mix(in srgb,var(--ext) 50%,transparent)}
+.ws-item.ext{border-left:3px solid var(--ext);background:color-mix(in srgb,var(--ext) 7%,transparent)}
+.ws-item.ext.on{border-color:var(--ext);background:color-mix(in srgb,var(--ext) 14%,transparent)}
+.ws-item.ext .dot-s.working{background:var(--ext)}
+.ws-sect{color:var(--ext)!important;font-weight:700}
+.ws-slot.ext{border-color:color-mix(in srgb,var(--ext) 55%,var(--line))}
+.ws-slot.ext.focus{border-color:var(--ext);box-shadow:0 0 0 1px var(--ext)}
+.ws-slot.ext .ws-slot-head{background:color-mix(in srgb,var(--ext) 12%,transparent)}
