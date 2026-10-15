@@ -21,6 +21,7 @@ type Report struct {
 	From      time.Time `json:"from"`
 	To        time.Time `json:"to"`
 	Labels    []string  `json:"labels"`
+	Axis      Axis      `json:"axis"`
 	Generated time.Time `json:"generated"`
 	TookMS    int64     `json:"took_ms"`
 	// RollupPct < 100 while the background rollup is still reading history: session-derived numbers are partial.
@@ -235,6 +236,31 @@ type Thread struct {
 
 // ---------------------------------------------------------------- build
 
+// earliestQueries find the first timestamp of each source "all time" covers. Each is an ordered LIMIT 1 on an
+// indexed column (Turso v0.7 scans the whole table for MIN()).
+var earliestQueries = []string{
+	`SELECT first_at FROM sessions WHERE first_at != '' ORDER BY first_at LIMIT 1`,
+	`SELECT ts FROM gateway_requests WHERE ts != '' ORDER BY ts LIMIT 1`,
+	`SELECT started_at FROM runs WHERE started_at != '' ORDER BY started_at LIMIT 1`,
+	`SELECT at FROM chat_messages WHERE at != '' ORDER BY at LIMIT 1`,
+	`SELECT ts FROM usage_events WHERE ts != '' ORDER BY ts LIMIT 1`,
+}
+
+// Earliest is the first timestamp across every source the report covers (zero when the hub is empty).
+func Earliest(ctx context.Context, db *sql.DB) time.Time {
+	var first time.Time
+	for _, q := range earliestQueries {
+		var v string
+		if db.QueryRowContext(ctx, q).Scan(&v) != nil {
+			continue
+		}
+		if t := store.ParseT(v); !t.IsZero() && (first.IsZero() || t.Before(first)) {
+			first = t
+		}
+	}
+	return first
+}
+
 // Debug, when set, receives each build step's duration.
 var Debug func(step string, d time.Duration)
 
@@ -244,12 +270,11 @@ func Build(ctx context.Context, st *store.Store, r Range, now time.Time, loc *ti
 	db := st.DB
 	var earliest time.Time
 	if r.Dur == 0 {
-		var f string
-		_ = db.QueryRowContext(ctx, `SELECT first_at FROM sessions WHERE first_at != '' ORDER BY first_at LIMIT 1`).Scan(&f)
-		earliest = store.ParseT(f)
+		earliest = Earliest(ctx, db)
 	}
 	b := NewBuckets(r, now, earliest, loc)
-	rep := &Report{Range: r, From: b.Start, To: b.End, Labels: b.Labels(), Generated: now, buckets: b}
+	ax := b.Axis()
+	rep := &Report{Range: r, From: b.From, To: b.To, Labels: ax.Labels, Axis: ax, Generated: now, buckets: b}
 	rep.RollupPct = Progress(ctx, st)
 	t0 := time.Now()
 	sess, err := loadSessions(ctx, db)
@@ -292,6 +317,13 @@ func Build(ctx context.Context, st *store.Store, r Range, now time.Time, loc *ti
 }
 
 func bound(t time.Time) string { return store.T(t) }
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
 
 func zeros(n int) []float64 { return make([]float64, n) }
 
@@ -435,9 +467,15 @@ type usageAgg struct {
 	t       Tokens
 }
 
-func queryUsage(ctx context.Context, db *sql.DB, from, to time.Time) ([]usageAgg, error) {
-	rows, err := db.QueryContext(ctx, `SELECT substr(ts, 1, 13), session_id, model, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write)
-		FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY 1, 2, 3`, bound(from), bound(to))
+// queryUsage sums usage in [from, to) per session, model and hour (per minute when fine is set, for short
+// ranges whose buckets don't sit on hour boundaries).
+func queryUsage(ctx context.Context, db *sql.DB, from, to time.Time, fine bool) ([]usageAgg, error) {
+	n := 13
+	if fine {
+		n = 16
+	}
+	rows, err := db.QueryContext(ctx, `SELECT substr(ts, 1, ?), session_id, model, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write)
+		FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY 1, 2, 3`, n, bound(from), bound(to))
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +487,11 @@ func queryUsage(ctx context.Context, db *sql.DB, from, to time.Time) ([]usageAgg
 		if err := rows.Scan(&h, &u.session, &u.model, &u.t.Input, &u.t.Output, &u.t.CacheRead, &u.t.CacheWrite); err != nil {
 			return nil, err
 		}
-		u.hour = parseHour(h)
+		if len(h) == 16 {
+			u.hour, _ = time.Parse("2006-01-02T15:04", h)
+		} else {
+			u.hour = parseHour(h)
+		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
@@ -457,7 +499,7 @@ func queryUsage(ctx context.Context, db *sql.DB, from, to time.Time) ([]usageAgg
 
 func (r *Report) buildUsage(ctx context.Context, db *sql.DB, sess *sessIndex) error {
 	b := r.buckets
-	rows, err := queryUsage(ctx, db, b.Start, b.End)
+	rows, err := queryUsage(ctx, db, b.From, b.To, b.Step > 0 && b.Step < 24*time.Hour)
 	if err != nil {
 		return err
 	}
@@ -467,10 +509,8 @@ func (r *Report) buildUsage(ctx context.Context, db *sql.DB, sess *sessIndex) er
 	models := map[string]*ModelCost{}
 	per := map[int64]*SessionRef{}
 	for _, u := range rows {
-		i := b.Index(u.hour)
-		if i < 0 {
-			continue
-		}
+		// Rows are already limited to the window; an hour that starts before it draws in the first bucket.
+		i := b.Index(maxTime(u.hour, b.From))
 		byModel.add(u.model, i, float64(u.t.Total()))
 		kinds.add("Uncached input", i, float64(u.t.Input))
 		kinds.add("Cache write", i, float64(u.t.CacheWrite))
@@ -528,7 +568,7 @@ func (r *Report) buildUsage(ctx context.Context, db *sql.DB, sess *sessIndex) er
 	}
 	p := b.Prev()
 	prev, err := db.QueryContext(ctx, `SELECT model, SUM(input), SUM(output), SUM(cache_read), SUM(cache_write)
-		FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY 1`, bound(p.Start), bound(p.End))
+		FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY 1`, bound(p.From), bound(p.To))
 	if err != nil {
 		return err
 	}
@@ -636,7 +676,7 @@ func latencies(rows []gwRow) map[string][]float64 {
 
 func (r *Report) buildGateway(ctx context.Context, db *sql.DB, accts []store.GatewayAccount, classes map[string]store.GatewayAccount) error {
 	b := r.buckets
-	rows, err := queryGateway(ctx, db, b.Start, b.End)
+	rows, err := queryGateway(ctx, db, b.From, b.To)
 	if err != nil {
 		return err
 	}
@@ -649,7 +689,7 @@ func (r *Report) buildGateway(ctx context.Context, db *sql.DB, accts []store.Gat
 	share := map[string]*AccountShare{}
 	var workTok, allTok int64
 	// Personal windows at >= 95% over time, to tell whether work was used because personal was capped.
-	capped, err := personalCapTimes(ctx, db, classes, b.Start)
+	capped, err := personalCapTimes(ctx, db, classes, b.From)
 	if err != nil {
 		return err
 	}
@@ -715,7 +755,7 @@ func (r *Report) buildGateway(ctx context.Context, db *sql.DB, accts []store.Gat
 	var prev map[string][]float64
 	if r.Range.Dur > 0 {
 		p := b.Prev()
-		prows, err := queryGateway(ctx, db, p.Start, p.End)
+		prows, err := queryGateway(ctx, db, p.From, p.To)
 		if err != nil {
 			return err
 		}
@@ -732,7 +772,62 @@ func (r *Report) buildGateway(ctx context.Context, db *sql.DB, accts []store.Gat
 	return nil
 }
 
-// personalCapTimes returns a test for "a personal account of this provider had a window at >= 95% at t",
+// capSpan is a stretch of time during which an account window sat at its cap.
+type capSpan struct {
+	from, to time.Time // to zero: still capped at the last observation, reset unknown
+}
+
+// capPoint is one quota observation of one account window.
+type capPoint struct {
+	at    time.Time
+	used  float64
+	reset int64 // unix seconds, 0 unknown
+}
+
+// capThreshold is the used % from which a window counts as capped.
+const capThreshold = 95
+
+// capSpans turns one window's observations (in time order) into capped intervals. An interval opens at a
+// capped observation and closes at whichever comes first: the next uncapped observation, or the window's
+// reset (a window that resets starts over even if no one looks at it until much later).
+func capSpans(pts []capPoint) []capSpan {
+	var out []capSpan
+	var open *capSpan
+	var reset time.Time
+	closeAt := func(t time.Time) {
+		if !reset.IsZero() && reset.Before(t) {
+			t = reset
+		}
+		open.to = t
+		out = append(out, *open)
+		open = nil
+	}
+	for _, p := range pts {
+		if open != nil && !reset.IsZero() && !p.at.Before(reset) {
+			closeAt(reset)
+		}
+		if p.used >= capThreshold {
+			if open == nil {
+				open = &capSpan{from: p.at}
+			}
+			reset = time.Time{}
+			if p.reset > 0 {
+				reset = time.Unix(p.reset, 0)
+			}
+			continue
+		}
+		if open != nil {
+			closeAt(p.at)
+		}
+	}
+	if open != nil {
+		open.to = reset // zero when the reset is unknown: capped until told otherwise
+		out = append(out, *open)
+	}
+	return out
+}
+
+// personalCapTimes returns a test for "a personal account of this provider had a window at its cap at t",
 // from the quota history.
 func personalCapTimes(ctx context.Context, db *sql.DB, classes map[string]store.GatewayAccount, from time.Time) (func(string, time.Time) bool, error) {
 	personal := map[string]string{} // account id -> provider
@@ -741,55 +836,44 @@ func personalCapTimes(ctx context.Context, db *sql.DB, classes map[string]store.
 			personal[a.ID] = a.Provider
 		}
 	}
-	type span struct {
-		from, to time.Time
-		prov     string
-	}
-	var spans []span
-	rows, err := db.QueryContext(ctx, `SELECT account_id, win, at, used_pct FROM gateway_quota_history WHERE at >= ? ORDER BY account_id, win, at`,
-		bound(from.Add(-7*24*time.Hour)))
+	rows, err := db.QueryContext(ctx, `SELECT account_id, win, at, used_pct, reset_at FROM gateway_quota_history WHERE at >= ?
+		ORDER BY account_id, win, at`, bound(from.Add(-7*24*time.Hour)))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var lastKey string
-	var open *span
+	series := map[string][]capPoint{}
+	provOf := map[string]string{}
 	for rows.Next() {
 		var id, win, at string
-		var used float64
-		if err := rows.Scan(&id, &win, &at, &used); err != nil {
+		var p capPoint
+		if err := rows.Scan(&id, &win, &at, &p.used, &p.reset); err != nil {
 			return nil, err
 		}
 		prov, ok := personal[id]
 		if !ok {
 			continue
 		}
-		t := store.ParseT(at)
+		p.at = store.ParseT(at)
 		k := id + "\x00" + win
-		if k != lastKey && open != nil {
-			spans = append(spans, *open)
-			open = nil
-		}
-		lastKey = k
-		if used >= 95 && open == nil {
-			open = &span{from: t, prov: prov}
-		} else if used < 95 && open != nil {
-			open.to = t
-			spans = append(spans, *open)
-			open = nil
-		}
+		series[k] = append(series[k], p)
+		provOf[k] = prov
 	}
-	if open != nil {
-		spans = append(spans, *open)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	spans := map[string][]capSpan{} // provider -> capped intervals
+	for k, pts := range series {
+		spans[provOf[k]] = append(spans[provOf[k]], capSpans(pts)...)
 	}
 	return func(prov string, t time.Time) bool {
-		for _, s := range spans {
-			if s.prov == prov && !t.Before(s.from) && (s.to.IsZero() || t.Before(s.to)) {
+		for _, s := range spans[prov] {
+			if !t.Before(s.from) && (s.to.IsZero() || t.Before(s.to)) {
 				return true
 			}
 		}
 		return false
-	}, rows.Err()
+	}, nil
 }
 
 // ---------------------------------------------------------------- quota
@@ -863,7 +947,7 @@ func (r *Report) buildQuota(ctx context.Context, st *store.Store, accts []store.
 	b := r.buckets
 	hist := map[string][]quotaPoint{}
 	rows, err := st.DB.QueryContext(ctx, `SELECT account_id, win, at, used_pct, reset_at FROM gateway_quota_history
-		WHERE at >= ? ORDER BY at`, bound(b.Start.Add(-8*24*time.Hour)))
+		WHERE at >= ? ORDER BY at`, bound(b.From.Add(-8*24*time.Hour)))
 	if err != nil {
 		return err
 	}
@@ -966,9 +1050,11 @@ type actRow struct {
 	blocks, prompts int64
 }
 
+// queryActivity returns the activity hours whose midpoint falls in [from, to). Activity is kept per hour, so an
+// hour cut by a window edge counts in exactly one of the two windows on either side.
 func queryActivity(ctx context.Context, db *sql.DB, from, to time.Time) ([]actRow, error) {
-	rows, err := db.QueryContext(ctx, `SELECT hour, session_id, blocks, prompts FROM activity WHERE hour >= ? AND hour < ?`,
-		hourKey(from), hourKey(to))
+	rows, err := db.QueryContext(ctx, `SELECT hour, session_id, blocks, prompts FROM activity WHERE hour >= ? AND hour <= ?`,
+		hourKey(from.Add(-time.Hour)), hourKey(to))
 	if err != nil {
 		return nil, err
 	}
@@ -981,6 +1067,9 @@ func queryActivity(ctx context.Context, db *sql.DB, from, to time.Time) ([]actRo
 			return nil, err
 		}
 		a.hour = parseHour(h)
+		if m := hourMid(a.hour); m.Before(from) || !m.Before(to) {
+			continue
+		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -1001,7 +1090,7 @@ func median(v []float64) float64 {
 func (r *Report) buildSessions(ctx context.Context, db *sql.DB, sess *sessIndex) error {
 	b := r.buckets
 	v := &r.Sessions
-	acts, err := queryActivity(ctx, db, b.Start, b.End)
+	acts, err := queryActivity(ctx, db, b.From, b.To)
 	if err != nil {
 		return err
 	}
@@ -1011,7 +1100,7 @@ func (r *Report) buildSessions(ctx context.Context, db *sql.DB, sess *sessIndex)
 	proj := map[string]float64{}
 	activeHours := map[int64]float64{}
 	for _, a := range acts {
-		i := b.Index(a.hour)
+		i := b.Index(hourMid(a.hour))
 		if i < 0 {
 			continue
 		}
@@ -1100,7 +1189,7 @@ func (r *Report) buildSessions(ctx context.Context, db *sql.DB, sess *sessIndex)
 
 	// Tools
 	trows, err := db.QueryContext(ctx, `SELECT tool, COUNT(*), SUM(is_error) FROM tool_calls WHERE ts >= ? AND ts < ? GROUP BY tool`,
-		bound(b.Start), bound(b.End))
+		bound(b.From), bound(b.To))
 	if err != nil {
 		return err
 	}
@@ -1122,7 +1211,7 @@ func (r *Report) buildSessions(ctx context.Context, db *sql.DB, sess *sessIndex)
 
 	if r.Range.Dur > 0 {
 		p := b.Prev()
-		pacts, err := queryActivity(ctx, db, p.Start, p.End)
+		pacts, err := queryActivity(ctx, db, p.From, p.To)
 		if err != nil {
 			return err
 		}
@@ -1130,11 +1219,11 @@ func (r *Report) buildSessions(ctx context.Context, db *sql.DB, sess *sessIndex)
 			v.PrevPrompts += a.prompts
 		}
 		for _, s := range sess.byID {
-			if s.Parent == "" && s.Messages > 0 && !s.First.Before(p.Start) && s.First.Before(p.End) {
+			if s.Parent == "" && s.Messages > 0 && p.In(s.First) {
 				v.PrevStarted++
 			}
 		}
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tool_calls WHERE ts >= ? AND ts < ?`, bound(p.Start), bound(p.End)).Scan(&v.PrevToolCalls)
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tool_calls WHERE ts >= ? AND ts < ?`, bound(p.From), bound(p.To)).Scan(&v.PrevToolCalls)
 	}
 	return nil
 }
@@ -1170,7 +1259,7 @@ func (r *Report) buildFleet(ctx context.Context, db *sql.DB) error {
 	b := r.buckets
 	f := &r.Fleet
 	rows, err := db.QueryContext(ctx, `SELECT id, key, kind, target, status, summary, started_at, ended_at FROM runs
-		WHERE started_at >= ? AND started_at < ? ORDER BY started_at`, bound(b.Start), bound(b.End))
+		WHERE started_at >= ? AND started_at < ? ORDER BY started_at`, bound(b.From), bound(b.To))
 	if err != nil {
 		return err
 	}
@@ -1318,7 +1407,7 @@ func (r *Report) buildFleet(ctx context.Context, db *sql.DB) error {
 	f.MedianCycleMin = median(spans)
 	if r.Range.Dur > 0 {
 		p := b.Prev()
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE started_at >= ? AND started_at < ?`, bound(p.Start), bound(p.End)).Scan(&f.PrevRuns)
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE started_at >= ? AND started_at < ?`, bound(p.From), bound(p.To)).Scan(&f.PrevRuns)
 	}
 	return nil
 }
@@ -1350,7 +1439,7 @@ func (r *Report) buildChat(ctx context.Context, db *sql.DB) error {
 	var me string
 	_ = db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'slack_user_id'`).Scan(&me)
 	rows, err := db.QueryContext(ctx, `SELECT at, conv_id, conv_name, conv_kind, user_id, user_name, mentions_me, thread_ts
-		FROM chat_messages WHERE at >= ? AND at < ?`, bound(b.Start), bound(b.End))
+		FROM chat_messages WHERE at >= ? AND at < ?`, bound(b.From), bound(b.To))
 	if err != nil {
 		return err
 	}

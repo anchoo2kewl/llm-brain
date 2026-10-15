@@ -33,7 +33,8 @@ type Opts struct {
 	ID      string   // unique on the page; used for aria ids
 	Title   string   // accessible name (also the first line of every tooltip)
 	Desc    string   // accessible description
-	XLabels []string // one per x position: the tooltip heading; a few are drawn on the axis
+	XLabels []string // one per x position; a few are drawn on the axis
+	Tips    []string // optional: one per x position, the tooltip heading (default XLabels)
 	Height  int      // viewBox height (default 180)
 	Format  func(float64) string
 	Stacked bool
@@ -190,7 +191,9 @@ func xLabels(b *strings.Builder, o Opts, n int, x func(int) float64) {
 // tooltip is the text of one x position: its label, then each series' value.
 func tooltip(o Opts, series []Series, i int) string {
 	var t strings.Builder
-	if i < len(o.XLabels) {
+	if i < len(o.Tips) {
+		t.WriteString(o.Tips[i])
+	} else if i < len(o.XLabels) {
 		t.WriteString(o.XLabels[i])
 	}
 	total := 0.0

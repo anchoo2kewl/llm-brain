@@ -248,16 +248,18 @@ func sessionBars(refs []insights.SessionRef, by string) []charts.Bar {
 
 func init() {
 	for k, v := range map[string]any{
-		"area": func(id, title string, labels []string, s []charts.Series, unit string, stacked bool) template.HTML {
-			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title + ", " + strconv.Itoa(len(labels)) + " intervals",
-				XLabels: labels, Stacked: stacked, Format: unitFormat(unit)}, s)
+		"area": func(id, title string, ax insights.Axis, s []charts.Series, unit string, stacked bool) template.HTML {
+			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title + ", " + strconv.Itoa(len(ax.Labels)) + " intervals",
+				XLabels: ax.Labels, Tips: ax.Tips, Stacked: stacked, Format: unitFormat(unit)}, s)
 		},
-		"linechart": func(id, title string, labels []string, s []charts.Series, unit string, top float64) template.HTML {
-			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title, XLabels: labels, Lines: true, Max: top, Format: unitFormat(unit), Height: 140}, s)
+		"linechart": func(id, title string, ax insights.Axis, s []charts.Series, unit string, top float64) template.HTML {
+			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title, XLabels: ax.Labels, Tips: ax.Tips, Lines: true, Max: top,
+				Format: unitFormat(unit), Height: 140}, s)
 		},
-		"bars": func(id, title string, labels []string, s []charts.Series, unit string) template.HTML {
-			return charts.Bars(charts.Opts{ID: id, Title: title, Desc: title, XLabels: labels, Format: unitFormat(unit)}, s)
+		"bars": func(id, title string, ax insights.Axis, s []charts.Series, unit string) template.HTML {
+			return charts.Bars(charts.Opts{ID: id, Title: title, Desc: title, XLabels: ax.Labels, Tips: ax.Tips, Format: unitFormat(unit)}, s)
 		},
+		"hourAxis": func() insights.Axis { return insights.Axis{Labels: hourLabels()} },
 		"hbars": func(id, title string, b []charts.Bar, unit string) template.HTML {
 			return charts.HBars(id, title, b, unitFormat(unit))
 		},
