@@ -53,10 +53,22 @@ type Executor struct {
 	wg     sync.WaitGroup
 }
 
+// turn is a turn this executor holds, from the moment it is claimed (so it counts against MaxTurns and a
+// Stop finds it) until its final report.
 type turn struct {
 	agentID int64
-	proc    Process
+	cancel  context.CancelFunc // ends worktree creation and anything else before the process starts
+	proc    Process            // nil until the process has started
 	stopped bool
+}
+
+// halt marks t stopped and ends whatever stage it is in. Call with e.mu held.
+func (t *turn) halt() {
+	t.stopped = true
+	t.cancel()
+	if t.proc != nil {
+		t.proc.Stop()
+	}
 }
 
 func (e *Executor) logf(f string, a ...any) {
@@ -129,11 +141,10 @@ func (e *Executor) Run(ctx context.Context) {
 	}
 	e.mu.Lock()
 	for _, t := range e.active {
-		t.stopped = true
-		t.proc.Stop()
+		t.halt()
 	}
 	e.mu.Unlock()
-	e.wg.Wait()
+	e.wg.Wait() // every turn has stopped its process group and sent its final report
 }
 
 func (e *Executor) inventory() Inventory {
@@ -155,17 +166,30 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 		e.logf("agent: command %d: %s for session %d", c.ID, c.Kind, c.AgentID)
 		switch c.Kind {
 		case KindTurn:
+			// Reserve the slot before the goroutine starts, so a batch can't overrun MaxTurns and a Stop
+			// that follows in the same batch finds the turn.
+			tctx, cancel := context.WithCancel(ctx)
 			e.mu.Lock()
 			n := len(e.active)
-			e.mu.Unlock()
 			if n >= e.MaxTurns {
+				e.mu.Unlock()
+				cancel()
 				e.report(ctx, c.ID, Report{Status: "failed", Error: fmt.Sprintf("%s already runs %d turns", e.Host, n)})
 				continue
 			}
+			st := &turn{agentID: c.AgentID, cancel: cancel}
+			e.active[c.ID] = st
+			e.mu.Unlock()
 			e.wg.Add(1)
 			go func(c store.Command) {
 				defer e.wg.Done()
-				e.runTurn(ctx, c)
+				defer func() {
+					e.mu.Lock()
+					delete(e.active, c.ID)
+					e.mu.Unlock()
+					cancel()
+				}()
+				e.runTurn(tctx, c, st)
 			}(c)
 		case KindStop:
 			e.stop(ctx, c)
@@ -207,27 +231,36 @@ func (e *Executor) stop(ctx context.Context, c store.Command) {
 	var p Stop
 	_ = json.Unmarshal(c.Payload, &p)
 	e.mu.Lock()
-	var hit *turn
+	hit := false
 	for id, t := range e.active {
 		if (p.TurnCommand > 0 && id == p.TurnCommand) || (p.TurnCommand == 0 && t.agentID == c.AgentID) {
-			hit = t
-			t.stopped = true
+			hit = true
+			t.halt() // also before the process exists: the turn checks before it starts one
 		}
 	}
 	e.mu.Unlock()
-	if hit == nil {
+	if !hit {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: "no running turn for this session on " + e.Host})
 		return
 	}
-	hit.proc.Stop()
 	e.report(ctx, c.ID, Report{Status: "done"})
 }
 
-func (e *Executor) runTurn(ctx context.Context, c store.Command) {
+func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
+	stopped := func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return st.stopped
+	}
 	fail := func(err error) {
+		if stopped() {
+			e.report(ctx, c.ID, Report{Status: "stopped"})
+			return
+		}
 		e.logf("agent: command %d failed: %v", c.ID, err)
 		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
 	}
+	errStopped := errors.New("stopped")
 	var t Turn
 	if err := json.Unmarshal(c.Payload, &t); err != nil {
 		fail(fmt.Errorf("bad payload: %w", err))
@@ -249,6 +282,10 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command) {
 	}
 	if err != nil {
 		fail(err)
+		return
+	}
+	if stopped() {
+		fail(errStopped)
 		return
 	}
 	if t.Worktree != nil && t.Resume == "" {
@@ -312,21 +349,23 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command) {
 	defer lf.Close()
 	fmt.Fprintf(lf, "%s hub session %d, command %d, %s in %s via %s\n$ %s %s\n\n", time.Now().Format("2006-01-02 15:04:05"),
 		c.AgentID, c.ID, t.Provider, cwd, route, spec.Bin, strings.Join(shownArgs(spec.Args), " "))
+	if stopped() || ctx.Err() != nil {
+		fmt.Fprintln(lf, "● stopped before it started")
+		fail(errStopped)
+		return
+	}
 	proc, err := e.Runner.Start(ctx, spec)
 	if err != nil {
 		fmt.Fprintf(lf, "✗ start: %v\n", err)
 		fail(err)
 		return
 	}
-	st := &turn{agentID: c.AgentID, proc: proc}
 	e.mu.Lock()
-	e.active[c.ID] = st
+	st.proc = proc
+	if st.stopped { // a Stop came while it was starting
+		proc.Stop()
+	}
 	e.mu.Unlock()
-	defer func() {
-		e.mu.Lock()
-		delete(e.active, c.ID)
-		e.mu.Unlock()
-	}()
 	e.report(ctx, c.ID, Report{Status: "running", PID: proc.PID(), Cwd: cwd, Log: logPath, SessionID: t.Resume})
 
 	capt := &Capture{Provider: t.Provider, SessionID: t.Resume}
@@ -366,6 +405,9 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command) {
 	}
 	proc.Close()
 	<-done
+	if esc, ok := proc.(interface{ Escalated() <-chan struct{} }); ok && stopped() {
+		<-esc.Escalated() // the whole group is gone, descendants included
+	}
 
 	final := capt.Final
 	if spec.LastFile != "" {
@@ -374,12 +416,9 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command) {
 		}
 		_ = os.Remove(spec.LastFile)
 	}
-	e.mu.Lock()
-	stopped := st.stopped
-	e.mu.Unlock()
 	r := Report{Status: "done", SessionID: capt.SessionID, Cwd: cwd, ExitCode: code, Result: final, Log: logPath}
 	switch {
-	case stopped:
+	case stopped():
 		r.Status = "stopped"
 	case werr != nil || code != 0:
 		r.Status = "failed"
@@ -432,8 +471,11 @@ func (e *Executor) scratchDir(agentID int64) (string, error) {
 
 // ---------------------------------------------------------------- the real runner
 
-// ProcRunner starts the CLI in its own process group, so Stop ends it and everything it spawned.
-type ProcRunner struct{}
+// ProcRunner starts the CLI in its own process group, so Stop ends it and everything it spawned: SIGTERM to
+// the group, then SIGKILL to the group after Grace (default 5 s), whether or not the leader has exited.
+type ProcRunner struct {
+	Grace time.Duration
+}
 
 // searchPath is PATH plus where Homebrew and the claude installer put things (launchd gives a bare PATH).
 func searchPath() string {
@@ -468,7 +510,7 @@ func childEnv(extra []string) []string {
 	return append(append(env, "PATH="+path), extra...)
 }
 
-func (ProcRunner) Start(ctx context.Context, s Spec) (Process, error) {
+func (r ProcRunner) Start(ctx context.Context, s Spec) (Process, error) {
 	exe, err := lookPath(s.Bin, searchPath())
 	if err != nil {
 		return nil, err
@@ -489,16 +531,24 @@ func (ProcRunner) Start(ctx context.Context, s Spec) (Process, error) {
 		return nil, err
 	}
 	pw.Close()
-	p := &proc{cmd: cmd, out: pr, exited: make(chan struct{})}
+	grace := r.Grace
+	if grace <= 0 {
+		grace = 5 * time.Second
+	}
+	p := &proc{cmd: cmd, out: pr, exited: make(chan struct{}), escalated: make(chan struct{}), grace: grace}
 	return p, nil
 }
 
 type proc struct {
-	cmd    *exec.Cmd
-	out    *os.File
-	exited chan struct{}
-	once   sync.Once
+	cmd       *exec.Cmd
+	out       *os.File
+	exited    chan struct{}
+	escalated chan struct{} // closed once Stop's SIGKILL went out
+	grace     time.Duration
+	once      sync.Once
 }
+
+func (p *proc) Escalated() <-chan struct{} { return p.escalated }
 
 func (p *proc) PID() int          { return p.cmd.Process.Pid }
 func (p *proc) Output() io.Reader { return p.out }
@@ -517,17 +567,15 @@ func (p *proc) Wait() (int, error) {
 	return 0, nil
 }
 
-// Stop sends SIGTERM to the process group, then SIGKILL if it is still there after 5 s.
+// Stop sends SIGTERM to the process group, then SIGKILL to the group after the grace period. The leader
+// exiting early doesn't end it: a descendant that ignored SIGTERM is still in the group.
 func (p *proc) Stop() {
 	p.once.Do(func() {
 		pgid := p.cmd.Process.Pid
 		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 		go func() {
-			select {
-			case <-p.exited:
-				return
-			case <-time.After(5 * time.Second):
-			}
+			defer close(p.escalated)
+			time.Sleep(p.grace)
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}()
 	})
