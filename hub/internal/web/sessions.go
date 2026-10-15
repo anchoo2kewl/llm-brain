@@ -788,7 +788,7 @@ func (s *Server) sessionReview(w http.ResponseWriter, r *http.Request) {
 
 type llmMsgView struct {
 	store.LLMMessage
-	HTML template.HTML
+	HTML  template.HTML
 	Files []store.Asset // attached to this message
 }
 

@@ -310,7 +310,10 @@ var funcs = template.FuncMap{
 	},
 	"expired": func(unix int64) bool { return unix > 0 && time.Now().Unix() >= unix },
 	"ago":     ago, "clock": clock, "duration": duration, "trunc": trunc, "snippet": snippet, "who": who,
-	"kindLabel": kindLabel, "imageName": func(n string) bool { t := mime.TypeByExtension(filepath.Ext(n)); return strings.HasPrefix(t, "image/") && !strings.Contains(t, "svg") }, "viewable": func(name string) bool { return inlineSafe(mime.TypeByExtension(filepath.Ext(name))) }, "statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
+	"kindLabel": kindLabel, "imageName": func(n string) bool {
+		t := mime.TypeByExtension(filepath.Ext(n))
+		return strings.HasPrefix(t, "image/") && !strings.Contains(t, "svg")
+	}, "viewable": func(name string) bool { return inlineSafe(mime.TypeByExtension(filepath.Ext(name))) }, "statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
 	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
 	"agentLabels": func(i Issue) []string {
 		var out []string
