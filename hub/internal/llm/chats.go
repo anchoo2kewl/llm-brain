@@ -131,7 +131,10 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	finish := func(text, status, msg string) {
-		if err := c.S.SetLLMReply(ctx, rid, text, status, msg); err != nil && c.Log != nil {
+		// A fresh context: ctx may be the one that just expired, and the reply must not stay "streaming".
+		fctx, fcancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer fcancel()
+		if err := c.S.SetLLMReply(fctx, rid, text, status, msg); err != nil && c.Log != nil {
 			c.Log.Printf("chat %d: save reply: %v", chatID, err)
 		}
 		r.mu.Lock()
@@ -171,7 +174,9 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 	})
 	if err != nil {
 		msg := err.Error()
-		if errors.Is(err, ErrNoGateway) || strings.Contains(msg, "unreachable") {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			msg = fmt.Sprintf("no complete reply within %s; this is what arrived", timeout)
+		} else if errors.Is(err, ErrNoGateway) || strings.Contains(msg, "unreachable") {
 			msg = fmt.Sprintf("The account gateway isn't answering (%v). Start it, or use an agent chat, which falls back to the CLI's own login.", err)
 		}
 		if c.Log != nil {

@@ -24,7 +24,13 @@ type Client struct {
 	KeyFile string
 	Key     string // set directly in tests
 	HTTP    *http.Client
+	// Limits on a streamed reply (defaults 1 MiB per event line, 4 MiB per reply). Past either, the request
+	// is cancelled and Stream returns ErrTooLarge with what arrived so far.
+	MaxLine, MaxReply int
 }
+
+// ErrTooLarge: the gateway sent more than the client's limits allow.
+var ErrTooLarge = errors.New("reply too large")
 
 // ErrNoGateway: no gateway configured, or no client key for it.
 var ErrNoGateway = errors.New("no account gateway configured")
@@ -151,6 +157,15 @@ type Message struct {
 // Stream asks model for the next reply and calls onDelta with each piece as it arrives. It returns the whole
 // reply.
 func (c *Client) Stream(ctx context.Context, model string, msgs []Message, onDelta func(string)) (string, error) {
+	maxLine, maxReply := c.MaxLine, c.MaxReply
+	if maxLine <= 0 {
+		maxLine = 1 << 20
+	}
+	if maxReply <= 0 {
+		maxReply = 4 << 20
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // past a limit, this closes the connection
 	body, _ := json.Marshal(map[string]any{"model": model, "messages": msgs, "stream": true})
 	r, err := c.req(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -167,50 +182,58 @@ func (c *Client) Stream(ctx context.Context, model string, msgs []Message, onDel
 		return "", fmt.Errorf("gateway: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	var full strings.Builder
-	br := bufio.NewReaderSize(resp.Body, 64<<10)
-	for {
-		line, err := br.ReadString('\n')
-		if t := strings.TrimSpace(line); strings.HasPrefix(t, "data:") {
-			data := strings.TrimSpace(strings.TrimPrefix(t, "data:"))
-			if data == "[DONE]" {
-				return full.String(), nil
-			}
-			var ev struct {
-				Choices []struct {
-					Delta struct {
-						Content string `json:"content"`
-					} `json:"delta"`
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				} `json:"choices"`
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if json.Unmarshal([]byte(data), &ev) == nil {
-				if ev.Error != nil {
-					return full.String(), errors.New(ev.Error.Message)
-				}
-				for _, ch := range ev.Choices {
-					d := ch.Delta.Content
-					if d == "" {
-						d = ch.Message.Content
-					}
-					if d != "" {
-						full.WriteString(d)
-						if onDelta != nil {
-							onDelta(d)
-						}
-					}
-				}
-			}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	for sc.Scan() {
+		t := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(t, "data:") {
+			continue
 		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return full.String(), nil
+		data := strings.TrimSpace(strings.TrimPrefix(t, "data:"))
+		if data == "[DONE]" {
+			return full.String(), nil
+		}
+		var ev struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &ev) != nil {
+			continue
+		}
+		if ev.Error != nil {
+			return full.String(), errors.New(ev.Error.Message)
+		}
+		for _, ch := range ev.Choices {
+			d := ch.Delta.Content
+			if d == "" {
+				d = ch.Message.Content
 			}
-			return full.String(), err
+			if d == "" {
+				continue
+			}
+			if full.Len()+len(d) > maxReply {
+				return full.String(), fmt.Errorf("%w: over %d bytes, stopped", ErrTooLarge, maxReply)
+			}
+			full.WriteString(d)
+			if onDelta != nil {
+				onDelta(d)
+			}
 		}
 	}
+	if err := sc.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return full.String(), fmt.Errorf("%w: an event over %d bytes", ErrTooLarge, maxLine)
+		}
+		return full.String(), err
+	}
+	return full.String(), nil
 }
