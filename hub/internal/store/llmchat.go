@@ -61,7 +61,7 @@ func (s *Store) LLMChat(ctx context.Context, id int64) (LLMChat, error) {
 const ScanRecent = 5000
 
 // LLMChats lists chats, newest activity first. q filters on the title and model, and, with scanContent,
-// on the text of the newest ScanRecent messages (the fallback while the search index isn't ready; with it,
+// on the first 4000 characters of the newest ScanRecent messages, so the scan stays bounded (the fallback while the search index isn't ready; with it,
 // message text is found through the index).
 func (s *Store) LLMChats(ctx context.Context, q string, limit int, scanContent bool) ([]LLMChat, error) {
 	query := `SELECT id, title, model, created_at, updated_at FROM llm_chats`
@@ -71,8 +71,8 @@ func (s *Store) LLMChats(ctx context.Context, q string, limit int, scanContent b
 		query += ` WHERE lower(title) LIKE ? OR lower(model) LIKE ?`
 		args = append(args, like, like)
 		if scanContent {
-			query += ` OR id IN (SELECT chat_id FROM llm_messages WHERE id > (SELECT COALESCE(max(id), 0) FROM llm_messages) - ?
-				AND lower(content) LIKE ?)`
+			query += ` OR id IN (SELECT chat_id FROM llm_messages WHERE id > (SELECT COALESCE((SELECT id FROM llm_messages ORDER BY id DESC LIMIT 1), 0)) - ?
+				AND lower(substr(content, 1, 4000)) LIKE ?)`
 			args = append(args, ScanRecent, like)
 		}
 	}
