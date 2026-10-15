@@ -26,8 +26,9 @@ func recordQuotaHistory(ctx context.Context, tx *sql.Tx, accts []GatewayAccount,
 			if err == nil && used == w.UsedPct && reset == w.ResetAt && now.Sub(ParseT(last)) < quotaHistoryEvery {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO gateway_quota_history (account_id, win, at, used_pct, reset_at)
-				VALUES (?, ?, ?, ?, ?)`, a.ID, w.Name, at, w.UsedPct, w.ResetAt); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO gateway_quota_history (account_id, win, at, used_pct, reset_at)
+				VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT (account_id, win, at) DO UPDATE SET used_pct = excluded.used_pct, reset_at = excluded.reset_at`, a.ID, w.Name, at, w.UsedPct, w.ResetAt); err != nil {
 				return err
 			}
 		}
