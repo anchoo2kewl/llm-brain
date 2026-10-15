@@ -248,10 +248,10 @@ func (s *Store) RecentFolders(ctx context.Context, host, home string, limit int)
 		return nil, nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT cwd, max(at) AS last FROM (
-			SELECT cwd, file_mtime AS at FROM sessions WHERE host = ? AND cwd LIKE ? AND file_mtime > ?
-			UNION ALL SELECT cwd, updated_at AS at FROM terminals WHERE host = ? AND cwd LIKE ?)
-		GROUP BY cwd ORDER BY last DESC LIMIT ?`,
-		host, home+"/%", T(time.Now().AddDate(0, 0, -30)), host, home+"/%", limit)
+			SELECT cwd, file_mtime AS at FROM sessions WHERE host = ? AND substr(cwd, 1, ?) = ? AND file_mtime > ?
+			UNION ALL SELECT cwd, updated_at AS at FROM terminals WHERE host = ? AND substr(cwd, 1, ?) = ?)
+		GROUP BY cwd ORDER BY last DESC LIMIT ?`, // a literal prefix: LIKE would read % and _ in home as wildcards
+		host, len(home)+1, home+"/", T(time.Now().AddDate(0, 0, -30)), host, len(home)+1, home+"/", limit)
 	if err != nil {
 		return nil, err
 	}

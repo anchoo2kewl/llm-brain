@@ -246,9 +246,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 	var argv, env []string
 	switch o.Provider {
 	case "claude":
-		argv = []string{"claude"}
-		if !o.Ask {
-			argv = append(argv, "--dangerously-skip-permissions")
+		argv = []string{"claude", "--dangerously-skip-permissions"}
+		if o.Ask { // explicit, so a bypass default in the CLI's own settings doesn't win
+			argv = []string{"claude", "--permission-mode", "manual"}
 		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
@@ -257,9 +257,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 			env = []string{"ANTHROPIC_BASE_URL=" + gw.URL, "ANTHROPIC_AUTH_TOKEN=" + gw.Key}
 		}
 	case "codex":
-		argv = []string{"codex"}
-		if !o.Ask {
-			argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
+		argv = []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+		if o.Ask {
+			argv = []string{"codex", "--ask-for-approval", "on-request", "--sandbox", "workspace-write"}
 		}
 		if o.Model != "" {
 			argv = append(argv, "-m", o.Model)
@@ -271,9 +271,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 			env = []string{"CPA_API_KEY=" + gw.Key}
 		}
 	case "gemini":
-		argv = []string{"gemini"}
-		if !o.Ask {
-			argv = append(argv, "--approval-mode", "yolo")
+		argv = []string{"gemini", "--approval-mode", "yolo"}
+		if o.Ask {
+			argv = []string{"gemini", "--approval-mode", "default"}
 		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
