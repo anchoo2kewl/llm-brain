@@ -3,7 +3,7 @@
 {{with .Status}}{{.Host}} · snapshot {{ago .At}}{{if .Stale}} <span class="bad">(stale — scheduler not running?)</span>{{end}}{{if .Paused}} · <span class="bad">PAUSED</span>{{end}}
 {{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>
 
-<nav class="section-nav" aria-label="Overview sections"><a href="#capacity">Usage &amp; capacity</a><a href="#models">LLMs</a><a href="#routing">Routing</a><a href="#agents">Live agents</a><a href="#pipeline">Issue pipeline</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a></nav>
+<nav class="section-nav" aria-label="Overview sections"><a href="#chat">Chat</a><a href="#capacity">Usage &amp; capacity</a><a href="#models">LLMs</a><a href="#routing">Routing</a><a href="#agents">Live agents</a><a href="#pipeline">Issue pipeline</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a></nav>
 {{with .Status}}<div class="grid">
 <div class="tile"><b>{{len .Owned}}/{{.MaxInFlight}}</b><span>issues in flight</span></div>
 <div class="tile"><b>{{.Queued}}</b><span>queued</span></div>
@@ -13,6 +13,13 @@
 <div class="tile"><b>{{len .Workers}}</b><span>workers running</span></div>
 
 </div>{{end}}
+
+{{with .Status}}{{with .Chat}}<section class="panel" id="chat">
+<div class="panel-heading"><h2>From chat</h2><span class="pill">{{ago .At}}</span></div>
+<div class="txt">{{.Digest}}</div>
+{{if .Asks}}<h3>Asks of you</h3><ul>{{range .Asks}}<li>{{.}}</li>{{end}}</ul>{{end}}
+<p class="mut small"><a href="/log/{{.Log}}">How this was read</a></p>
+</section>{{end}}{{end}}
 
 <div class="inspect-grid">
 <section class="panel" id="capacity">

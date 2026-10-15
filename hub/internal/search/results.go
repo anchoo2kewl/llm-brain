@@ -202,7 +202,7 @@ var (
 )
 
 func eventHit(e store.IndexEvent, terms []HTerm) Hit {
-	h := Hit{Type: "event", ID: e.ID, Host: e.Host, Time: e.TS, Title: "fleet.log", Label: e.Level, Snippet: Snippet(e.Text, terms)}
+	h := Hit{Type: "event", ID: e.ID, Host: e.Host, Time: e.TS, Title: eventTitle(e.Path), Label: e.Level, Snippet: Snippet(e.Text, terms)}
 	// An event that names a worker log links to its run; one that names a worker key, to that key's runs.
 	if m := logRef.FindStringSubmatch(e.Text); m != nil {
 		h.Link = "/log/" + url.PathEscape(filepath.Base(m[1])) + "?host=" + url.QueryEscape(e.Host)
@@ -238,4 +238,12 @@ func FromStore(q string, msgs []store.Hit, runs []store.Run) []Hit {
 		out = append(out, messageHit(m, terms))
 	}
 	return out
+}
+
+// eventTitle names the log an event came from: fleet.log (scheduler) or chat.log (team chat).
+func eventTitle(path string) string {
+	if b := filepath.Base(path); b == "chat.log" {
+		return b
+	}
+	return "fleet.log"
 }

@@ -70,7 +70,7 @@ func (c *Collector) Discover() []source {
 		logs, _ := filepath.Glob(filepath.Join(c.StateDir, "logs", "*.log"))
 		for _, p := range logs {
 			base := filepath.Base(p)
-			if base == "fleet.log" {
+			if base == "fleet.log" || base == "chat.log" { // chat.log: bin/chat-watch, same line format
 				out = append(out, source{p, KindFleetLog})
 			} else if _, ok := parse.ParseRunLogName(base, time.UTC, "", ""); ok {
 				out = append(out, source{p, KindRunLog})

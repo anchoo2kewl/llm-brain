@@ -28,6 +28,15 @@ type Status struct {
 	Reviews     []Review `json:"reviews"`
 	Workers     []Worker `json:"workers"`
 	Log         string   `json:"log"`
+	Chat        *Chat    `json:"chat"`
+}
+
+// Chat is bin/chat-watch's latest digest of team chat.
+type Chat struct {
+	At     string   `json:"at"`
+	Digest string   `json:"digest"`
+	Asks   []string `json:"asks"`
+	Log    string   `json:"log"`
 }
 
 type Issue struct {
