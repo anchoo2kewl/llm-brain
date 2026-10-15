@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -32,6 +34,9 @@ func (s *Server) terminalRoutes(g, p func(string, http.HandlerFunc), mux *http.S
 	g("GET /workspace", s.workspace)
 	g("GET /api/terminals", s.terminalsAPI)
 	p("POST /terminals/{id}/rename", s.terminalRename)
+	// Driving a terminal from a script or an agent: type / press keys, read the screen.
+	p("POST /api/terminals/{id}/send", s.terminalSend)
+	g("GET /api/terminals/{id}/screen", s.terminalScreen)
 	p("GET /terminals/{id}/ws", s.terminalWS) // sameSite: a websocket from another site is refused
 	p("POST /terminals/{id}/kill", s.terminalKill)
 	p("POST /terminals/{id}/review", s.terminalReview)
@@ -540,4 +545,102 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request) {
 		Hosts []termHost
 		CLIs  []cli
 	}{page{Title: "Workspace", Nav: "workspace"}, f, hs, termCLIs})
+}
+
+// termCommand queues a command for a live terminal and waits (up to 20 s) for its report.
+func (s *Server) termCommand(ctx context.Context, id int64, kind string, payload any) (agent.Report, error) {
+	t, err := s.Store.Terminal(ctx, id)
+	if err != nil {
+		return agent.Report{}, err
+	}
+	if t.Status != "live" {
+		return agent.Report{}, fmt.Errorf("the terminal is %s", t.Status)
+	}
+	if !s.Agents.Ctl.HostLive(ctx, t.Host) {
+		return agent.Report{}, fmt.Errorf("the agent on %s is offline", t.Host)
+	}
+	b, _ := json.Marshal(payload)
+	cid, err := s.Store.QueueCommand(ctx, store.Command{Host: t.Host, Kind: kind, AgentID: id, Payload: b})
+	if err != nil {
+		return agent.Report{}, err
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := s.Store.Command(ctx, cid)
+		if err == nil && store.FinalStatus(c.Status) {
+			var r agent.Report
+			_ = json.Unmarshal([]byte(c.Result), &r)
+			if c.Status != "done" {
+				if r.Error == "" {
+					r.Error = c.Status
+				}
+				return r, errors.New(r.Error)
+			}
+			return r, nil
+		}
+		select {
+		case <-ctx.Done():
+			return agent.Report{}, ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	return agent.Report{}, errors.New("the agent didn't answer in 20 s")
+}
+
+// terminalSend types text and/or presses keys. JSON {"text": "...", "keys": ["Enter"]}, or form fields
+// text= and keys= (comma-separated).
+func (s *Server) terminalSend(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	var req agent.TermSend
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, err)
+			return
+		}
+	} else {
+		req.Text = r.FormValue("text")
+		for _, k := range strings.Split(r.FormValue("keys"), ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				req.Keys = append(req.Keys, k)
+			}
+		}
+	}
+	if req.Text == "" && len(req.Keys) == 0 {
+		jsonErr(w, http.StatusBadRequest, errors.New("nothing to send: give text and/or keys"))
+		return
+	}
+	if len(req.Text) > 64<<10 || len(req.Keys) > 50 {
+		jsonErr(w, http.StatusBadRequest, errors.New("too much at once"))
+		return
+	}
+	if _, err := s.termCommand(r.Context(), id, agent.KindTermSend, req); err != nil {
+		jsonErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// terminalScreen returns the visible screen as text (?scrollback=N adds N lines above it).
+func (s *Server) terminalScreen(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	n, _ := strconv.Atoi(r.URL.Query().Get("scrollback"))
+	rep, err := s.termCommand(r.Context(), id, agent.KindTermCapture, agent.TermCapture{Scrollback: n})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, err)
+		return
+	}
+	if r.URL.Query().Get("format") == "text" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, rep.Result)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"screen": rep.Result})
 }
