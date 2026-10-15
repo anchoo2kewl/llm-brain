@@ -795,7 +795,7 @@
   window.require.config({ paths: { vs: "/static/monaco/vs" } });
   window.require(["vs/editor/editor.main"], function () {
     M = window.monaco;
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var dark = window.hubDark ? window.hubDark() : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
     var saved = function (k) { try { return JSON.parse(load(k) || "null"); } catch (e) { return null; } };
     var opts = Object.assign({
       model: null, theme: dark ? "vs-dark" : "vs", automaticLayout: true, fontSize: fontSize, minimap: { enabled: true },

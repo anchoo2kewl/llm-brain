@@ -1,0 +1,39 @@
+{{define "content"}}
+<div class="top"><div><p class="eyebrow">Settings</p><h1>Settings</h1><p class="mut">How the hub looks, what it tells you, and what it keeps up to date.</p></div></div>
+{{if .Saved}}<p class="ok" role="status">Saved.</p>{{end}}
+
+<section class="panel" id="appearance">
+<div class="panel-heading"><h2>Appearance</h2></div>
+<div class="field"><span>Theme</span>
+<div class="seg" role="radiogroup" aria-label="Theme" data-theme-pick>
+<button type="button" data-theme-v="">Auto</button><button type="button" data-theme-v="light">Light</button><button type="button" data-theme-v="dark">Dark</button></div>
+<span class="mut small">Stored in this browser.</span></div>
+<form method="post" action="/settings/app" class="field"><label for="home">Home page</label>
+<select id="home" name="home"><option value="inbox" {{if eq .Home "inbox"}}selected{{end}}>Inbox: what needs me</option><option value="fleet" {{if eq .Home "fleet"}}selected{{end}}>Fleet overview</option></select>
+<button type="submit">Save</button></form>
+</section>
+
+<section class="panel" id="notifications">
+<div class="panel-heading"><h2>Notifications</h2>{{if .Subs}}<span class="chip s-done">{{len .Subs}} {{if eq (len .Subs) 1}}device{{else}}devices{{end}}</span>{{end}}</div>
+<p class="mut">Get a notification when an agent is waiting for you, a PR needs a review, or something fails.</p>
+{{if not .PushOn}}<p class="warn">Push is off on this hub.</p>{{else}}
+<div class="actions" id="pushctl" data-https="{{.HTTPS}}">
+<button type="button" class="primary" id="pushon" hidden>Turn on for this device</button>
+<button type="button" id="pushoff" hidden>Turn off for this device</button>
+<button type="button" id="pushtest" {{if not .Subs}}hidden{{end}}>Send a test</button>
+<span class="mut small" id="pushmsg"></span></div>
+<details class="inspect"><summary>Phones and iPads</summary>
+<p>Browsers only allow notifications over HTTPS. Serve the hub through Tailscale once on this Mac, then open the https address on your phone and add it to the home screen (Share → Add to Home Screen); iOS sends notifications only to the installed app.</p>
+<pre>tailscale serve --bg 8787</pre></details>
+{{if .Subs}}<ul class="rows">{{range .Subs}}<li class="row"><span class="grow small">{{if .Label}}{{.Label}}{{else}}a browser{{end}} <span class="mut">· since {{ago .CreatedAt}}{{if .LastOK}} · last delivered {{ago .LastOK}}{{end}}</span>{{if .LastErr}} <span class="bad">· {{.LastErr}}</span>{{end}}</span></li>{{end}}</ul>{{end}}
+{{end}}
+</section>
+
+<div class="set-grid">
+{{if .HasAgents}}<a class="card" href="/settings/updates"><b>Updates</b><span>Keep Homebrew, Claude Code, Codex and Gemini CLI current on every Mac. Daily update: {{if .AutoUpd}}on{{else}}off{{end}}.</span></a>{{end}}
+<a class="card" href="/settings/slack"><b>Slack</b><span>{{if .Slack.Connected}}Connected as @{{.Slack.UserName}} in {{.Slack.Team}}.{{else}}Connect a user token to read channels, DMs and mentions.{{end}}</span></a>
+<a class="card" href="/memory"><b>Shared memory</b><span>What every agent reads before it works, and who's working on what.</span></a>
+<a class="card" href="/agents"><b>Hosts &amp; agents</b><span>The Macs that run sessions, their CLIs and the command log.</span></a>
+<a class="card" href="/prompts"><b>Prompt library</b><span>Saved prompts with variables, for tasks and follow-ups.</span></a>
+</div>
+{{end}}

@@ -96,6 +96,8 @@ type Inventory struct {
 	// Home and the folders directly in it, for the terminal folder picker.
 	Home   string   `json:"home,omitempty"`
 	Places []string `json:"places,omitempty"`
+	// Tools are the CLIs this host can update (update.go); agents from before updates send none.
+	Tools []store.ToolInfo `json:"tools"`
 }
 
 // Hub is the executor's side of the queue.

@@ -1,0 +1,14 @@
+{{define "content"}}<div id="live" data-live="now" data-refresh="/now?fragment=1">
+<div class="top"><div><p class="eyebrow">Everything running</p><h1>Now</h1>
+<p class="mut">{{if .Total}}{{.Total}} running on {{len .Groups}} {{if eq (len .Groups) 1}}Mac{{else}}Macs{{end}}: hub terminals and tasks, fleet workers, and Claude/Codex sessions you started anywhere.{{else}}Nothing is running.{{end}}</p></div>
+<div class="head-actions"><a class="btn" href="/workspace">Workspace</a><a class="btn primary" href="/terminals/new">New terminal</a></div></div>
+{{range .Groups}}<section class="now-host" aria-label="{{.Host}}">
+<h2><span class="dot" aria-hidden="true"></span>{{.Host}} <span class="mut small">{{len .Rows}}</span></h2>
+<ul class="now-list">{{range .Rows}}<li class="s-{{.State}}{{if .Ext}} ext{{end}}"><a class="nrow" href="{{.Link}}">
+<span class="kind-ico" aria-hidden="true">{{kindIcon .Kind}}</span>
+<span class="nt">{{.Title}}</span>
+<span class="nd">{{.Kind}}{{if .Ext}} · outside the hub{{end}}{{if .Detail}} · {{.Detail}}{{end}}{{if .Where}} · {{.Where}}{{end}}</span>
+<span class="ns"><span class="chip s-{{.State}}">{{stateWord .State}}</span><br>{{ago .Since}}</span>
+</a></li>{{end}}</ul>
+</section>{{else}}<div class="empty-state"><div class="big" aria-hidden="true">☾</div><h2>All quiet</h2><p><a href="/terminals/new">Open a terminal</a> or <a href="/chats/new?kind=agent">start a task</a>.</p></div>{{end}}
+</div>{{end}}

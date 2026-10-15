@@ -70,6 +70,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	s.terminalRoutes(g, p, mux)
 	s.fileRoutes(g, p, mux)
 	s.renameRoutes(p)
+	s.updateRoutes(g, p)
 }
 
 // sameSite wraps sameOrigin (chat.go) for every POST here.
@@ -262,7 +263,7 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 
 // newPage is "+ New": pick a terminal, a task or a model chat.
 func (s *Server) newPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "new", "layout", struct{ page }{page{Title: "New", Nav: "chats"}})
+	s.render(w, "new", "layout", struct{ page }{page{Title: "New", Nav: "new"}})
 }
 
 // plainChats finds plain chats for the list: by title and model, and by message text through the search
@@ -404,7 +405,7 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 		Err     string
 		Hosts   []store.AgentHost
 		Prompts []store.SavedPrompt
-	}{page{Title: map[bool]string{true: "New model chat", false: "New task"}[f.Kind == "model"], Nav: "chats"}, f, groups, gwErr, errMsg, hosts, prompts})
+	}{page{Title: map[bool]string{true: "New model chat", false: "New task"}[f.Kind == "model"], Nav: "new"}, f, groups, gwErr, errMsg, hosts, prompts})
 }
 
 func (s *Server) newChatPost(w http.ResponseWriter, r *http.Request) {
@@ -482,7 +483,7 @@ func (s *Server) agentsPage(w http.ResponseWriter, r *http.Request) {
 		Sessions []store.AgentSession
 		Commands []store.Command
 		Err      string
-	}{page{Title: "Agents", Nav: "chats"}, hosts, as, cmds, r.URL.Query().Get("err")})
+	}{page{Title: "Agents", Nav: "agents"}, hosts, as, cmds, r.URL.Query().Get("err")})
 }
 
 type agentView struct {
@@ -541,6 +542,7 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Err = r.URL.Query().Get("err")
 	v.Prompts, _ = s.Store.SavedPrompts(r.Context())
+	s.markSeen(r.Context(), "a:"+strconv.FormatInt(id, 10))
 	s.render(w, "agent", "layout", struct {
 		page
 		V agentView
@@ -959,7 +961,7 @@ func (s *Server) promptsPage(w http.ResponseWriter, r *http.Request) {
 		Prompts []row
 		Edit    store.SavedPrompt
 		Err     string
-	}{page{Title: "Prompt library", Nav: "chats"}, rows, edit, r.URL.Query().Get("err")})
+	}{page{Title: "Prompt library", Nav: "prompts"}, rows, edit, r.URL.Query().Get("err")})
 }
 
 func (s *Server) promptSave(w http.ResponseWriter, r *http.Request) {

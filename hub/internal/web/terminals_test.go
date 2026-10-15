@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
 // TestTerminalEndToEnd opens a shell terminal through the hub with a real tmux, types into it over the
@@ -34,7 +35,7 @@ func TestTerminalEndToEnd(t *testing.T) {
 	sock := fmt.Sprintf("llmb-test-%d", os.Getpid())
 	t.Cleanup(func() { _ = exec.Command(tmuxBin, "-L", sock, "kill-server").Run() })
 	ctx, cancel := context.WithCancel(context.Background())
-	ex := &agent.Executor{Host: "studio", Version: "test", Hub: rig.srv.Agents.Hub, StateDir: t.TempDir(), HubURL: rig.ts.URL,
+	ex := &agent.Executor{Host: "studio", Version: "test", Hub: rig.srv.Agents.Hub, FindTools: func(context.Context) []store.ToolInfo { return nil }, StateDir: t.TempDir(), HubURL: rig.ts.URL,
 		TmuxSocket: sock, Poll: 100 * time.Millisecond, Providers: []string{"claude"}, Log: log.New(io.Discard, "", 0)}
 	done := make(chan struct{})
 	go func() { defer close(done); ex.Run(ctx) }()

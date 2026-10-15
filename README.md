@@ -114,6 +114,19 @@ Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite
   - `/agents` lists every hub-run session, the hosts with a live agent, and the command log. `/prompts` is a prompt library with `{{VARS}}` (CWD, REPO, HOST and BASE are filled in).
   - How it runs: the hub keeps a command queue. `hub serve` runs the session agent for its own Mac; `hub ship` runs it on the laptop and polls `POST /api/agent/poll` (JSON) every 3 s, so nothing listens there. Folders are checked on the Mac that runs them, after resolving symlinks, against `--roots`. Every control endpoint is tailnet-only and refuses cross-site POSTs; every command is logged.
 
+- **Inbox** (`/`, `/inbox`): one list of what needs you. Every source the hub has feeds it:
+  - agents that finished their turn and wait for an answer (hub tasks, open terminals, and Claude/Codex conversations from the last 6 h; headless `-p`/`exec` runs never count);
+  - tasks and fleet runs that failed;
+  - issues labelled `*blocked*`, and fleet PRs that need a review;
+  - Slack DMs and mentions you haven't answered, plus the chat digest's asks;
+  - failed tool updates.
+
+  Answer from the list: quick replies (`yes`, `continue`, `1`…) or a line of text go straight to the task or terminal. Opening or dismissing an item marks it seen, and it comes back when something newer happens. Settings can make the fleet overview (`/fleet`) the home page instead.
+- **Now** (`/now`): everything running, grouped by Mac: hub terminals and tasks, fleet workers, sessions started outside the hub, and tool updates.
+- **App shell:** one design system (`static/tokens.css` for colour, type, spacing, radius and motion; `static/ui.css` for components), light and dark (Settings → Appearance, per browser), and one status language: working, waiting for you, blocked, done, failed. On a phone there's a bottom tab bar (Inbox, Now, New, Search, More); tables become cards, and nothing scrolls sideways at 375 px. Terminals get a touch key row (Esc, Tab, ⇧Tab, arrows, ⌃C, ⌃D), quick replies, dictation, and swipe or ‹ › to move between open terminals. Keyboard: `/` searches, `g i` / `g n` / `g w` / `g h` go to Inbox, Now, Workspace and History, and `c` starts something new. Every page listens to one event stream (`/api/events`) for badges and live sections, instead of each polling on its own.
+- **Installable app and push:** a web manifest and service worker (offline page, push). Browsers need HTTPS for both, so serve the hub through Tailscale once: `tailscale serve --bg 8787`. Then open `https://<mac>.<tailnet>.ts.net`, add it to the home screen, and turn notifications on in Settings. You're notified when something new lands in the inbox. Payloads are end-to-end encrypted (RFC 8291) and signed with the hub's own VAPID key, which it keeps in its database.
+- **Updates** (`/settings/updates`): keeps Homebrew, Claude Code, Codex, Gemini CLI, `gh` and open-code-review current on every Mac. Each host agent reports how each tool was installed (cask, formula, npm or Claude's own installer) and updates it that way. Turn the daily update on or off, pick the hour, the tools and the hosts, or press **Update now** for one tool, one host or all of them. Each run's versions before and after and its output are kept; a failure lands in the inbox.
+
 Ingestion is incremental and idempotent: a byte offset per file advances in the same transaction as its rows; the hub re-scans every 10 s.
 
 ```

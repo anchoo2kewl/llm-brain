@@ -1,6 +1,6 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css"><link rel="stylesheet" href="/static/files.css">
 <div class="top termtop"><div><p class="eyebrow">Terminal · {{.With}} · {{.T.Host}}</p><h1 class="title"><span data-rename="/terminals/{{.T.ID}}/rename">{{.T.Title}}</span></h1></div>
-<div class="meta"><span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
+<div class="meta"><span class="termnav" id="termnav" data-id="{{.T.ID}}"><a class="btn small" id="termprev" href="#" hidden aria-label="Previous terminal">‹</a><a class="btn small" id="termnext" href="#" hidden aria-label="Next terminal">›</a></span> <span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .T.Error}}<pre class="err small">{{.T.Error}}</pre>{{end}}
 <div class="row actions termbar">
@@ -14,10 +14,15 @@
 <div class="termsplit" id="termsplit"><div id="term" class="term" data-term="{{.T.ID}}" data-status="{{.T.Status}}" data-host="{{.T.Host}}"></div><iframe class="termed" id="termed" title="Editor" hidden></iframe></div>
 <div class="termmsg mut small" id="termmsg"></div>
 <div class="keys" id="termkeys" aria-label="Keys">
+<div class="keyrow" role="group" aria-label="Keys">
 <button type="button" data-key="esc">Esc</button><button type="button" data-key="tab">Tab</button><button type="button" data-key="stab">⇧Tab</button>
-<button type="button" data-key="up">↑</button><button type="button" data-key="down">↓</button><button type="button" data-key="ctrlc">Ctrl-C</button><button type="button" data-key="enter">Enter</button>
+<button type="button" data-key="left" aria-label="Left">←</button><button type="button" data-key="up" aria-label="Up">↑</button><button type="button" data-key="down" aria-label="Down">↓</button><button type="button" data-key="right" aria-label="Right">→</button>
+<button type="button" data-key="ctrlc">⌃C</button><button type="button" data-key="ctrld">⌃D</button><button type="button" data-key="enter">⏎</button>
 <label class="btn upl small" title="Or drop / paste files onto the terminal">Attach…<input type="file" id="termfile" multiple hidden></label>
-<form id="termline" class="line"><input id="termin" placeholder="Type a line and send (handy on a phone)" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="submit">Send</button></form>
+</div>
+<div class="quick" role="group" aria-label="Quick replies"><button type="button" data-quick="yes">yes</button><button type="button" data-quick="continue">continue</button><button type="button" data-quick="1">1</button><button type="button" data-quick="2">2</button><button type="button" data-quick="3">3</button><button type="button" data-quick="no">no</button></div>
+<form id="termline" class="line"><input id="termin" placeholder="Type or dictate, then send" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" aria-label="Line to send">
+<button type="button" class="mic" id="termmic" hidden aria-pressed="false" aria-label="Dictate">🎤</button><button type="submit" class="primary">Send</button></form>
 </div>
 <p class="mut small">Drop or paste files and screenshots onto the terminal: they go to {{.T.Host}} and their path is typed in. From a shell on {{.T.Host}}: <code class="copy">{{.Attach}}</code> · detach with Ctrl-b d</p>
 <script src="/static/xterm/xterm.js" defer></script><script src="/static/xterm/addon-fit.js" defer></script><script src="/static/xterm/addon-web-links.js" defer></script><script src="/static/drop.js" defer></script><script src="/static/termpane.js" defer></script><script src="/static/term.js" defer></script>

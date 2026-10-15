@@ -1,4 +1,4 @@
-{{define "content"}}<div id="live" data-refresh="/?fragment=1">
+{{define "content"}}<div id="live" data-refresh="/fleet?fragment=1">
 <div class="top"><div><p class="eyebrow">Fleet control room</p><h1>Fleet overview</h1><p class="mut">Activity across your machines, models, and review pipeline.</p></div><div class="meta">
 {{with .Status}}{{.Host}} · snapshot {{ago .At}}{{if .Stale}} <span class="bad">(stale — scheduler not running?)</span>{{end}}{{if .Paused}} · <span class="bad">PAUSED</span>{{end}}
 {{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>

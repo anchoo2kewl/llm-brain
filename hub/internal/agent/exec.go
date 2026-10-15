@@ -46,9 +46,11 @@ type Executor struct {
 	Log           *log.Logger
 	Poll          time.Duration
 	MaxTurns      int
-	Providers     []string // the CLIs to offer; nil = whichever are on PATH
-	HubURL        string   // where terminal bridges dial back (term.go); '' = no terminals
-	TmuxSocket    string   // tmux -L name for terminals; '' = llm-brain
+	Providers     []string                               // the CLIs to offer; nil = whichever are on PATH
+	HubURL        string                                 // where terminal bridges dial back (term.go); '' = no terminals
+	TmuxSocket    string                                 // tmux -L name for terminals; '' = llm-brain
+	UpdateRun     UpdateRunner                           // runs tool updates (update.go); nil = the real commands
+	FindTools     func(context.Context) []store.ToolInfo // finds them; nil = DetectTools
 
 	mu      sync.Mutex
 	active  map[int64]*turn              // by turn command id
@@ -56,6 +58,7 @@ type Executor struct {
 	termMu  map[int64]*sync.Mutex        // per terminal: open, kill and attach one at a time (term.go)
 	opening map[int64]context.CancelFunc // per terminal: the open in progress, for a kill to cancel
 	killed  map[int64]bool               // terminals this agent was told to end
+	ts      toolState                    // the CLIs this host can update (update.go)
 	wg      sync.WaitGroup
 }
 
@@ -162,7 +165,8 @@ func (e *Executor) inventory(ctx context.Context) Inventory {
 	if provs == nil {
 		provs = AvailableProviders()
 	}
-	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
+	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs,
+		Tools: e.tools(ctx, false)}
 	if e.HubURL != "" {
 		inv.Home, inv.Places = homePlaces()
 		inv.TermsAt = time.Now()
@@ -214,7 +218,8 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 			e.stop(ctx, c)
 		case KindSessionTitle: // inline, in queue order: two renames land in the order they were made
 			e.sessionTitle(ctx, c)
-		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut, KindFSAttach:
+		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut, KindFSAttach,
+			KindToolUpdate:
 			e.mu.Lock()
 			e.busy[c.ID] = true
 			e.mu.Unlock()
@@ -229,7 +234,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 				map[string]func(context.Context, store.Command){
 					KindTermOpen: e.termOpen, KindTermAttach: e.termAttach, KindTermKill: e.termKill,
 					KindTermSend: e.termSend, KindTermCapture: e.termCapture, KindFSAttach: e.fsAttach,
-					KindFileList: e.fileCmd, KindFileGet: e.fileCmd, KindFilePut: e.fileCmd,
+					KindFileList: e.fileCmd, KindFileGet: e.fileCmd, KindFilePut: e.fileCmd, KindToolUpdate: e.toolUpdate,
 				}[c.Kind](ctx, c)
 			}(c)
 		default:

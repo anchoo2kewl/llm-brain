@@ -45,12 +45,14 @@ type Server struct {
 	Chat     *chat.Poller  // nil: the Slack settings page can't connect or list channels
 	Insights *insights.Cache
 	Agents   *Sessions // nil: no session control or chats (sessions.go)
+	Events   *Events   // the live stream every page listens to (events.go)
+	Push     *Push     // nil: no push notifications (push.go)
 
 	pages map[string]*template.Template
 }
 
 func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger) (*Server, error) {
-	srv := &Server{Store: s, Engine: e, StateDir: stateDir, Host: host, Log: lg, pages: map[string]*template.Template{}}
+	srv := &Server{Store: s, Engine: e, StateDir: stateDir, Host: host, Log: lg, Events: newEvents(), pages: map[string]*template.Template{}}
 	names, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -73,7 +75,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.HandleFunc("GET /{$}", s.overview)
+	mux.HandleFunc("GET /{$}", s.home)
+	mux.HandleFunc("GET /fleet", s.overview)
+	mux.HandleFunc("GET /now", s.nowPage)
+	mux.HandleFunc("GET /api/events", s.tailnetOnly(s.eventsSSE))
+	s.inboxRoutes(mux)
+	s.pushRoutes(mux)
+	s.appRoutes(mux)
 	mux.HandleFunc("GET /status.json", s.statusJSON)
 	mux.HandleFunc("GET /runs", s.runs)
 	mux.HandleFunc("GET /runs/{id}", s.run)
@@ -246,7 +254,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		ChatOn     bool
 		Now        time.Time
 		Insight    *insights.Report // last 24h, for KPI tiles, gauges and sparklines (nil if it can't be built)
-	}{page: page{Title: "Overview", Nav: "overview"}, Now: time.Now()}
+	}{page: page{Title: "Fleet", Nav: "overview"}, Now: time.Now()}
 	data.Insight, _ = s.Insights.Get(ctx, insights.Ranges[0])
 	st, err := readStatus(filepath.Join(s.StateDir, "status.json"))
 	if err != nil {
@@ -482,6 +490,9 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		hasEarlier = len(e) > 0
 		l, _ := s.Store.Messages(ctx, id, lastID, 0, 1)
 		hasLater = len(l) > 0
+	}
+	if q.Get("embed") != "1" {
+		s.markSeen(ctx, "s:"+strconv.FormatInt(id, 10))
 	}
 	var subs []store.Session
 	var parentID int64

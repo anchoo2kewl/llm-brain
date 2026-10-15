@@ -246,6 +246,59 @@ func statusClass(s string) string {
 	return "warn"
 }
 
+// state maps any status the hub stores (runs, tasks, terminals, commands, PR checks) onto the one language
+// every page uses: working, waiting (for you), blocked, done, failed, idle.
+func state(s string) string {
+	switch strings.ToLower(s) {
+	case "running", "live", "claimed", "starting", "working", "pending", "in_progress", "queued":
+		return "working"
+	case "waiting", "review", "review_required", "changes_requested":
+		return "waiting"
+	case "blocked", "paused", "agent:blocked":
+		return "blocked"
+	case "done", "succeeded", "success", "passing", "approve", "approved", "merged", "ended", "exited", "idle", "closed":
+		return "done"
+	case "failed", "failing", "error", "cancelled", "stopped":
+		return "failed"
+	}
+	return "idle"
+}
+
+var stateWords = map[string]string{"working": "working", "waiting": "waiting for you", "blocked": "blocked", "done": "done",
+	"failed": "failed", "idle": "idle", "review": "needs review"}
+
+// stateWord is a status in plain words: the raw status when it says more ("queued", "stopped"), else the state.
+func stateWord(s string) string {
+	switch strings.ToLower(s) {
+	case "queued", "claimed":
+		return "queued"
+	case "stopped", "cancelled", "ended", "starting":
+		return strings.ToLower(s)
+	case "live":
+		return "live"
+	}
+	if w, ok := stateWords[s]; ok {
+		return w
+	}
+	return stateWords[state(s)]
+}
+
+// kindIcon is a small line icon for a kind of running thing.
+func kindIcon(kind string) template.HTML {
+	paths := map[string]string{
+		"terminal": `<path d="M4 6l5 5-5 5M11 18h9"/>`,
+		"task":     `<path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/>`,
+		"run":      `<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>`,
+		"session":  `<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>`,
+		"update":   `<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>`,
+	}
+	p, ok := paths[kind]
+	if !ok {
+		p = `<circle cx="12" cy="12" r="3"/>`
+	}
+	return template.HTML(`<svg viewBox="0 0 24 24">` + p + `</svg>`)
+}
+
 func short(s string) string {
 	s = strings.TrimPrefix(s, "https://github.com/")
 	return s
@@ -313,7 +366,15 @@ var funcs = template.FuncMap{
 	"kindLabel": kindLabel, "imageName": func(n string) bool {
 		t := mime.TypeByExtension(filepath.Ext(n))
 		return strings.HasPrefix(t, "image/") && !strings.Contains(t, "svg")
-	}, "viewable": func(name string) bool { return inlineSafe(mime.TypeByExtension(filepath.Ext(name))) }, "statusClass": statusClass, "short": short, "home": homeShort, "bytes": bytesH,
+	}, "viewable": func(name string) bool { return inlineSafe(mime.TypeByExtension(filepath.Ext(name))) }, "statusClass": statusClass, "state": state, "stateWord": stateWord, "kindIcon": kindIcon, "navIn": func(nav string, set ...string) bool {
+		for _, x := range set {
+			if nav == x {
+				return true
+			}
+		}
+		return false
+	}, "statusWord": stateWord,
+	"final": store.FinalStatus, "short": short, "home": homeShort, "bytes": bytesH,
 	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
 	"agentLabels": func(i Issue) []string {
 		var out []string
