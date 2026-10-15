@@ -154,29 +154,70 @@ func termEnv(extra []string) []string {
 	return append(append(env, "PATH="+searchPath(), "TERM=xterm-256color", "COLORTERM=truecolor"), extra...)
 }
 
-// Terminals lists the ids of this host's live terminals; ok is false when tmux isn't installed.
-func (e *Executor) Terminals(ctx context.Context) ([]int64, bool) {
+// Terminals lists this host's live terminals and the folder each started in; ok is false when the list
+// can't be trusted (no tmux, or tmux failed), so the hub ends nothing on it.
+func (e *Executor) Terminals(ctx context.Context) ([]store.TermSeen, bool) {
 	t, err := e.tmux()
 	if err != nil {
 		return nil, false
 	}
-	out, err := t.run(ctx, "list-sessions", "-F", "#{session_name}")
+	out, err := t.run(ctx, "list-sessions", "-F", "#{session_name}\t#{session_path}")
 	if err != nil {
 		if strings.Contains(out, "no server running") || strings.Contains(out, "error connecting") || strings.Contains(out, "No such file") {
 			return nil, true
 		}
-		return nil, false // can't tell: don't let the hub end anything
+		return nil, false
 	}
-	var ids []int64
+	var seen []store.TermSeen
 	for _, l := range strings.Split(out, "\n") {
-		if s, ok := strings.CutPrefix(strings.TrimSpace(l), "llmb-"); ok {
+		name, cwd, _ := strings.Cut(strings.TrimSpace(l), "\t")
+		if s, ok := strings.CutPrefix(name, "llmb-"); ok {
 			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
-				ids = append(ids, id)
+				seen = append(seen, store.TermSeen{ID: id, Cwd: cwd})
 			}
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return ids, true
+	sort.Slice(seen, func(i, j int) bool { return seen[i].ID < seen[j].ID })
+	return seen, true
+}
+
+// ErrTermEnded is the attach error that tells the hub the tmux session is gone.
+const ErrTermEnded = "the terminal has ended"
+
+// termLock serializes one terminal's open, kill and attach, so an End can't slip in before the Open it
+// races and leave a session nobody manages.
+func (e *Executor) termLock(id int64) *sync.Mutex {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.termMu == nil {
+		e.termMu = map[int64]*sync.Mutex{}
+	}
+	m := e.termMu[id]
+	if m == nil {
+		m = &sync.Mutex{}
+		e.termMu[id] = m
+	}
+	return m
+}
+
+// cancelOpen ends an open still in progress for the terminal (making its worktree, say), and marks the
+// terminal killed so an open that hasn't started yet (same poll batch) never makes the session.
+func (e *Executor) cancelOpen(id int64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.killed == nil {
+		e.killed = map[int64]bool{}
+	}
+	e.killed[id] = true
+	if c := e.opening[id]; c != nil {
+		c()
+	}
+}
+
+func (e *Executor) wasKilled(id int64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.killed[id]
 }
 
 // TermScript is the shell command the tmux session runs: the CLI with every permission, then a login
@@ -266,6 +307,22 @@ func (e *Executor) termCwd(ctx context.Context, id int64, o TermOpen) (string, e
 }
 
 func (e *Executor) termOpen(ctx context.Context, c store.Command) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.mu.Lock()
+	if e.opening == nil {
+		e.opening = map[int64]context.CancelFunc{}
+	}
+	e.opening[c.AgentID] = cancel
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.opening, c.AgentID)
+		e.mu.Unlock()
+	}()
+	l := e.termLock(c.AgentID)
+	l.Lock()
+	defer l.Unlock()
 	var o TermOpen
 	if err := json.Unmarshal(c.Payload, &o); err != nil {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: "bad payload: " + err.Error()})
@@ -285,6 +342,9 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 		return
 	}
 	cwd, err := e.termCwd(ctx, c.AgentID, o)
+	if err == nil && (ctx.Err() != nil || e.wasKilled(c.AgentID)) {
+		err = errors.New("ended before it started")
+	}
 	if err != nil {
 		fail(err)
 		return
@@ -305,7 +365,11 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 	}
 	// -i: an interactive login shell reads .zshrc too, so the CLI is on PATH however it was installed.
 	args = append(args, shell, "-lic", script)
-	if _, err := t.run(ctx, args...); err != nil {
+	if ctx.Err() != nil || e.wasKilled(c.AgentID) { // an End came while it was getting ready
+		fail(errors.New("ended before it started"))
+		return
+	}
+	if _, err := t.run(context.WithoutCancel(ctx), args...); err != nil {
 		fail(err)
 		return
 	}
@@ -314,6 +378,10 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 }
 
 func (e *Executor) termKill(ctx context.Context, c store.Command) {
+	e.cancelOpen(c.AgentID)
+	l := e.termLock(c.AgentID)
+	l.Lock()
+	defer l.Unlock()
 	t, err := e.tmux()
 	if err != nil {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
@@ -349,7 +417,7 @@ func (e *Executor) termAttach(ctx context.Context, c store.Command) {
 	}
 	name := TmuxName(c.AgentID)
 	if _, err := t.run(ctx, "has-session", "-t", "="+name); err != nil {
-		fail(errors.New("the terminal has ended"))
+		fail(errors.New(ErrTermEnded))
 		return
 	}
 	u, err := url.Parse(strings.TrimRight(e.HubURL, "/") + "/api/agent/term/" + url.PathEscape(a.Token))
@@ -380,9 +448,12 @@ func (e *Executor) termAttach(ctx context.Context, c store.Command) {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		bridge(ctx, ws, ptmx)
-		_ = cmd.Process.Kill() // only the attach client: the tmux session keeps running
-		_ = ptmx.Close()
+		// Ending the bridge kills the attach client (only the client: the tmux session keeps running) and
+		// closes the pty, which also frees a write stuck on a full pty.
+		bridge(ctx, ws, ptmx, func() {
+			_ = cmd.Process.Kill()
+			_ = ptmx.Close()
+		})
 		_ = cmd.Wait()
 	}()
 }
@@ -394,17 +465,39 @@ func clampSize(n, def int) uint16 {
 	return uint16(n)
 }
 
-// bridge copies pty output to the websocket and websocket input to the pty until either side ends.
-func bridge(ctx context.Context, ws *websocket.Conn, ptmx *os.File) {
+// bridge copies pty output to the websocket and websocket input to the pty until either side ends, then
+// calls stop (once). Input goes through a queue to its own writer, so a pty that stops draining can't block
+// the websocket reader; stop closing the pty unblocks that writer.
+func bridge(ctx context.Context, ws *websocket.Conn, ptmx *os.File, stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var once sync.Once
 	done := func(code websocket.StatusCode, why string) {
 		once.Do(func() {
 			cancel()
+			stop()
 			_ = ws.Close(code, why)
 		})
 	}
+	defer done(websocket.StatusGoingAway, "")
+	go func() { // the agent stopping ends the bridge too
+		<-ctx.Done()
+		done(websocket.StatusGoingAway, "the agent stopped")
+	}()
+	in := make(chan []byte, 256)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case b := <-in:
+				if _, err := ptmx.Write(b); err != nil {
+					done(websocket.StatusInternalError, "pty write failed")
+					return
+				}
+			}
+		}
+	}()
 	go func() {
 		buf := make([]byte, 32<<10)
 		for {
@@ -414,14 +507,14 @@ func bridge(ctx context.Context, ws *websocket.Conn, ptmx *os.File) {
 				werr := ws.Write(wctx, websocket.MessageBinary, buf[:n])
 				wc()
 				if werr != nil {
-					done(websocket.StatusGoingAway, "write failed")
+					done(websocket.StatusGoingAway, "")
 					return
 				}
 			}
 			if err != nil {
 				reason := "detached"
 				if !errors.Is(err, io.EOF) {
-					reason = "the terminal has ended"
+					reason = ErrTermEnded
 				}
 				done(websocket.StatusNormalClosure, reason)
 				return
@@ -431,12 +524,15 @@ func bridge(ctx context.Context, ws *websocket.Conn, ptmx *os.File) {
 	for {
 		typ, b, err := ws.Read(ctx)
 		if err != nil {
-			done(websocket.StatusNormalClosure, "")
 			return
 		}
 		if typ == websocket.MessageBinary {
-			if _, err := ptmx.Write(b); err != nil {
-				done(websocket.StatusInternalError, "pty write failed")
+			select {
+			case in <- b:
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second): // the pty hasn't taken input for 10 s
+				done(websocket.StatusInternalError, "the terminal stopped reading input")
 				return
 			}
 			continue

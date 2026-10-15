@@ -137,37 +137,36 @@ func (h *LocalHub) Inventory(ctx context.Context, inv Inventory) error {
 	if err := h.S.SetAgentInventory(ctx, inv.Host, inv.Version, inv.Roots, inv.Folders, provs); err != nil {
 		return err
 	}
-	if inv.Tmux {
-		if n, err := h.S.EndMissingTerminals(ctx, inv.Host, inv.Terminals); err != nil {
+	if inv.Tmux && !inv.TermsAt.IsZero() {
+		// 10 s of slack for the two Macs' clocks: a listing is only trusted for what was settled before it.
+		ended, revived, err := h.S.SyncTerminals(ctx, inv.Host, inv.Terminals, store.T(inv.TermsAt.Add(-10*time.Second)))
+		if err != nil {
 			return err
-		} else if n > 0 {
-			h.logf("agent: %d terminal(s) on %s ended", n, inv.Host)
+		}
+		if ended+revived > 0 {
+			h.logf("agent: terminals on %s: %d ended, %d live again", inv.Host, ended, revived)
 		}
 	}
 	return nil
 }
 
-// termReport finishes a terminal command and moves its terminal: an open that worked makes it live, one
-// that failed fails it; a kill ends it. Attach reports only finish the command (the page watches it).
+// termReport finishes a terminal command and moves its terminal in one step: an open that worked makes it
+// live, one that failed fails it; a kill ends it. Attach reports only finish the command (the page watches it).
 func (h *LocalHub) termReport(ctx context.Context, c store.Command, r Report, body string) error {
 	if store.FinalStatus(c.Status) {
 		return nil
 	}
-	if err := h.S.FinishCommand(ctx, c.ID, r.Status, body); err != nil {
-		return err
-	}
-	if !r.Final() {
-		return nil
-	}
+	tstatus, cwd, msg := "", "", ""
 	switch {
+	case !r.Final():
 	case c.Kind == KindTermOpen && r.Status == "done":
-		return h.S.SetTerminal(ctx, c.AgentID, "live", r.Cwd, "")
+		tstatus, cwd = "live", r.Cwd
 	case c.Kind == KindTermOpen:
-		return h.S.SetTerminal(ctx, c.AgentID, "failed", "", r.Error)
+		tstatus, msg = "failed", r.Error
 	case c.Kind == KindTermKill && r.Status == "done":
-		return h.S.SetTerminal(ctx, c.AgentID, "ended", "", "")
-	case c.Kind == KindTermAttach && r.Error == "the terminal has ended":
-		return h.S.SetTerminal(ctx, c.AgentID, "ended", "", "")
+		tstatus = "ended"
+	case c.Kind == KindTermAttach && r.Error == ErrTermEnded:
+		tstatus = "ended"
 	}
-	return nil
+	return h.S.ApplyTermReport(ctx, c.ID, r.Status, body, c.AgentID, tstatus, cwd, msg)
 }

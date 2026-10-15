@@ -50,10 +50,13 @@ type Executor struct {
 	HubURL        string   // where terminal bridges dial back (term.go); '' = no terminals
 	TmuxSocket    string   // tmux -L name for terminals; '' = llm-brain
 
-	mu     sync.Mutex
-	active map[int64]*turn // by turn command id
-	busy   map[int64]bool  // terminal commands in hand, so the hub doesn't fail a slow one as lost
-	wg     sync.WaitGroup
+	mu      sync.Mutex
+	active  map[int64]*turn              // by turn command id
+	busy    map[int64]bool               // terminal commands in hand, so the hub doesn't fail a slow one as lost
+	termMu  map[int64]*sync.Mutex        // per terminal: open, kill and attach one at a time (term.go)
+	opening map[int64]context.CancelFunc // per terminal: the open in progress, for a kill to cancel
+	killed  map[int64]bool               // terminals this agent was told to end
+	wg      sync.WaitGroup
 }
 
 // turn is a turn this executor holds, from the moment it is claimed (so it counts against MaxTurns and a
@@ -161,6 +164,7 @@ func (e *Executor) inventory() Inventory {
 	}
 	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
 	if e.HubURL != "" {
+		inv.TermsAt = time.Now()
 		inv.Terminals, inv.Tmux = e.Terminals(context.Background())
 	}
 	return inv

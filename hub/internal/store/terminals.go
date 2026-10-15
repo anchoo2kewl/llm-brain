@@ -19,16 +19,17 @@ type Terminal struct {
 	Error     string
 	CreatedAt string
 	UpdatedAt string
+	LiveAt    string
 	EndedAt   string
 }
 
 func (t Terminal) Open() bool { return t.Status == "starting" || t.Status == "live" }
 
-const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, ended_at`
+const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, live_at, ended_at`
 
 func scanTerm(sc interface{ Scan(...any) error }) (Terminal, error) {
 	var t Terminal
-	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.EndedAt)
+	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.LiveAt, &t.EndedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -87,16 +88,66 @@ func (s *Store) Terminals(ctx context.Context, q string, limit int) ([]Terminal,
 
 // SetTerminal moves a terminal. An ended or failed terminal stays that way; cwd is set when given.
 func (s *Store) SetTerminal(ctx context.Context, id int64, status, cwd, errMsg string) error {
+	return setTerminal(ctx, s.DB, id, status, cwd, errMsg)
+}
+
+func setTerminal(ctx context.Context, x execer, id int64, status, cwd, errMsg string) error {
 	now := Now()
-	ended := ""
-	if status == "ended" || status == "failed" {
+	ended, live := "", ""
+	switch status {
+	case "ended", "failed":
 		ended = now
+	case "live":
+		live = now
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE terminals SET status = ?, error = ?, updated_at = ?,
+	_, err := x.ExecContext(ctx, `UPDATE terminals SET status = ?, error = ?, updated_at = ?,
 		cwd = CASE WHEN ? != '' THEN ? ELSE cwd END,
+		live_at = CASE WHEN ? != '' THEN ? ELSE live_at END,
 		ended_at = CASE WHEN ? != '' THEN ? ELSE ended_at END
-		WHERE id = ? AND status NOT IN ('ended', 'failed')`, status, errMsg, now, cwd, cwd, ended, ended, id)
+		WHERE id = ? AND status NOT IN ('ended', 'failed')`, status, errMsg, now, cwd, cwd, live, live, ended, ended, id)
 	return err
+}
+
+// ApplyTermReport finishes a terminal command and, only when this report is the one that finished it, moves
+// its terminal (tstatus ” = leave it), in one transaction. A retried report finds the command final and
+// changes nothing, so the terminal can't be left behind its command.
+func (s *Store) ApplyTermReport(ctx context.Context, cmdID int64, status, result string, termID int64, tstatus, cwd, errMsg string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := Now()
+	fin := ""
+	if FinalStatus(status) {
+		fin = now
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE commands SET status = ?, result = ?, updated_at = ?,
+		finished_at = CASE WHEN ? != '' THEN ? ELSE finished_at END
+		WHERE id = ? AND status NOT IN ('done', 'failed', 'stopped', 'cancelled')`, status, result, now, fin, fin, cmdID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 && tstatus != "" {
+		if err := setTerminal(ctx, tx, termID, tstatus, cwd, errMsg); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// CancelQueuedTerm cancels a terminal's commands no host has claimed yet; opened says its term_open was one.
+func (s *Store) CancelQueuedTerm(ctx context.Context, termID int64) (opened bool, err error) {
+	now := Now()
+	res, err := s.DB.ExecContext(ctx, `UPDATE commands SET status = 'cancelled', updated_at = ?, finished_at = ?
+		WHERE agent_id = ? AND kind = 'term_open' AND status = 'queued'`, now, now, termID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	_, err = s.DB.ExecContext(ctx, `UPDATE commands SET status = 'cancelled', updated_at = ?, finished_at = ?
+		WHERE agent_id = ? AND kind LIKE 'term\_%' ESCAPE '\' AND status = 'queued'`, now, now, termID)
+	return n > 0, err
 }
 
 // TouchTerminal bumps updated_at (someone attached), so the list shows recent use first.
@@ -105,33 +156,65 @@ func (s *Store) TouchTerminal(ctx context.Context, id int64) error {
 	return err
 }
 
-// EndMissingTerminals ends the host's live terminals whose tmux session is gone. alive holds terminal ids.
-// Terminals still starting are left to their open command.
-func (s *Store) EndMissingTerminals(ctx context.Context, host string, alive []int64) (int, error) {
-	have := map[int64]bool{}
-	for _, id := range alive {
-		have[id] = true
+// TermSeen is a terminal a host's tmux has right now, with the folder it started in.
+type TermSeen struct {
+	ID  int64  `json:"id"`
+	Cwd string `json:"cwd,omitempty"`
+}
+
+// SyncTerminals squares the host's terminals with a tmux listing taken at or after since:
+//   - live ones missing from it end, unless they became live after since (the listing predates them);
+//   - ones it has that the hub thinks are starting, ended or failed are live again (an open whose report
+//     was lost, or a restart's lost-command check), unless they ended after since (a kill the listing predates).
+func (s *Store) SyncTerminals(ctx context.Context, host string, seen []TermSeen, since string) (ended, revived int, err error) {
+	have := map[int64]string{}
+	for _, t := range seen {
+		have[t.ID] = t.Cwd
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM terminals WHERE host = ? AND status = 'live'`, host)
+	ts, err := s.hostTerminals(ctx, host)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	var gone []int64
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := Now()
+	for _, t := range ts {
+		cwd, there := have[t.ID]
+		switch {
+		case t.Status == "live" && !there && t.LiveAt < since:
+			if _, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'ended', updated_at = ?, ended_at = ? WHERE id = ? AND status = 'live'`,
+				now, now, t.ID); err != nil {
+				return 0, 0, err
+			}
+			ended++
+		case t.Status != "live" && there && (t.EndedAt == "" || t.EndedAt < since):
+			if _, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'live', error = '', updated_at = ?, live_at = ?, ended_at = '',
+				cwd = CASE WHEN ? != '' THEN ? ELSE cwd END WHERE id = ?`, now, now, cwd, cwd, t.ID); err != nil {
+				return 0, 0, err
+			}
+			revived++
+		}
+	}
+	return ended, revived, tx.Commit()
+}
+
+// hostTerminals: the host's terminals worth reconciling (the newest few hundred).
+func (s *Store) hostTerminals(ctx context.Context, host string) ([]Terminal, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? ORDER BY id DESC LIMIT 500`, host)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Terminal
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, err
+		t, err := scanTerm(rows)
+		if err != nil {
+			return nil, err
 		}
-		if !have[id] {
-			gone = append(gone, id)
-		}
+		out = append(out, t)
 	}
-	rows.Close()
-	for _, id := range gone {
-		if err := s.SetTerminal(ctx, id, "ended", "", ""); err != nil {
-			return 0, err
-		}
-	}
-	return len(gone), nil
+	return out, rows.Err()
 }
