@@ -379,8 +379,12 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
-	// -i: an interactive login shell reads .zshrc too, so the CLI is on PATH however it was installed.
-	args = append(args, shell, "-lic", script)
+	if o.Provider == "shell" {
+		args = append(args, shell, "-l") // straight in: -lic + exec would run the startup files twice
+	} else {
+		// -i: an interactive login shell reads .zshrc too, so the CLI is on PATH however it was installed.
+		args = append(args, shell, "-lic", script)
+	}
 	if ctx.Err() != nil || e.wasKilled(c.AgentID) { // an End came while it was getting ready
 		fail(errors.New("ended before it started"))
 		return

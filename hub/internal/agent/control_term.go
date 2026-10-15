@@ -127,14 +127,10 @@ func (c *Control) ReviewTerminal(ctx context.Context, id int64, provider string)
 	if provider != "claude" && provider != "codex" {
 		return 0, bad("reviews run on Claude or Codex")
 	}
-	h, err := c.liveHost(ctx, t.Host)
-	if err != nil {
+	if _, err := c.liveHost(ctx, t.Host); err != nil {
 		return 0, err
 	}
-	if !knownFolder(h, t.Cwd) {
-		return 0, bad("%s is outside the folders the agent on %s may review (%s)", t.Cwd, t.Host, strings.Join(h.Roots, ", "))
-	}
-	tr := Turn{Provider: provider, Cwd: t.Cwd, Perm: PermPlan, Review: &Review{}}
+	tr := Turn{Provider: provider, Cwd: t.Cwd, Perm: PermPlan, Review: &Review{}, InHome: true}
 	a := store.AgentSession{Host: t.Host, Cwd: t.Cwd, Provider: provider, Perm: PermPlan,
 		Title: title(fmt.Sprintf("Review of terminal #%d: %s", id, t.Title))}
 	rid, cid, err := c.S.CreateAgentSession(ctx, a, &store.Command{Host: t.Host, Kind: KindTurn, Payload: payload(tr)})

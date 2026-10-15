@@ -311,6 +311,9 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 		cwd, err = e.scratchDir(c.AgentID)
 	case t.Scratch:
 		cwd, err = NewRoots([]string{e.chatsDir()}).Validate(t.Cwd)
+	case t.InHome && t.Review != nil:
+		home, _ := os.UserHomeDir()
+		cwd, err = NewRoots([]string{home}).Validate(t.Cwd)
 	default:
 		cwd, err = e.Roots.Validate(t.Cwd)
 	}
