@@ -142,8 +142,13 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 				}
 			}
 		}
-		recent, _ := s.Store.RecentFolders(ctx, h.Host, home, 8)
+		recent, _ := s.Store.RecentFolders(ctx, h.Host, home, 40)
 		for _, p := range recent {
+			v := tilde(home, p)
+			// Skip the fleet's own scratch (inside dot-folders) and what the quick picks already offer.
+			if seen[v] || strings.Contains(v, "/.") || len(o.Recent) >= 8 {
+				continue
+			}
 			add(&o.Recent, p, "")
 		}
 		var rest []pick
