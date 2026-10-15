@@ -149,10 +149,38 @@ func TestNewAgentChatAndPages(t *testing.T) {
 	}
 
 	// The host agent API: poll, then report as JSON only.
-	code, body, _ = r.get(t, "/api/agent/commands?host=studio&version=t")
+	// Polling claims commands, so it is a JSON POST: not a GET, not a form, not from another site.
+	if code, _, _ := r.get(t, "/api/agent/poll?host=studio"); code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET poll: %d", code)
+	}
+	if code, _ := r.post(t, "/api/agent/poll", url.Values{"host": {"studio"}}, ""); code != http.StatusUnsupportedMediaType {
+		t.Fatalf("form poll: %d", code)
+	}
+	pollReq := func(origin string) (int, string) {
+		req, _ := http.NewRequest(http.MethodPost, r.ts.URL+"/api/agent/poll", strings.NewReader(`{"host":"studio","version":"t","running":[]}`))
+		req.Header.Set("Content-Type", "application/json")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := r.cl.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, _ := pollReq("https://evil.example"); code != http.StatusForbidden {
+		t.Fatalf("cross-site poll: %d", code)
+	}
+	code, body = pollReq("")
 	var cmds []store.Command
 	if code != 200 || json.Unmarshal([]byte(body), &cmds) != nil || len(cmds) != 1 || cmds[0].Kind != "turn" {
 		t.Fatalf("poll: %d %s", code, body)
+	}
+	// The shipper's client speaks the same protocol (nothing left to claim now).
+	if cs, err := agent.NewHTTPHub(r.ts.URL).Poll(context.Background(), "studio", "t", []int64{1}); err != nil || len(cs) != 0 {
+		t.Fatalf("HTTPHub poll: %v %v", cs, err)
 	}
 	req, _ := http.NewRequest(http.MethodPost, r.ts.URL+"/api/agent/commands/1", strings.NewReader(`{"status":"running","pid":7,"session_id":"abc"}`))
 	req.Header.Set("Content-Type", "text/plain")
@@ -181,7 +209,8 @@ func TestNewAgentChatAndPages(t *testing.T) {
 
 	// Not from the tailnet: refused.
 	w := httptest.NewRecorder()
-	rq := httptest.NewRequest(http.MethodGet, "/api/agent/commands?host=studio", nil)
+	rq := httptest.NewRequest(http.MethodPost, "/api/agent/poll", strings.NewReader(`{"host":"studio"}`))
+	rq.Header.Set("Content-Type", "application/json")
 	rq.RemoteAddr = "203.0.113.9:4000"
 	r.srv.Handler().ServeHTTP(w, rq)
 	if w.Code != http.StatusForbidden {

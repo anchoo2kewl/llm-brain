@@ -39,7 +39,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	g := func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.tailnetOnly(h)) }
 	p := func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.tailnetOnly(s.sameSite(h))) }
 	// host agents
-	g("GET /api/agent/commands", s.apiPoll)
+	p("POST /api/agent/poll", s.apiPoll) // claims commands: a POST, JSON only, so no page can trigger it
 	p("POST /api/agent/commands/{id}", s.apiReport)
 	p("POST /api/agent/inventory", s.apiInventory)
 	// chats
@@ -117,14 +117,11 @@ func idPath(id int64, f string) string { return fmt.Sprintf(f, id) }
 // ---------------------------------------------------------------- host agent API
 
 func (s *Server) apiPoll(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	var running []int64
-	for _, x := range strings.Split(q.Get("running"), ",") {
-		if id, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64); err == nil && id > 0 {
-			running = append(running, id)
-		}
+	var req agent.PollRequest
+	if !jsonBody(w, r, &req) {
+		return
 	}
-	cs, err := s.Agents.Hub.Poll(r.Context(), q.Get("host"), q.Get("version"), running)
+	cs, err := s.Agents.Hub.Poll(r.Context(), req.Host, req.Version, req.Running)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
