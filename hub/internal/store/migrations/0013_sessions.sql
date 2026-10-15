@@ -64,3 +64,27 @@ CREATE TABLE IF NOT EXISTS agent_hosts (
   providers TEXT NOT NULL DEFAULT '[]', -- agent CLIs installed there: claude, codex, gemini
   last_poll TEXT NOT NULL DEFAULT ''
 );
+
+-- Plain chats: talk to a model through the account gateway's OpenAI-compatible API, no tools, no folder.
+-- The model is per message, so a conversation can switch models.
+CREATE TABLE IF NOT EXISTS llm_chats (
+  id         INTEGER PRIMARY KEY,
+  title      TEXT NOT NULL DEFAULT '',
+  model      TEXT NOT NULL DEFAULT '', -- the model the next reply uses
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS llm_chats_updated ON llm_chats (updated_at);
+
+CREATE TABLE IF NOT EXISTS llm_messages (
+  id         INTEGER PRIMARY KEY,
+  chat_id    INTEGER NOT NULL,
+  role       TEXT NOT NULL,              -- user | assistant
+  model      TEXT NOT NULL DEFAULT '',   -- assistant: the model that answered
+  content    TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'done', -- streaming | done | error
+  error      TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS llm_messages_chat ON llm_messages (chat_id, id);
