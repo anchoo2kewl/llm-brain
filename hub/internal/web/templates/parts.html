@@ -69,3 +69,28 @@
 <a href="/chats/new?kind=agent" {{if eq . "agent"}}class="on" aria-current="page"{{end}}><b>Task</b><span>one job at a time in a folder, with review</span></a>
 <a href="/chats/new?kind=model" {{if eq . "model"}}class="on" aria-current="page"{{end}}><b>Model chat</b><span>talk to any model, no tools</span></a>
 </nav>{{end}}
+
+{{define "termfields"}}<fieldset class="clis"><legend>Run</legend>
+{{range .CLIs}}<label class="cli"><input type="radio" name="cli" value="{{.Value}}" {{if eq .Value $.F.Provider}}checked{{end}}><span><b>{{.Label}}</b><code>{{.Note}}</code></span></label>{{end}}
+</fieldset>
+<div class="grid2">
+<label>On<select name="host" id="termhost">{{range .Hosts}}<option value="{{.Host}}" {{if eq .Host $.F.Host}}selected{{end}} {{if not .Live}}disabled{{end}}>{{.Host}}{{if not .Live}} (offline){{end}}</option>{{end}}</select></label>
+<label class="wide">Folder<input name="path" id="termpath" value="{{.F.Path}}" placeholder="Type or pick: ~/elastio/blue-stack, ~/projects/…  (empty = a new scratch folder)" autocomplete="off" spellcheck="false"></label>
+<div class="wide folderpicks">{{range $i, $h := .Hosts}}{{if .Live}}
+<datalist id="dl-{{$i}}">{{range .All}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</datalist>
+<div class="picks" data-host="{{.Host}}" data-list="dl-{{$i}}">
+{{if .Quick}}<span class="mut small">Start in</span>{{range .Quick}}<button type="button" class="chip" data-path="{{.Value}}">{{.Label}}</button>{{end}}{{end}}
+{{if .Recent}}<span class="mut small sep">Recent</span>{{range .Recent}}<button type="button" class="chip" data-path="{{.Value}}">{{.Label}}</button>{{end}}{{end}}
+</div>{{end}}{{end}}</div>
+<label>New worktree (optional)<input name="wt_slug" value="{{.F.WtSlug}}" placeholder="e.g. fix-pager" autocomplete="off"></label>
+<label>…from<input name="wt_base" value="{{.F.WtBase}}" placeholder="origin/main" autocomplete="off"></label>
+<label>Model (optional)<input name="model" value="{{.F.Model}}" placeholder="the CLI's default, e.g. opus" autocomplete="off"></label>
+<label class="wide">First message (optional)<textarea name="prompt" rows="3" id="termprompt" placeholder="What to work on. Drop, paste or attach images and files here too. You can also just type in the terminal.">{{.F.Prompt}}</textarea></label>
+<div class="wide row attachrow"><label class="btn upl small">Attach images or files…<input type="file" id="termattach" multiple hidden></label><span class="mut small">They go to the chosen Mac and the message points the CLI at them.</span></div>
+</div>
+<fieldset class="perms wide"><legend>Permissions</legend>
+<label><input type="radio" name="perm" value="full" {{if eq .F.Perm "full"}}checked{{end}}> <span><b>Full access</b> <span class="mut">no approval prompts, no sandbox: <code>claude --dangerously-skip-permissions</code>, <code>codex --dangerously-bypass-approvals-and-sandbox</code>, <code>gemini --approval-mode yolo</code></span></span></label>
+<label><input type="radio" name="perm" value="ask" {{if eq .F.Perm "ask"}}checked{{end}}> <span><b>Ask first</b> <span class="mut">the CLI's normal prompts before it edits files or runs commands</span></span></label>
+</fieldset>
+<p class="mut small">When the CLI exits you're left in a shell in the same folder.</p>
+{{end}}

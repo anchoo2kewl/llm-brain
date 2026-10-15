@@ -1,0 +1,292 @@
+// Workspace (terminals.go): many terminals at once. Every open terminal stays attached in the background
+// (TermPane), so switching is instant and the sidebar knows who is working and who is waiting for you.
+// Panes are slots in a grid; a terminal's element moves between a slot and an off-screen parking spot.
+(function () {
+  "use strict";
+  var grid = document.getElementById("wsgrid"), list = document.getElementById("wslist");
+  if (!grid || !list || !window.TermPane) return;
+  var KEY = "llmb.workspace.v1", MAX_ATTACHED = 12;
+  var COUNTS = { "1": 1, "2": 2, "3": 3, "4": 4, "6": 6, "9": 9 }, ORDER = ["1", "2", "3", "4", "6", "9"];
+  var narrow = window.matchMedia("(max-width: 760px)");
+  var st = load();
+  var infos = {}, panes = {}, items = {}, order = [];
+  var park = document.createElement("div");
+  park.className = "ws-park";
+  document.body.appendChild(park);
+  var slotEls = [];
+
+  function load() {
+    try {
+      var s = JSON.parse(localStorage.getItem(KEY) || "{}");
+      return { layout: COUNTS[s.layout] ? s.layout : "2", slots: Array.isArray(s.slots) ? s.slots : [], focus: s.focus | 0, zoom: !!s.zoom };
+    } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false }; }
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* private mode */ } }
+  function count() { return narrow.matches || st.zoom ? 1 : COUNTS[st.layout]; }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+  // ------------------------------------------------------------ terminals
+
+  function attach(info) {
+    if (panes[info.id] || !(info.status === "live" || info.status === "starting")) return;
+    if (Object.keys(panes).length >= MAX_ATTACHED) return;
+    var p = new window.TermPane({
+      id: info.id, host: info.host, status: info.status, parent: park, visible: false,
+      isFocused: function () { return document.hasFocus() && st.slots[st.focus] === info.id; },
+      onSay: function (t) { var s = slotOf(info.id); if (s >= 0) slotEls[s].msg.textContent = t; },
+      onState: function () { paintItem(info.id); paintSlot(slotOf(info.id)); badge(); },
+      onStatus: function (s) { if (s.status) { info.status = s.status; info.error = s.error; paintItem(info.id); } }
+    });
+    p.term.textarea && p.term.textarea.addEventListener("focus", function () { var s = slotOf(info.id); if (s >= 0 && s !== st.focus) focusSlot(s, true); });
+    panes[info.id] = p;
+  }
+
+  function refresh(then) {
+    fetch("/api/terminals", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (ts) {
+      var seen = {};
+      order = ts.map(function (t) { return t.id; });
+      ts.forEach(function (t) {
+        seen[t.id] = true;
+        var old = infos[t.id];
+        infos[t.id] = t;
+        if (old && old.title !== t.title && slotOf(t.id) >= 0) paintSlot(slotOf(t.id));
+        attach(t);
+      });
+      Object.keys(infos).forEach(function (id) {
+        if (!seen[id]) { delete infos[id]; if (panes[id]) { panes[id].dispose(); delete panes[id]; } }
+      });
+      if (!st.slots.length || st.slots.every(function (s) { return !infos[s]; })) { // first visit: fill with the newest open ones
+        st.slots = order.filter(function (id) { return panes[id]; }).slice(0, COUNTS[st.layout]);
+      }
+      st.slots = st.slots.map(function (id) { return infos[id] ? id : null; });
+      renderList();
+      layout();
+      document.getElementById("wsempty").hidden = order.length > 0;
+      if (then) then();
+    }).catch(function () { /* the hub restarting: try again on the next tick */ });
+  }
+
+  // ------------------------------------------------------------ sidebar
+
+  var dotTitle = { working: "working", waiting: "waiting for you", idle: "idle", connecting: "connecting", ended: "ended" };
+  function stateOf(id) {
+    var p = panes[id], i = infos[id];
+    if (!i) return "ended";
+    if (i.status === "ended" || i.status === "failed") return "ended";
+    return p ? p.state() : "idle";
+  }
+  function renderList() {
+    var q = (document.getElementById("wsq").value || "").toLowerCase();
+    list.textContent = "";
+    order.forEach(function (id) {
+      var t = infos[id];
+      if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
+      var li = items[id] || makeItem(id);
+      list.appendChild(li);
+      paintItem(id);
+    });
+  }
+  function makeItem(id) {
+    var li = el("li", "ws-item");
+    li.tabIndex = 0;
+    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
+    top.append(dot, title, num);
+    var meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
+    li.append(top, meta, prev);
+    li.addEventListener("click", function () { show(id); });
+    li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
+    title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
+    items[id] = li;
+    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num };
+    return li;
+  }
+  function paintItem(id) {
+    var li = items[id], t = infos[id];
+    if (!li || !t) return;
+    var s = stateOf(id), p = panes[id];
+    li.className = "ws-item s-" + s + (slotOf(id) === st.focus ? " on" : slotOf(id) >= 0 ? " shown" : "");
+    li.parts.dot.title = dotTitle[s] || s;
+    li.parts.dot.className = "dot-s " + s;
+    if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
+    li.parts.meta.textContent = t.cli + " · " + t.host.replace(/^Anshumans?-?/, "") + " · " + t.cwd;
+    var slot = slotOf(id);
+    li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
+    li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : p ? p.lastLine() : "";
+  }
+  function badge() {
+    var n = order.filter(function (id) { return stateOf(id) === "waiting"; }).length;
+    document.title = (n ? "(" + n + ") " : "") + "Workspace · llm-brain hub";
+  }
+  setInterval(function () { order.forEach(function (id) { if (stateOf(id) === "working") paintItem(id); }); }, 2000);
+
+  function rename(id, span) {
+    span.setAttribute("contenteditable", "true");
+    span.focus();
+    document.getSelection().selectAllChildren(span);
+    function done(ok) {
+      span.removeAttribute("contenteditable");
+      var title = span.textContent.trim();
+      if (!ok || !title || title === infos[id].title) { span.textContent = infos[id].title; return; }
+      var body = new URLSearchParams(); body.set("title", title);
+      fetch("/terminals/" + id + "/rename", { method: "POST", body: body }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j.title) { infos[id].title = j.title; paintSlot(slotOf(id)); }
+        paintItem(id);
+      });
+    }
+    span.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); span.onkeydown = null; span.onblur = null; done(true); } if (e.key === "Escape") { span.onkeydown = null; span.onblur = null; done(false); } };
+    span.onblur = function () { span.onkeydown = null; span.onblur = null; done(true); };
+  }
+
+  // ------------------------------------------------------------ panes
+
+  function slotOf(id) { for (var i = 0; i < count(); i++) if (st.slots[i] === id) return i; return -1; }
+  function layout() {
+    var n = count();
+    grid.setAttribute("data-layout", narrow.matches || st.zoom ? "1" : st.layout);
+    document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-layout") === st.layout); });
+    if (st.focus >= n) st.focus = 0;
+    while (slotEls.length < n) slotEls.push(makeSlot(slotEls.length));
+    slotEls.forEach(function (s, i) { s.root.hidden = i >= n; });
+    // Zoomed: show the focused pane's terminal in slot 0.
+    var shown = {};
+    for (var i = 0; i < n; i++) {
+      var id = st.zoom ? st.slots[st.focus] : st.slots[i];
+      var s = slotEls[i];
+      s.root.classList.toggle("focus", st.zoom || i === st.focus);
+      if (id && panes[id] && !shown[id]) {
+        shown[id] = true;
+        if (panes[id].el.parentNode !== s.body) s.body.appendChild(panes[id].el);
+        panes[id].show(true);
+        s.empty.hidden = true;
+      } else {
+        s.empty.hidden = false;
+        fillEmpty(s, i);
+      }
+      s.id = id;
+      paintSlot(i);
+    }
+    Object.keys(panes).forEach(function (id) {
+      if (!shown[id] && panes[id].el.parentNode !== park) { park.appendChild(panes[id].el); panes[id].show(false); }
+    });
+    save();
+    order.forEach(paintItem);
+  }
+  function makeSlot(i) {
+    var root = el("section", "ws-slot"), head = el("header", "ws-slot-head"), body = el("div", "ws-slot-body"), msg = el("div", "ws-slot-msg");
+    var num = el("span", "ws-num", String(i + 1)), dot = el("span", "dot-s"), title = el("span", "ws-slot-title"), meta = el("span", "ws-slot-meta");
+    var grow = el("span", "grow");
+    var open = el("a", "ws-btn", "↗"); open.title = "Open on its own page"; open.target = "_blank"; open.rel = "noopener";
+    var zoom = el("button", "ws-btn", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
+    var clear = el("button", "ws-btn", "✕"); clear.type = "button"; clear.title = "Take it out of this pane (it keeps running)";
+    head.append(num, dot, title, meta, grow, open, zoom, clear);
+    var empty = el("div", "ws-slot-empty");
+    root.append(head, body, msg, empty);
+    grid.appendChild(root);
+    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, open: open, i: i };
+    root.addEventListener("mousedown", function () { if (s.i !== st.focus && !st.zoom) focusSlot(s.i, false); });
+    zoom.onclick = function (e) { e.stopPropagation(); focusSlot(s.i, false); toggleZoom(); };
+    clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
+    return s;
+  }
+  function fillEmpty(s, i) {
+    s.empty.textContent = "";
+    var free = order.filter(function (id) { return panes[id] && st.slots.slice(0, count()).indexOf(id) < 0; });
+    s.empty.appendChild(el("p", "mut", free.length ? "Pick a terminal for pane " + (i + 1) + ":" : "Every terminal is already on screen."));
+    free.slice(0, 8).forEach(function (id) {
+      var b = el("button", "chip", (infos[id].title || "terminal " + id).slice(0, 60));
+      b.type = "button";
+      b.onclick = function () { st.slots[i] = id; st.focus = i; layout(); focusSlot(i, true); };
+      s.empty.appendChild(b);
+    });
+    var nb = el("button", "primary small", "+ New terminal here");
+    nb.type = "button";
+    nb.onclick = function () { st.focus = i; openNew(); };
+    s.empty.appendChild(nb);
+  }
+  function paintSlot(i) {
+    if (i < 0 || !slotEls[i]) return;
+    var s = slotEls[i], id = s.id, t = id && infos[id];
+    if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
+    var stt = stateOf(id);
+    s.title.textContent = t.title || "terminal " + id;
+    s.meta.textContent = t.cli + " · " + t.cwd;
+    s.dot.className = "dot-s " + stt;
+    s.dot.title = dotTitle[stt] || stt;
+    s.open.href = "/terminals/" + id;
+    s.root.classList.toggle("waiting", stt === "waiting");
+  }
+  function focusSlot(i, focusTerm) {
+    st.focus = i;
+    slotEls.forEach(function (s, j) { s.root.classList.toggle("focus", st.zoom || j === i); });
+    var id = st.slots[i];
+    if (id && panes[id]) { panes[id].markSeen(); if (focusTerm) panes[id].focus(); }
+    save();
+    order.forEach(paintItem);
+    badge();
+  }
+  // show: put a terminal in the focused pane (or go to its pane if it's on screen already).
+  function show(id) {
+    var at = slotOf(id);
+    if (at >= 0 && !st.zoom) { focusSlot(at, true); return; }
+    if (!panes[id]) attach(infos[id]);
+    if (!panes[id]) return;
+    st.slots[st.focus] = id;
+    layout();
+    focusSlot(st.focus, true);
+  }
+  function toggleZoom() { st.zoom = !st.zoom; layout(); focusSlot(st.focus, true); }
+  function setLayout(l) { st.layout = l; st.zoom = false; layout(); focusSlot(Math.min(st.focus, count() - 1), true); }
+  function step(d) { // previous / next terminal in the focused pane
+    var live = order.filter(function (id) { return panes[id]; });
+    if (!live.length) return;
+    var cur = live.indexOf(st.slots[st.focus]);
+    show(live[(cur + d + live.length) % live.length]);
+  }
+
+  // ------------------------------------------------------------ keys
+
+  function shortcut(e) { // xterm's key hook and the page's: true = let the terminal have it
+    if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
+    var k = e.key, n = /^Digit([1-9])$/.exec(e.code);
+    if (n) { var i = +n[1] - 1; if (i < count()) focusSlot(i, true); }
+    else if (k === "ArrowLeft") step(-1);
+    else if (k === "ArrowRight") step(1);
+    else if (k === "ArrowUp") focusSlot((st.focus - 1 + count()) % count(), true);
+    else if (k === "ArrowDown") focusSlot((st.focus + 1) % count(), true);
+    else if (k === "Enter") toggleZoom();
+    else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
+    else if (k === "N" || k === "n") openNew();
+    else if (k === "J" || k === "j") { var w = order.filter(function (id) { return stateOf(id) === "waiting"; }); if (w.length) show(w[0]); }
+    else return true;
+    e.preventDefault();
+    return false;
+  }
+  // Capture phase on the document: runs before xterm sees the key, so a shortcut never reaches the shell.
+  document.addEventListener("keydown", function (e) { if (!shortcut(e)) e.stopPropagation(); }, true);
+  document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.onclick = function () { setLayout(b.getAttribute("data-layout")); }; });
+  document.getElementById("wsq").addEventListener("input", renderList);
+  narrow.addEventListener && narrow.addEventListener("change", layout);
+
+  // ------------------------------------------------------------ new terminal
+
+  var dlg = document.getElementById("wsnew"), form = document.getElementById("wsnewform"), err = document.getElementById("wsnewerr");
+  function openNew() { err.textContent = ""; if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", ""); var c = form.querySelector('input[name="path"]'); if (c) c.focus(); }
+  document.getElementById("wsnewbtn").onclick = openNew;
+  document.getElementById("wsnewbtn2").onclick = openNew;
+  document.getElementById("wsnewclose").onclick = function () { dlg.close(); };
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true; err.textContent = "";
+    fetch("/terminals/new", { method: "POST", body: new FormData(form) }).then(function (r) { return r.json(); }).then(function (j) {
+      btn.disabled = false;
+      if (j.error) { err.textContent = j.error; return; }
+      dlg.close();
+      form.querySelector('textarea[name="prompt"]').value = "";
+      refresh(function () { show(j.id); });
+    }).catch(function (x) { btn.disabled = false; err.textContent = String(x); });
+  });
+
+  refresh(function () { var id = st.slots[st.focus]; if (id && panes[id]) setTimeout(function () { panes[id].focus(); }, 300); });
+  setInterval(refresh, 10000);
+})();

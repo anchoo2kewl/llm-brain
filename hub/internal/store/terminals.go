@@ -267,3 +267,9 @@ func (s *Store) RecentFolders(ctx context.Context, host, home string, limit int)
 	}
 	return out, rows.Err()
 }
+
+// RenameTerminal sets a terminal's title.
+func (s *Store) RenameTerminal(ctx context.Context, id int64, title string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE terminals SET title = ? WHERE id = ?`, title, id)
+	return err
+}

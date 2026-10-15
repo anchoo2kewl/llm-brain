@@ -29,6 +29,9 @@ func (s *Server) terminalRoutes(g, p func(string, http.HandlerFunc), mux *http.S
 	p("POST /terminals/new", s.newTerminalPost)
 	g("GET /terminals/{id}", s.terminalPage)
 	g("GET /terminals/{id}/status", s.terminalStatus)
+	g("GET /workspace", s.workspace)
+	g("GET /api/terminals", s.terminalsAPI)
+	p("POST /terminals/{id}/rename", s.terminalRename)
 	p("GET /terminals/{id}/ws", s.terminalWS) // sameSite: a websocket from another site is refused
 	p("POST /terminals/{id}/kill", s.terminalKill)
 	p("POST /terminals/{id}/review", s.terminalReview)
@@ -78,6 +81,10 @@ type termForm struct {
 	Host, Provider, Folder, Path, Model, Prompt, WtSlug, WtBase, Perm string
 }
 
+type cli struct{ Value, Label, Note string }
+
+var termCLIs = []cli{{"claude", "Claude Code", "claude"}, {"codex", "Codex", "codex"}, {"gemini", "Gemini CLI", "gemini"}, {"shell", "Shell", "your login shell"}}
+
 // pick is a folder the picker offers: Value is what goes in the box ("~/elastio"), Label how it reads.
 type pick struct{ Value, Label string }
 
@@ -99,22 +106,23 @@ func (s *Server) newTerminal(w http.ResponseWriter, r *http.Request) {
 	s.newTerminalPage(w, r, termForm{Host: q.Get("host"), Provider: q.Get("cli"), Path: q.Get("path")}, "")
 }
 
-func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termForm, errMsg string) {
-	ctx := r.Context()
+// termHost is a Mac in the folder picker: its quick picks, recent folders and every folder it can suggest.
+type termHost struct {
+	store.AgentHost
+	Live          bool
+	Quick, Recent []pick
+	All           []pick // the datalist: quick, recent, every folder in home, every repo
+}
+
+// termHosts builds the folder picker for every Mac, and picks the default host into *sel.
+func (s *Server) termHosts(ctx context.Context, sel *string) ([]termHost, error) {
 	hosts, err := s.Agents.Ctl.Folders(ctx)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
-	type hostOpt struct {
-		store.AgentHost
-		Live          bool
-		Quick, Recent []pick
-		All           []pick // the datalist: quick, recent, every folder in home, every repo
-	}
-	var hs []hostOpt
+	var hs []termHost
 	for _, h := range hosts {
-		o := hostOpt{AgentHost: h, Live: h.Live()}
+		o := termHost{AgentHost: h, Live: h.Live()}
 		home, places, _ := s.Store.AgentPlaces(ctx, h.Host)
 		seen := map[string]bool{}
 		add := func(list *[]pick, p, label string) {
@@ -163,17 +171,26 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 			add(&rest, fo.Path, label)
 		}
 		hs = append(hs, o)
-		if f.Host == "" && o.Live && h.Host == s.Host {
-			f.Host = h.Host
+		if *sel == "" && o.Live && h.Host == s.Host {
+			*sel = h.Host
 		}
 	}
-	if f.Host == "" {
+	if *sel == "" {
 		for _, h := range hs {
 			if h.Live {
-				f.Host = h.Host
+				*sel = h.Host
 				break
 			}
 		}
+	}
+	return hs, nil
+}
+
+func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termForm, errMsg string) {
+	hs, err := s.termHosts(r.Context(), &f.Host)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 	if f.Provider == "" {
 		f.Provider = "claude"
@@ -181,20 +198,13 @@ func (s *Server) newTerminalPage(w http.ResponseWriter, r *http.Request, f termF
 	if f.Perm != "ask" {
 		f.Perm = "full"
 	}
-	type cli struct{ Value, Label, Note string }
-	clis := []cli{
-		{"claude", "Claude Code", "claude"},
-		{"codex", "Codex", "codex"},
-		{"gemini", "Gemini CLI", "gemini"},
-		{"shell", "Shell", "your login shell"},
-	}
 	s.render(w, "terminalnew", "layout", struct {
 		page
 		F     termForm
 		Err   string
-		Hosts []hostOpt
+		Hosts []termHost
 		CLIs  []cli
-	}{page{Title: "New terminal", Nav: "chats"}, f, errMsg, hs, clis})
+	}{page{Title: "New terminal", Nav: "chats"}, f, errMsg, hs, termCLIs})
 }
 
 func (s *Server) newTerminalPost(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +226,19 @@ func (s *Server) newTerminalPost(w http.ResponseWriter, r *http.Request) {
 		req.Cwd = cwd
 	}
 	id, err := s.Agents.Ctl.OpenTerminal(r.Context(), req)
+	if r.FormValue("format") == "json" { // the workspace's quick "new terminal"
+		if err != nil {
+			msg, ok := isInput(err)
+			if !ok {
+				msg = "internal error"
+				s.Log.Printf("new terminal: %v", err)
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"id": id})
+		return
+	}
 	if err != nil {
 		if msg, ok := isInput(err); ok {
 			s.newTerminalPage(w, r, f, msg)
@@ -449,4 +472,72 @@ func reportError(result string) string {
 	var r agent.Report
 	_ = json.Unmarshal([]byte(result), &r)
 	return r.Error
+}
+
+// ---------------------------------------------------------------- workspace
+
+// termJSON is a terminal for the workspace's list.
+type termJSON struct {
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Host     string `json:"host"`
+	CLI      string `json:"cli"`
+	Provider string `json:"provider"`
+	Cwd      string `json:"cwd"`
+	Status   string `json:"status"`
+	Error    string `json:"error,omitempty"`
+	Updated  string `json:"updated"`
+}
+
+// terminalsAPI: open terminals, plus ones that ended in the last day (so a pane can say why it stopped).
+func (s *Server) terminalsAPI(w http.ResponseWriter, r *http.Request) {
+	ts, err := s.Store.Terminals(r.Context(), "", 200)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	cut := store.T(time.Now().Add(-24 * time.Hour))
+	out := []termJSON{}
+	for _, t := range ts {
+		if !t.Open() && t.UpdatedAt < cut {
+			continue
+		}
+		home, _, _ := s.Store.AgentPlaces(r.Context(), t.Host)
+		out = append(out, termJSON{t.ID, t.Title, t.Host, agent.TermProviderName(t.Provider), t.Provider, tilde(home, t.Cwd), t.Status, t.Error, t.UpdatedAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) terminalRename(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" || len(title) > 120 {
+		jsonErr(w, http.StatusBadRequest, errors.New("a title of 1–120 characters"))
+		return
+	}
+	if err := s.Store.RenameTerminal(r.Context(), id, title); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"title": title})
+}
+
+func (s *Server) workspace(w http.ResponseWriter, r *http.Request) {
+	f := termForm{Provider: "claude", Perm: "full"}
+	hs, err := s.termHosts(r.Context(), &f.Host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' ws://"+r.Host+" wss://"+r.Host)
+	s.render(w, "workspace", "layout", struct {
+		page
+		F     termForm
+		Hosts []termHost
+		CLIs  []cli
+	}{page{Title: "Workspace", Nav: "workspace"}, f, hs, termCLIs})
 }

@@ -17,109 +17,47 @@
     document.querySelectorAll(".folderpicks .chip").forEach(function (b) {
       b.addEventListener("click", function () { pathIn.value = b.getAttribute("data-path"); pathIn.focus(); });
     });
+    // Images and files for the first message: uploaded to the chosen Mac before the terminal exists.
+    var prompt = document.getElementById("termprompt"), attach = document.getElementById("termattach");
+    if (prompt && window.hubDrop) {
+      var takeNew = window.hubDrop(prompt.closest("form") || prompt, function () { return hostSel.value; }, "new", function (paths) {
+        var add = paths.map(function (p) { return "Attached: " + p; }).join("\n");
+        prompt.value = prompt.value ? prompt.value.replace(/\s*$/, "") + "\n" + add + "\n" : add + "\n";
+      });
+      if (attach) attach.addEventListener("change", function () { takeNew(attach.files); attach.value = ""; });
+    }
   }
   var el = document.getElementById("term");
-  if (!el || !window.Terminal) return;
+  if (!el || !window.TermPane) return;
   var id = el.getAttribute("data-term");
   var msg = document.getElementById("termmsg");
   var pill = document.getElementById("termstatus");
-  var enc = new TextEncoder();
-  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  var term = new window.Terminal({
-    cursorBlink: true, scrollback: 5000, allowProposedApi: true, macOptionIsMeta: true,
-    fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: window.innerWidth < 640 ? 12 : 13,
-    theme: dark ? { background: "#0d1117", foreground: "#e6edf3" } : { background: "#ffffff", foreground: "#1f2328", cursor: "#1f2328", selectionBackground: "#b6d7ff" }
-  });
-  var fit = new window.FitAddon.FitAddon();
-  term.loadAddon(fit);
-  if (window.WebLinksAddon) term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
-  term.open(el);
-  fit.fit();
-  var ws = null, wanted = true, tries = 0, timer = null;
-
-  function say(t) { msg.textContent = t || ""; }
-  var queued = []; // typed before the socket is up: sent once it is (capped, so a dead page can't hoard)
-  function send(data) {
-    var b = typeof data === "string" ? enc.encode(data) : data;
-    if (ws && ws.readyState === 1) ws.send(b);
-    else if (queued.length < 500) queued.push(b);
-  }
-  function resize() {
-    try { fit.fit(); } catch (e) { return; }
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "resize", cols: term.cols, rows: term.rows }));
-  }
-  function status(cb) {
-    fetch("/terminals/" + id + "/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+  var pane = new window.TermPane({
+    id: id, host: el.getAttribute("data-host"), status: el.getAttribute("data-status"), parent: el,
+    isFocused: function () { return document.hasFocus(); },
+    onSay: function (t) { msg.textContent = t; },
+    onStatus: function (s) {
       if (pill && s.status) { pill.textContent = s.status; pill.className = "pill " + (s.status === "live" ? "ok" : s.status === "failed" ? "bad" : s.status === "starting" ? "warn" : ""); }
-      cb(s);
-    }).catch(function () { cb({}); });
-  }
-  function connect() {
-    clearTimeout(timer);
-    say(tries ? "Reconnecting…" : "Connecting…");
-    var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    ws = new WebSocket(proto + location.host + "/terminals/" + id + "/ws?cols=" + term.cols + "&rows=" + term.rows);
-    ws.binaryType = "arraybuffer";
-    ws.onopen = function () { var q = queued; queued = []; q.forEach(function (b) { ws.send(b); }); };
-    var got = false;
-    ws.onmessage = function (ev) {
-      if (!got) { got = true; tries = 0; say(""); term.focus(); }
-      if (typeof ev.data === "string") return;
-      term.write(new Uint8Array(ev.data));
-    };
-    ws.onclose = function (ev) {
-      ws = null;
-      if (!wanted) return;
-      var why = ev.code === 4000 && ev.reason ? ev.reason : "";
-      status(function (s) {
-        if (s.status === "starting") { say("Starting…"); timer = setTimeout(connect, 1500); return; }
-        if (s.status && s.status !== "live") { say(why || ("The terminal has " + s.status + ".") + (s.error ? " " + s.error : "")); return; }
-        if (why === "detached") { say("Detached (someone ended the attach). Reconnecting…"); }
-        else if (why) { say(why + ". Retrying…"); }
-        tries++;
-        timer = setTimeout(connect, Math.min(1000 * tries, 10000));
-      });
-    };
-  }
-
-  term.onData(function (d) { send(d); });
-  term.onBinary(function (d) {
-    var b = new Uint8Array(d.length);
-    for (var i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 255;
-    send(b);
+    }
   });
-  var rt = null;
-  window.addEventListener("resize", function () { clearTimeout(rt); rt = setTimeout(resize, 120); });
-  if (window.ResizeObserver) new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(resize, 120); }).observe(el);
+  pane.term.focus();
+  var send = pane.send;
 
   var keys = { esc: "\x1b", tab: "\t", stab: "\x1b[Z", up: "\x1b[A", down: "\x1b[B", ctrlc: "\x03", enter: "\r" };
   document.getElementById("termkeys").addEventListener("click", function (e) {
     var k = e.target.getAttribute && e.target.getAttribute("data-key");
-    if (k && keys[k]) { send(keys[k]); term.focus(); }
+    if (k && keys[k]) { send(keys[k]); pane.term.focus(); }
   });
   var line = document.getElementById("termin");
   document.getElementById("termline").addEventListener("submit", function (e) {
     e.preventDefault();
     if (!line.value) { send("\r"); return; }
-    send("\x1b[200~" + line.value + "\x1b[201~"); // bracketed paste: a TUI takes it as text, not keys
+    pane.paste(line.value);
     setTimeout(function () { send("\r"); }, 60);
     line.value = "";
   });
-
-  // Dropped / pasted / attached files: upload to the host, then type their paths in (bracketed paste).
-  if (window.hubDrop) {
-    var typePaths = function (paths) {
-      send("\x1b[200~" + paths.map(function (p) { return /\s/.test(p) ? "'" + p + "'" : p; }).join(" ") + " \x1b[201~");
-      term.focus();
-    };
-    var take = window.hubDrop(el, el.getAttribute("data-host"), "t" + id, typePaths);
-    var fileIn = document.getElementById("termfile");
-    if (fileIn) fileIn.addEventListener("change", function () { take(fileIn.files); fileIn.value = ""; });
-  }
-
+  var fileIn = document.getElementById("termfile");
+  if (fileIn && pane.take) fileIn.addEventListener("change", function () { pane.take(fileIn.files); fileIn.value = ""; });
   var endForm = document.querySelector("form.endform");
-  if (endForm) endForm.addEventListener("submit", function () { wanted = false; });
-
-  if (el.getAttribute("data-status") === "live" || el.getAttribute("data-status") === "starting") connect();
-  else say("This terminal has " + el.getAttribute("data-status") + ".");
+  if (endForm) endForm.addEventListener("submit", function () { pane.stop(); });
 })();

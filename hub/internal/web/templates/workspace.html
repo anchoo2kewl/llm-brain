@@ -1,0 +1,34 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css"><link rel="stylesheet" href="/static/files.css"><link rel="stylesheet" href="/static/workspace.css">
+<div class="ws" id="ws">
+<aside class="ws-side" aria-label="Terminals">
+  <div class="ws-head"><b>Terminals</b><span class="grow"></span><button type="button" class="primary small" id="wsnewbtn" title="New terminal (Ctrl+Shift+N)">+ New</button></div>
+  <div class="ws-filter"><input type="search" id="wsq" placeholder="Filter…" aria-label="Filter terminals"></div>
+  <ul class="ws-list" id="wslist"></ul>
+  <div class="ws-foot">
+    <div class="ws-layouts" role="group" aria-label="Layout">
+      <button type="button" data-layout="1" title="One (Ctrl+Shift+L cycles)"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="22" height="15" rx="1.5"/></svg></button>
+      <button type="button" data-layout="2" title="Two side by side"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="10.5" height="15" rx="1.5"/><rect x="11.5" y="0" width="10.5" height="15" rx="1.5"/></svg></button>
+      <button type="button" data-layout="3" title="One big, two stacked"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="12" height="15" rx="1.5"/><rect x="13" y="0" width="9" height="7" rx="1.5"/><rect x="13" y="8" width="9" height="7" rx="1.5"/></svg></button>
+      <button type="button" data-layout="4" title="Two by two"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="10.5" height="7" rx="1.5"/><rect x="11.5" y="0" width="10.5" height="7" rx="1.5"/><rect x="0" y="8" width="10.5" height="7" rx="1.5"/><rect x="11.5" y="8" width="10.5" height="7" rx="1.5"/></svg></button>
+      <button type="button" data-layout="6" title="Three by two"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="6.6" height="7" rx="1.5"/><rect x="7.7" y="0" width="6.6" height="7" rx="1.5"/><rect x="15.4" y="0" width="6.6" height="7" rx="1.5"/><rect x="0" y="8" width="6.6" height="7" rx="1.5"/><rect x="7.7" y="8" width="6.6" height="7" rx="1.5"/><rect x="15.4" y="8" width="6.6" height="7" rx="1.5"/></svg></button>
+      <button type="button" data-layout="9" title="Three by three"><svg width="22" height="15" viewBox="0 0 22 15" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="6.6" height="4.3" rx="1.5"/><rect x="7.7" y="0" width="6.6" height="4.3" rx="1.5"/><rect x="15.4" y="0" width="6.6" height="4.3" rx="1.5"/><rect x="0" y="5.35" width="6.6" height="4.3" rx="1.5"/><rect x="7.7" y="5.35" width="6.6" height="4.3" rx="1.5"/><rect x="15.4" y="5.35" width="6.6" height="4.3" rx="1.5"/><rect x="0" y="10.7" width="6.6" height="4.3" rx="1.5"/><rect x="7.7" y="10.7" width="6.6" height="4.3" rx="1.5"/><rect x="15.4" y="10.7" width="6.6" height="4.3" rx="1.5"/></svg></button>
+    </div>
+    <details class="ws-keys"><summary class="small mut">Shortcuts</summary>
+      <dl class="small"><dt>Ctrl+Shift+1…9</dt><dd>go to pane 1…9</dd><dt>Ctrl+Shift+← →</dt><dd>previous / next terminal here</dd>
+      <dt>Ctrl+Shift+↑ ↓</dt><dd>previous / next pane</dd><dt>Ctrl+Shift+Enter</dt><dd>zoom this pane</dd><dt>Ctrl+Shift+L</dt><dd>next layout</dd>
+      <dt>Ctrl+Shift+N</dt><dd>new terminal</dd><dt>Ctrl+Shift+J</dt><dd>jump to the next one waiting for you</dd></dl></details>
+  </div>
+</aside>
+<main class="ws-main"><div class="ws-grid" id="wsgrid" data-layout="1"></div>
+<div class="ws-empty" id="wsempty" hidden><p>No terminals yet.</p><button type="button" class="primary" id="wsnewbtn2">Open a terminal</button></div></main>
+</div>
+<dialog id="wsnew" class="ws-dialog"><form method="post" action="/terminals/new" class="newchat-form termform" id="wsnewform">
+<div class="row"><h2>New terminal</h2><span class="grow"></span><button type="button" class="small" id="wsnewclose" aria-label="Close">✕</button></div>
+<input type="hidden" name="format" value="json">
+{{template "termfields" .}}
+<p class="bad" id="wsnewerr"></p>
+<div class="row"><span class="mut small">Opens in the focused pane.</span><span class="grow"></span><button type="submit" class="primary">Open terminal</button></div>
+</form></dialog>
+<script src="/static/xterm/xterm.js" defer></script><script src="/static/xterm/addon-fit.js" defer></script><script src="/static/xterm/addon-web-links.js" defer></script>
+<script src="/static/drop.js" defer></script><script src="/static/termpane.js" defer></script><script src="/static/term.js" defer></script><script src="/static/workspace.js" defer></script>
+{{end}}
