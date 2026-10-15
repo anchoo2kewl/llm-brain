@@ -1,5 +1,6 @@
 {{define "content"}}{{with .Run}}
 <div class="top"><h1>{{.Key}}</h1><div class="meta"><span class="{{statusClass .Status}}">{{.Status}}</span>{{if and (eq .Status "running") (not .HostLive)}} <span class="warn">(host offline)</span>{{end}} · {{.Host}}</div></div>
+{{template "stats-strip" $.Stats}}
 <dl class="kv">
 <dt>Kind</dt><dd>{{.Kind}}</dd>
 <dt>Target</dt><dd>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{.Target}}</a>{{else}}—{{end}}</dd>
@@ -12,5 +13,7 @@
 </dl>
 {{if .Prompt}}<details class="block"><summary>Prompt <span class="mut small">{{lines .Prompt}} lines</span></summary><pre>{{.Prompt}}</pre></details>{{else}}<p class="mut small">No prompt captured.</p>{{end}}
 <h2>Log <span class="mut small" id="logstate">{{bytes .LogBytes}}{{if not .EndedAt}} · live{{end}}</span></h2>
-<pre class="log tall" id="runlog" data-run="{{.ID}}" data-next="{{len .Log}}" data-live="{{if .EndedAt}}0{{else}}1{{end}}">{{.Log}}</pre>
+{{$split := logSplit .Log}}{{if $split.Head}}<details class="block earlier" id="log-earlier"><summary>Earlier log <span class="mut small">{{$split.HeadLines}} lines</span></summary><pre class="log">{{$split.Head}}</pre></details>
+<p class="mut small">Last {{$split.TailLines}} lines:</p>{{end}}
+<pre class="log tall" id="runlog" data-run="{{.ID}}" data-next="{{len .Log}}" data-live="{{if .EndedAt}}0{{else}}1{{end}}">{{$split.Tail}}</pre>
 {{end}}{{end}}
