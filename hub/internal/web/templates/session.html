@@ -19,7 +19,7 @@
 {{if .Subagents}}<details class="block"><summary>Subagents <span class="mut small">{{len .Subagents}}</span></summary>{{template "sessrows" .Subagents}}</details>{{end}}
 <div class="tools-toggle small"><label><input type="checkbox" id="hidetools"> hide tool calls</label> <label><input type="checkbox" id="hidemeta" checked> hide injected context</label></div>
 {{if .HasEarlier}}<p class="pager"><a href="/sessions/{{.S.ID}}?before={{.FirstID}}">← earlier messages</a></p>{{end}}
-<div id="transcript" class="transcript hidemeta" data-session="{{.S.ID}}" data-after="{{.LastID}}" data-live="{{if and .S.Live (not .HasLater)}}1{{else}}0{{end}}">
+<div id="transcript" class="transcript hidemeta" data-session="{{.S.ID}}" data-after="{{.LastID}}" data-live="{{if or (and .S.Live (not .HasLater)) .Embed}}1{{else}}0{{end}}">
 {{template "grouped" .Items}}
 </div>
 {{if .HasLater}}<p class="pager"><a href="/sessions/{{.S.ID}}?after={{.LastID}}">later messages →</a> · <a href="/sessions/{{.S.ID}}">latest</a></p>{{end}}
