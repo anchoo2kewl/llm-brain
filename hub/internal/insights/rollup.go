@@ -28,7 +28,7 @@ type Rollup struct {
 	OnCatchUp func()
 }
 
-const cursorName = "messages"
+const cursorName = store.InsightsCursor
 
 // lastMessageID reads the newest message id. (Turso v0.7 answers MAX(id) with a full table scan; an ordered
 // LIMIT 1 walks the rowid b-tree from the end.)
@@ -103,23 +103,29 @@ type actKey struct {
 
 // Step processes the next Batch message ids and returns how many rows it read (0: caught up).
 func (r *Rollup) Step(ctx context.Context) (int, error) {
-	db := r.Store.DB
+	// One transaction for the read and the writes: ingestion shares the store's single connection, so a
+	// transcript reset (which deletes messages and their derived rows) can't land between them.
+	tx, err := r.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 	batch := r.Batch
 	if batch <= 0 {
 		batch = 1000
 	}
 	var last, top int64
-	if err := db.QueryRowContext(ctx, `SELECT last_id FROM insights_cursor WHERE name = ?`, cursorName).Scan(&last); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT last_id FROM insights_cursor WHERE name = ?`, cursorName).Scan(&last); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	if err := db.QueryRowContext(ctx, lastMessageID).Scan(&top); err != nil {
+	if err := tx.QueryRowContext(ctx, lastMessageID).Scan(&top); err != nil {
 		return 0, err
 	}
 	if top <= last {
 		return 0, nil
 	}
 	hi := min(top, last+int64(batch))
-	rows, err := db.QueryContext(ctx, `SELECT id, session_id, role, kind, meta, ts, tool_name, tool_use_id, is_error,
+	rows, err := tx.QueryContext(ctx, `SELECT id, session_id, role, kind, meta, ts, tool_name, tool_use_id, is_error,
 		CASE WHEN role = 'assistant' AND raw LIKE '%"usage"%' THEN raw ELSE '' END
 		FROM messages WHERE id > ? AND id <= ? ORDER BY id`, last, hi)
 	if err != nil {
@@ -197,7 +203,7 @@ func (r *Rollup) Step(ctx context.Context) (int, error) {
 		first := map[int64]string{}
 		for sid := range missingTS {
 			var f string
-			_ = db.QueryRowContext(ctx, `SELECT first_at FROM sessions WHERE id = ?`, sid).Scan(&f)
+			_ = tx.QueryRowContext(ctx, `SELECT first_at FROM sessions WHERE id = ?`, sid).Scan(&f)
 			first[sid] = f
 		}
 		for _, p := range noTS {
@@ -207,11 +213,6 @@ func (r *Rollup) Step(ctx context.Context) (int, error) {
 		}
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
 	for k, c := range act {
 		if k.hour == "" {
 			continue
@@ -225,11 +226,8 @@ func (r *Rollup) Step(ctx context.Context) (int, error) {
 	// A response is written as several lines that repeat its usage; later lines can carry the final output
 	// count, so keep the largest of each figure.
 	for _, u := range usage {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO usage_events (session_id, api_id, ts, model, input, output, cache_read, cache_write)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (session_id, api_id) DO UPDATE SET
-			input = max(usage_events.input, excluded.input), output = max(usage_events.output, excluded.output),
-			cache_read = max(usage_events.cache_read, excluded.cache_read), cache_write = max(usage_events.cache_write, excluded.cache_write)`,
-			u.session, u.apiID, u.ts, u.model, u.input, u.output, u.cacheRead, u.cacheWr); err != nil {
+		if err := store.UpsertUsage(ctx, tx, store.Usage{SessionID: u.session, APIID: u.apiID, TS: u.ts, Model: u.model,
+			Input: u.input, Output: u.output, CacheRead: u.cacheRead, CacheWrite: u.cacheWr}); err != nil {
 			return 0, err
 		}
 	}

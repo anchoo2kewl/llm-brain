@@ -48,6 +48,16 @@ type Event struct {
 	Blocks      []Block
 	Raw         string
 	Quota       *Quota
+	// Usage is the token usage of the model response this line belongs to (Claude), read from the full line
+	// before Raw is capped.
+	Usage *Usage
+}
+
+// Usage is one model response's token counts. ID is the provider's message id; a response written over
+// several lines repeats it.
+type Usage struct {
+	ID, Model                            string
+	Input, Output, CacheRead, CacheWrite int64
 }
 
 // Time is the hub's one time format: UTC, fixed width, so text comparison is time comparison.

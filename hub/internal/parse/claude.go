@@ -23,9 +23,16 @@ type claudeLine struct {
 }
 
 type claudeMessage struct {
+	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
+	Usage   *struct {
+		Input      int64 `json:"input_tokens"`
+		Output     int64 `json:"output_tokens"`
+		CacheRead  int64 `json:"cache_read_input_tokens"`
+		CacheWrite int64 `json:"cache_creation_input_tokens"`
+	} `json:"usage"`
 }
 
 type claudeBlock struct {
@@ -70,6 +77,9 @@ func Claude(line []byte) (Event, error) {
 			break
 		}
 		ev.Model = m.Model
+		if u := m.Usage; u != nil && m.ID != "" && !strings.HasPrefix(m.Model, "<") {
+			ev.Usage = &Usage{ID: m.ID, Model: m.Model, Input: u.Input, Output: u.Output, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite}
+		}
 		role := m.Role
 		if role == "" {
 			role = l.Type

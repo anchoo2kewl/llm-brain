@@ -214,6 +214,9 @@ func (e *Engine) reset(ctx context.Context, tx *sql.Tx, c Chunk) error {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`, c.Host, c.Path); err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE sessions SET message_count = 0 WHERE host = ? AND path = ?`, c.Host, c.Path)
 		}
+		if err == nil {
+			err = store.ResetSessionInsights(ctx, tx, c.Host, c.Path)
+		}
 	case KindRunLog:
 		_, err = tx.ExecContext(ctx, `UPDATE runs SET log = '', log_bytes = 0 WHERE host = ? AND path = ?`, c.Host, c.Path)
 	case KindFleetLog:
@@ -323,6 +326,13 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 		}
 		if m.title == "" && ev.FirstPrompt != "" {
 			m.title = parse.TitleFrom(ev.FirstPrompt)
+		}
+		// Usage is taken from the parsed line, not from raw (which is capped and may not parse back).
+		if u := ev.Usage; u != nil && ts != "" {
+			if err := store.UpsertUsage(ctx, tx, store.Usage{SessionID: m.id, APIID: u.ID, TS: ts, Model: u.Model,
+				Input: u.Input, Output: u.Output, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite}); err != nil {
+				return err
+			}
 		}
 		for i, b := range ev.Blocks {
 			raw := ""
