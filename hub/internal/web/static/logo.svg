@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="llm-brain">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#g)"/>
+  <g stroke="#fff" stroke-width="3.2" stroke-linecap="round" opacity=".9">
+    <path d="M18 21 32 31 46 21M32 31v15M18 21l14 25 14-25M18 21h28" fill="none"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="18" cy="21" r="5.2"/>
+    <circle cx="46" cy="21" r="5.2"/>
+    <circle cx="32" cy="46" r="5.2"/>
+  </g>
+  <circle cx="32" cy="31" r="7" fill="#fff"/>
+  <circle cx="32" cy="31" r="3.2" fill="url(#g)"/>
+</svg>

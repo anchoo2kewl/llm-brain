@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/slack/token", s.tailnetOnly(s.slackToken))
 	mux.HandleFunc("GET /api/chat/messages", s.tailnetOnly(s.chatMessagesAPI))
 	mux.HandleFunc("GET /api/chat/me", s.tailnetOnly(s.chatMeAPI))
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/static/logo.svg", http.StatusMovedPermanently) })
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /api/ship/offsets", s.tailnetOnly(s.shipOffsets))
 	mux.HandleFunc("POST /api/ship/chunk", s.tailnetOnly(s.shipChunk))
