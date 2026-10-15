@@ -202,6 +202,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 		}
 		srv.Agents.Chats = &llm.Chats{S: st, C: &llm.Client{URL: *gwURL, KeyFile: *gwEnv}, Log: lg}
 	}
+	go srv.RunHarvest(ctx, time.Minute) // keep a copy of every document a session writes
 	var ex *agent.Executor
 	exDone := make(chan struct{})
 	if c.agent {

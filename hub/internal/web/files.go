@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -250,27 +251,78 @@ func (s *Server) storeAsset(ctx context.Context, host, path, name string, src io
 	return s.Store.AddAsset(ctx, store.Asset{Host: host, Path: path, Name: name, Size: n, SHA256: sum, Source: source})
 }
 
-// hostKeep copies a file from the host into the hub's assets without downloading it.
-func (s *Server) hostKeep(w http.ResponseWriter, r *http.Request) {
-	host := r.PathValue("host")
-	t, cid, finish, err := s.startXfer(r.Context(), host, agent.KindFileGet, agent.FileReq{Path: r.FormValue("path")}, "")
+// keepFromHost copies a file from the host into the hub's assets.
+func (s *Server) keepFromHost(ctx context.Context, host, path, source string) (int64, error) {
+	t, cid, finish, err := s.startXfer(ctx, host, agent.KindFileGet, agent.FileReq{Path: path}, "")
 	if err != nil {
-		jsonErr(w, http.StatusBadRequest, err)
-		return
+		return 0, err
 	}
 	defer finish()
-	h, err := s.await(r.Context(), t, cid, 60*time.Second)
+	h, err := s.await(ctx, t, cid, 60*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer close(h.done)
+	return s.keepAsset(ctx, host, h, nil, source)
+}
+
+// hostKeep copies a file from the host into the hub's assets without downloading it.
+func (s *Server) hostKeep(w http.ResponseWriter, r *http.Request) {
+	id, err := s.keepFromHost(r.Context(), r.PathValue("host"), r.FormValue("path"), "keep")
+	if back := r.FormValue("back"); strings.HasPrefix(back, "/") && !strings.HasPrefix(back, "//") { // a plain form on a page
+		s.back(w, r, back, err)
+		return
+	}
 	if err != nil {
 		jsonErr(w, http.StatusBadGateway, err)
 		return
 	}
-	defer close(h.done)
-	id, err := s.keepAsset(r.Context(), host, h, nil, "keep")
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err)
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "url": fmt.Sprintf("/files/%d", id)})
+}
+
+// keyHarvest is the settings key holding the last message id the harvester looked at.
+const keyHarvest = "assets_harvest_after"
+
+// RunHarvest keeps a copy of every document a session writes (a report, a CSV, a screenshot; not source
+// code, which lives in git), so it can still be downloaded after the Mac cleans up. A host that is offline
+// holds the queue until it is back.
+func (s *Server) RunHarvest(ctx context.Context, every time.Duration) {
+	for ctx.Err() == nil {
+		s.harvestOnce(ctx)
+		select {
+		case <-ctx.Done():
+		case <-time.After(every):
+		}
+	}
+}
+
+func (s *Server) harvestOnce(ctx context.Context) {
+	if s.Agents == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "url": fmt.Sprintf("/files/%d", id)})
+	v, _ := s.Store.Setting(ctx, keyHarvest)
+	after, _ := strconv.ParseInt(v, 10, 64)
+	docs, last, err := s.Store.WrittenDocs(ctx, after, 200)
+	if err != nil {
+		s.Log.Printf("files: harvest: %v", err)
+		return
+	}
+	done := last
+	for _, d := range docs {
+		if !s.Agents.Ctl.HostLive(ctx, d[0]) {
+			done = -1 // retry the batch next time (a copy kept twice is stored once)
+			break
+		}
+		if _, err := s.keepFromHost(ctx, d[0], d[1], "auto"); err != nil && ctx.Err() == nil {
+			s.Log.Printf("files: keep %s:%s: %v", d[0], d[1], err) // gone already, or a credential: skip it
+		}
+	}
+	if done < 0 || ctx.Err() != nil {
+		return
+	}
+	if done > after {
+		_ = s.Store.SetSettings(ctx, map[string]string{keyHarvest: strconv.FormatInt(done, 10)})
+	}
 }
 
 func (s *Server) assetsPage(w http.ResponseWriter, r *http.Request) {
