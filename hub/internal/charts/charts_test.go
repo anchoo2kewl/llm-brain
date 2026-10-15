@@ -106,6 +106,9 @@ func TestSparkDonutGaugeHeat(t *testing.T) {
 		t.Fatalf("a single 100%% slice is a full ring, got %v", c)
 	}
 	g := string(Gauge("g", "5h window", 95, "5% left", "resets 15:00"))
+	if !strings.Contains(g, `<p class="gauge-sub">resets 15:00</p>`) {
+		t.Error("gauge sub-label is HTML below the meter")
+	}
 	wellFormed(t, g)
 	if !strings.Contains(g, `class="g-bad"`) {
 		t.Error("95% used is bad")
@@ -135,18 +138,18 @@ func TestFoldKeepsOrderAndSumsOther(t *testing.T) {
 }
 
 func TestFormats(t *testing.T) {
-	for in, want := range map[float64]string{0: "0", 950: "950", 1200: "1.2K", 1000: "1K", 3_400_000: "3.4M", 2.5: "2.5"} {
+	for in, want := range map[float64]string{0: "0", 950: "950", 1200: "1.2K", 1000: "1K", 3_400_000: "3.4M", 2.5: "2.5", 7_500_000: "7.5M", 0.25: "0.25"} {
 		if got := Compact(in); got != want {
 			t.Errorf("Compact(%v) = %q, want %q", in, got, want)
 		}
 	}
-	if Dollars(0.4) != "$0.40" || Dollars(12.4) != "$12" || Dollars(1500) != "$1.5K" {
+	if Dollars(0) != "$0" || Dollars(0.4) != "$0.40" || Dollars(12.4) != "$12" || Dollars(1500) != "$1.5K" {
 		t.Error("Dollars")
 	}
 	if Millis(850) != "850ms" || Millis(2500) != "2.5s" {
 		t.Error("Millis")
 	}
-	if niceMax(7) != 10 || niceMax(180) != 200 || niceMax(0) != 1 || niceMax(23) != 25 {
+	if niceMax(7) != 8 || niceMax(180) != 200 || niceMax(0) != 1 || niceMax(23) != 24 || niceMax(21.9e6) != 24e6 || niceMax(100) != 100 {
 		t.Error("niceMax")
 	}
 }

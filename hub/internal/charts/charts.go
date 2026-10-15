@@ -66,8 +66,12 @@ func (o *Opts) defaults() {
 
 func esc(s string) string { return html.EscapeString(s) }
 
+// d1 prints one decimal, a trailing ".0" trimmed (4.1, 12).
+func d1(v float64) string { return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") }
+
+// f1 prints up to two decimals, trailing zeros trimmed (2.5, 0.25, 12).
 func f1(v float64) string {
-	return strings.TrimSuffix(strings.TrimRight(fmt.Sprintf("%.1f", v), "0"), ".")
+	return strings.TrimSuffix(strings.TrimRight(fmt.Sprintf("%.2f", v), "0"), ".")
 }
 
 func class(s Series, i int) string {
@@ -82,11 +86,11 @@ func Compact(v float64) string {
 	a := math.Abs(v)
 	switch {
 	case a >= 1e9:
-		return f1(v/1e9) + "B"
+		return d1(v/1e9) + "B"
 	case a >= 1e6:
-		return f1(v/1e6) + "M"
+		return d1(v/1e6) + "M"
 	case a >= 1e3:
-		return f1(v/1e3) + "K"
+		return d1(v/1e3) + "K"
 	case a == math.Trunc(a):
 		return fmt.Sprintf("%.0f", v)
 	}
@@ -100,6 +104,8 @@ func Dollars(v float64) string {
 		return "$" + Compact(v)
 	case v >= 10:
 		return fmt.Sprintf("$%.0f", v)
+	case v == 0:
+		return "$0"
 	}
 	return fmt.Sprintf("$%.2f", v)
 }
@@ -115,18 +121,19 @@ func Millis(v float64) string {
 	return fmt.Sprintf("%.0fms", v)
 }
 
-// niceMax rounds v up to 1, 2, 2.5 or 5 times a power of ten.
+// niceMax returns a round axis top above v whose quarter (the tick step) is also round.
 func niceMax(v float64) float64 {
 	if v <= 0 {
 		return 1
 	}
-	p := math.Pow(10, math.Floor(math.Log10(v)))
-	for _, m := range []float64{1, 2, 2.5, 5, 10} {
-		if v <= m*p {
-			return m * p
+	step := v / 4
+	p := math.Pow(10, math.Floor(math.Log10(step)))
+	for _, m := range []float64{1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10} {
+		if step <= m*p*(1+1e-9) {
+			return 4 * m * p
 		}
 	}
-	return 10 * p
+	return 40 * p
 }
 
 func head(b *strings.Builder, o Opts, h int, extra string) {
@@ -544,18 +551,18 @@ func Gauge(id, title string, used float64, center, sub string) template.HTML {
 	}
 	const r, cx, cy = 50.0, 60.0, 60.0
 	var b strings.Builder
-	fmt.Fprintf(&b, `<svg class="gauge" viewBox="0 0 120 76" role="img" aria-labelledby="%s-t"><title id="%s-t">%s</title>`, esc(id), esc(id), esc(title))
+	fmt.Fprintf(&b, `<svg class="gauge" viewBox="0 0 120 66" role="img" aria-labelledby="%s-t"><title id="%s-t">%s</title>`, esc(id), esc(id), esc(title))
 	fmt.Fprintf(&b, `<path class="track" d="M10 60A50 50 0 0 1 110 60" fill="none" stroke-width="10" stroke-linecap="round"/>`)
 	if used > 0 {
 		a := math.Pi * (1 - used/100) // from 180° (left) toward 0° (right)
 		fmt.Fprintf(&b, `<path class="g-%s" d="M10 60A50 50 0 0 1 %.2f %.2f" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>`,
 			cls, cx+r*math.Cos(a), cy-r*math.Sin(a))
 	}
-	fmt.Fprintf(&b, `<text class="big" x="60" y="56" text-anchor="middle">%s</text>`, esc(center))
-	if sub != "" {
-		fmt.Fprintf(&b, `<text class="tick" x="60" y="73" text-anchor="middle">%s</text>`, esc(sub))
-	}
+	fmt.Fprintf(&b, `<text class="gv" x="60" y="58" text-anchor="middle">%s</text>`, esc(center))
 	b.WriteString(`</svg>`)
+	if sub != "" {
+		fmt.Fprintf(&b, `<p class="gauge-sub">%s</p>`, esc(sub))
+	}
 	return template.HTML(b.String())
 }
 
