@@ -63,6 +63,26 @@ func TestTerminalEndToEnd(t *testing.T) {
 		t.Fatalf("terminal never became %s", want)
 	}
 	waitStatus("live")
+	// The driving API: type, press Enter, read the screen back.
+	{
+		resp, err := rig.cl.Post(rig.ts.URL+"/api/terminals/1/send", "application/json", strings.NewReader(`{"text":"echo api-$((6*7))","keys":["Enter"]}`))
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("send: %v %v", err, resp)
+		}
+		resp.Body.Close()
+		if resp, _ := rig.cl.Post(rig.ts.URL+"/api/terminals/1/send", "application/json", strings.NewReader(`{"keys":["Enter; rm -rf"]}`)); resp.StatusCode != http.StatusBadGateway {
+			t.Fatalf("a bad key name was sent: %d", resp.StatusCode)
+		}
+		var screen string
+		for i := 0; i < 50 && !strings.Contains(screen, "api-42"); i++ {
+			_, body, _ := rig.get(t, "/api/terminals/1/screen?format=text")
+			screen = body
+			time.Sleep(100 * time.Millisecond)
+		}
+		if !strings.Contains(screen, "api-42") {
+			t.Fatalf("screen: %q", screen)
+		}
+	}
 	// The workspace's list, rename and the JSON create.
 	{
 		resp, err := rig.cl.Get(rig.ts.URL + "/api/terminals")

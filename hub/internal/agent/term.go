@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,10 +37,80 @@ import (
 // person's own tmux.
 
 const (
-	KindTermOpen   = "term_open"
-	KindTermAttach = "term_attach"
-	KindTermKill   = "term_kill"
+	KindTermOpen    = "term_open"
+	KindTermAttach  = "term_attach"
+	KindTermKill    = "term_kill"
+	KindTermSend    = "term_send"    // type text and/or press keys (tmux send-keys)
+	KindTermCapture = "term_capture" // the screen (and some scrollback) as text
 )
+
+// TermSend is a term_send payload: Text is typed literally, then each of Keys is pressed (tmux key names:
+// Enter, Escape, Up, Down, Tab, BTab, C-c, …).
+type TermSend struct {
+	Text string   `json:"text,omitempty"`
+	Keys []string `json:"keys,omitempty"`
+}
+
+// TermCapture is a term_capture payload: how many lines of scrollback to include above the screen.
+type TermCapture struct {
+	Scrollback int `json:"scrollback,omitempty"`
+}
+
+var tmuxKeyRe = regexp.MustCompile(`^([CMS]-)*([A-Za-z0-9]|Enter|Escape|Up|Down|Left|Right|Tab|BTab|Space|BSpace|Home|End|PPage|NPage|DC|IC|F[0-9]{1,2})$`)
+
+// termSend types into a terminal, for the hub's API (an agent driving a session).
+func (e *Executor) termSend(ctx context.Context, c store.Command) {
+	var r TermSend
+	if err := json.Unmarshal(c.Payload, &r); err != nil {
+		e.report(ctx, c.ID, Report{Status: "failed", Error: "bad payload"})
+		return
+	}
+	for _, k := range r.Keys {
+		if !tmuxKeyRe.MatchString(k) {
+			e.report(ctx, c.ID, Report{Status: "failed", Error: fmt.Sprintf("unknown key %q", k)})
+			return
+		}
+	}
+	t, err := e.tmux()
+	if err != nil {
+		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
+		return
+	}
+	name := "=" + TmuxName(c.AgentID) + ":"
+	if r.Text != "" {
+		if _, err := t.run(ctx, "send-keys", "-t", name, "-l", "--", r.Text); err != nil {
+			e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
+			return
+		}
+	}
+	for _, k := range r.Keys {
+		if _, err := t.run(ctx, "send-keys", "-t", name, k); err != nil {
+			e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
+			return
+		}
+	}
+	e.report(ctx, c.ID, Report{Status: "done"})
+}
+
+// termCapture returns the terminal's screen as plain text.
+func (e *Executor) termCapture(ctx context.Context, c store.Command) {
+	var r TermCapture
+	_ = json.Unmarshal(c.Payload, &r)
+	if r.Scrollback < 0 || r.Scrollback > 5000 {
+		r.Scrollback = 0
+	}
+	t, err := e.tmux()
+	if err != nil {
+		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
+		return
+	}
+	out, err := t.run(ctx, "capture-pane", "-p", "-J", "-t", "="+TmuxName(c.AgentID)+":", "-S", strconv.Itoa(-r.Scrollback))
+	if err != nil {
+		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
+		return
+	}
+	e.report(ctx, c.ID, Report{Status: "done", Result: out})
+}
 
 // TermProviders are what a terminal can run.
 var TermProviders = []string{"claude", "codex", "gemini", "shell"}

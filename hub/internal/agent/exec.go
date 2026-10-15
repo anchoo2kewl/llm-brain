@@ -212,7 +212,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 			}(c)
 		case KindStop:
 			e.stop(ctx, c)
-		case KindTermOpen, KindTermAttach, KindTermKill, KindFileList, KindFileGet, KindFilePut:
+		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut:
 			e.mu.Lock()
 			e.busy[c.ID] = true
 			e.mu.Unlock()
@@ -226,6 +226,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 				}()
 				map[string]func(context.Context, store.Command){
 					KindTermOpen: e.termOpen, KindTermAttach: e.termAttach, KindTermKill: e.termKill,
+					KindTermSend: e.termSend, KindTermCapture: e.termCapture,
 					KindFileList: e.fileCmd, KindFileGet: e.fileCmd, KindFilePut: e.fileCmd,
 				}[c.Kind](ctx, c)
 			}(c)
