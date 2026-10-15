@@ -68,3 +68,4 @@ body.embed .ed{height:100dvh}
 #edkeyslist{columns:2;column-gap:28px;margin-top:10px}.kr{display:flex;gap:10px;padding:3px 0;font-size:12.5px;break-inside:avoid}
 @media (max-width:760px){body:not(.embed) .ed{grid-template-columns:1fr;grid-template-rows:34vh 0 1fr;height:auto}body:not(.embed) .ed-main{height:70dvh}#edkeyslist{columns:1}}
 body.embed .ed{--side:clamp(150px,28%,240px)}
+.ed-pal .lbl{text-transform:none;letter-spacing:normal;font-size:13px;color:var(--fg);font-weight:500}
