@@ -322,7 +322,17 @@ cmd_labels() {
 }
 
 case "${1:-}" in
-  tick) log "tick"; "$BRAIN_DIR/bin/chat-watch" 2>>"$BRAIN_STATE/logs/fleet.log" || true; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
+  tick)
+    # One tick at a time on this machine: a slow tick (a long chat digest) must not overlap the next one,
+    # or both dispatch the same issue. A lock whose owner is gone is taken over.
+    lock="$BRAIN_STATE/tick.lock"
+    if ! mkdir "$lock" 2>/dev/null; then
+      if kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then log "tick: previous tick still running — skipping"; exit 0; fi
+      rm -rf "$lock"; mkdir "$lock" || exit 0
+    fi
+    echo $$ >"$lock/pid"
+    trap 'rm -rf "$lock"' EXIT
+    log "tick"; "$BRAIN_DIR/bin/chat-watch" 2>>"$BRAIN_STATE/logs/fleet.log" || true; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
   snapshot) cmd_snapshot ;;
   review-prs) cmd_review_prs ;;
   review-pr) shift; ONLY_PR="$1" cmd_review_prs ;;
