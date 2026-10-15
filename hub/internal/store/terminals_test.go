@@ -98,7 +98,7 @@ func TestRecentFoldersLiteralPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, cwd := range []string{"/Users/a_b/app", "/Users/axb/other", "/Users/a_b"} {
+	for _, cwd := range []string{"/Users/a_b/app", "/Users/axb/other", "/Users/a_b", "/Users/rené/x"} {
 		if _, err := s.CreateTerminal(ctx, Terminal{Host: "h", Provider: "shell", Cwd: cwd}, Command{Host: "h", Kind: "term_open"}); err != nil {
 			t.Fatal(err)
 		}
@@ -109,5 +109,8 @@ func TestRecentFoldersLiteralPrefix(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "/Users/a_b/app" {
 		t.Fatalf("recent: %v", got)
+	}
+	if got, _ := s.RecentFolders(ctx, "h", "/Users/rené", 10); len(got) != 1 || got[0] != "/Users/rené/x" {
+		t.Fatalf("unicode home: %v", got)
 	}
 }
