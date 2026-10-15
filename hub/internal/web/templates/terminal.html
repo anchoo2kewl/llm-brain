@@ -1,0 +1,21 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css">
+<div class="top termtop"><div><p class="eyebrow">Terminal · {{.With}} · {{.T.Host}}</p><h1 class="title">{{.T.Title}}</h1></div>
+<div class="meta"><span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+{{if .T.Error}}<pre class="err small">{{.T.Error}}</pre>{{end}}
+<div class="row actions termbar">
+<span class="mut small">{{home .T.Cwd}}</span><span class="grow"></span>
+<form class="inline" method="post" action="/terminals/{{.T.ID}}/review"><input type="hidden" name="with" value="codex"><button class="small" type="submit" {{if not .T.Open}}disabled{{end}}>Review with Codex</button></form>
+<form class="inline" method="post" action="/terminals/{{.T.ID}}/review"><input type="hidden" name="with" value="claude"><button class="small" type="submit" {{if not .T.Open}}disabled{{end}}>Review with Claude</button></form>
+<form class="inline" method="post" action="/terminals/{{.T.ID}}/kill" data-confirm="End this terminal? The CLI and anything it runs will stop."><button class="small danger" type="submit" {{if not .T.Open}}disabled{{end}}>End</button></form>
+</div>
+<div id="term" class="term" data-term="{{.T.ID}}" data-status="{{.T.Status}}"></div>
+<div class="termmsg mut small" id="termmsg"></div>
+<div class="keys" id="termkeys" aria-label="Keys">
+<button type="button" data-key="esc">Esc</button><button type="button" data-key="tab">Tab</button><button type="button" data-key="stab">⇧Tab</button>
+<button type="button" data-key="up">↑</button><button type="button" data-key="down">↓</button><button type="button" data-key="ctrlc">Ctrl-C</button><button type="button" data-key="enter">Enter</button>
+<form id="termline" class="line"><input id="termin" placeholder="Type a line and send (handy on a phone)" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="submit">Send</button></form>
+</div>
+<p class="mut small">From a shell on {{.T.Host}}: <code class="copy">{{.Attach}}</code> · detach with Ctrl-b d</p>
+<script src="/static/xterm/xterm.js" defer></script><script src="/static/xterm/addon-fit.js" defer></script><script src="/static/xterm/addon-web-links.js" defer></script><script src="/static/term.js" defer></script>
+{{end}}

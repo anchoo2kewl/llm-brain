@@ -206,6 +206,10 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	exDone := make(chan struct{})
 	if c.agent {
 		ex = c.executor(lh, 2*time.Second, lg)
+		ex.HubURL = fmt.Sprintf("http://127.0.0.1:%d", *port) // terminals dial back here
+		if *listen != "" {
+			ex.HubURL = "http://" + net.JoinHostPort(strings.TrimSpace(strings.Split(*listen, ",")[0]), strconv.Itoa(*port))
+		}
 		go func() {
 			defer close(exDone)
 			ex.Run(ctx)
@@ -319,6 +323,7 @@ func ship(ctx context.Context, lg *log.Logger, args []string) error {
 	var wg sync.WaitGroup
 	if c.agent {
 		ex := c.executor(agent.NewHTTPHub(*to), *poll, lg)
+		ex.HubURL = strings.TrimRight(*to, "/")
 		col.Extra = ex.RunningKeys
 		wg.Add(1)
 		go func() {

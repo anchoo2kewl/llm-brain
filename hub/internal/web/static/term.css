@@ -1,0 +1,21 @@
+/* terminals (terminals.go, term.js) */
+.term{height:calc(100vh - 330px);min-height:320px;border:1px solid var(--line);border-radius:10px;padding:6px;background:#fff;overflow:hidden}
+@media (prefers-color-scheme:dark){.term{background:#0d1117}}
+.term .xterm{height:100%}
+.termmsg{min-height:1.2em;margin:4px 2px}
+.termbar{margin:6px 0 8px}
+.keys{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}
+.keys button{padding:4px 10px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.keys .line{display:flex;gap:6px;flex:1;min-width:220px;margin:0}
+.keys .line input{flex:1;font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}
+.termform .clis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;border:0;padding:0;margin:12px 0}
+.termform .clis legend{font-weight:600;margin-bottom:6px}
+.termform .cli{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card);cursor:pointer}
+.termform .cli:has(input:checked){border-color:var(--acc);outline:1px solid var(--acc)}
+.termform .cli span{display:flex;flex-direction:column;gap:3px}
+.termform .cli code{font-size:11px;color:var(--mut);overflow-wrap:anywhere}
+.startpick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;margin:12px 0 4px}
+.startpick a{display:block;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--card);color:var(--fg);text-decoration:none}
+.startpick a.on{border-color:var(--acc);outline:1px solid var(--acc)}
+.startpick a b{display:block;margin-bottom:3px}
+@media (max-width:640px){.term{height:60vh}}

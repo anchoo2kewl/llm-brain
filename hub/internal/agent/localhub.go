@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/parse"
@@ -78,6 +79,11 @@ func (h *LocalHub) Report(ctx context.Context, id int64, r Report) error {
 	r.Result = parse.Truncate(r.Result, 256<<10)
 	r.Error = parse.Truncate(r.Error, 8<<10)
 	body, _ := json.Marshal(r)
+	if c, err := h.S.Command(ctx, id); err != nil {
+		return err
+	} else if strings.HasPrefix(c.Kind, "term_") {
+		return h.termReport(ctx, c, r, string(body))
+	}
 	u := store.AgentUpdate{ProviderSession: r.SessionID, Cwd: r.Cwd}
 	zero, empty := 0, ""
 	switch r.Status {
@@ -128,5 +134,40 @@ func (h *LocalHub) Inventory(ctx context.Context, inv Inventory) error {
 			provs = append(provs, p)
 		}
 	}
-	return h.S.SetAgentInventory(ctx, inv.Host, inv.Version, inv.Roots, inv.Folders, provs)
+	if err := h.S.SetAgentInventory(ctx, inv.Host, inv.Version, inv.Roots, inv.Folders, provs); err != nil {
+		return err
+	}
+	if inv.Tmux {
+		if n, err := h.S.EndMissingTerminals(ctx, inv.Host, inv.Terminals); err != nil {
+			return err
+		} else if n > 0 {
+			h.logf("agent: %d terminal(s) on %s ended", n, inv.Host)
+		}
+	}
+	return nil
+}
+
+// termReport finishes a terminal command and moves its terminal: an open that worked makes it live, one
+// that failed fails it; a kill ends it. Attach reports only finish the command (the page watches it).
+func (h *LocalHub) termReport(ctx context.Context, c store.Command, r Report, body string) error {
+	if store.FinalStatus(c.Status) {
+		return nil
+	}
+	if err := h.S.FinishCommand(ctx, c.ID, r.Status, body); err != nil {
+		return err
+	}
+	if !r.Final() {
+		return nil
+	}
+	switch {
+	case c.Kind == KindTermOpen && r.Status == "done":
+		return h.S.SetTerminal(ctx, c.AgentID, "live", r.Cwd, "")
+	case c.Kind == KindTermOpen:
+		return h.S.SetTerminal(ctx, c.AgentID, "failed", "", r.Error)
+	case c.Kind == KindTermKill && r.Status == "done":
+		return h.S.SetTerminal(ctx, c.AgentID, "ended", "", "")
+	case c.Kind == KindTermAttach && r.Error == "the terminal has ended":
+		return h.S.SetTerminal(ctx, c.AgentID, "ended", "", "")
+	}
+	return nil
 }

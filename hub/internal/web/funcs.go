@@ -238,7 +238,7 @@ func statusClass(s string) string {
 		return "ok"
 	case "failed", "failing", "error":
 		return "bad"
-	case "exited":
+	case "exited", "ended":
 		return "mut"
 	}
 	return "warn"
