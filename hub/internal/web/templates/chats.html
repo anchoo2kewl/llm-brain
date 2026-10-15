@@ -1,9 +1,10 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">
-<div class="top"><div><h1>Chats</h1><p class="mut">Terminals (the CLI itself, live), agent sessions (one task at a time in a folder) and plain chats with any model the gateway serves.</p></div>
-<div class="meta"><a class="btn primary" href="/chats/new">+ New chat</a> <a class="btn primary" href="/terminals/new">+ Terminal</a> · <a href="/agents">agents &amp; hosts</a> · <a href="/prompts">prompt library</a></div></div>
-<form class="filters" method="get" action="/chats"><input type="search" name="q" value="{{.Q}}" placeholder="Search chats…" aria-label="Search chats"><button type="submit">Search</button></form>
-{{if .Rows}}<div class="wrap"><table><tr><th>Chat</th><th>With</th><th>Host</th><th>Status</th><th>Last activity</th></tr>
-{{range .Rows}}<tr><td><a href="{{.Link}}">{{trunc 100 .Title}}</a>{{if .Review}} <span class="pill">review</span>{{end}}{{if eq .Kind "plain"}} <span class="pill">plain</span>{{end}}{{if eq .Kind "terminal"}} <span class="pill">terminal</span>{{end}}</td>
-<td class="small">{{.With}}</td><td class="mut small">{{.Host}}</td><td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td><td class="mut small">{{ago .Updated}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">{{if .Q}}No chats match.{{else}}No chats yet. <a href="/chats/new">Start one.</a>{{end}}</div>{{end}}
+<div class="top"><div><h1>Chats</h1><p class="mut">Everything you started from the hub. Every Claude/Codex conversation on your Macs is in <a href="/sessions">Sessions</a>.</p></div>
+<div class="meta"><a href="/prompts">prompt library</a> · <a href="/agents">hosts</a></div></div>
+<nav class="chips" aria-label="Kind">{{$k := .Kind}}{{range .Kinds}}<a href="/chats?kind={{.Value}}{{if $.Q}}&q={{$.Q}}{{end}}" {{if eq .Value $k}}class="on"{{end}}>{{.Label}}{{if .N}} <span class="mut">{{.N}}</span>{{end}}</a>{{end}}</nav>
+<form class="filters" method="get" action="/chats"><input type="hidden" name="kind" value="{{.Kind}}"><input type="search" name="q" value="{{.Q}}" placeholder="Search chats…" aria-label="Search chats"><button type="submit">Search</button></form>
+{{if .Rows}}<div class="wrap"><table><tr><th>Chat</th><th>Kind</th><th>With</th><th>Host</th><th>Status</th><th>Last activity</th></tr>
+{{range .Rows}}<tr><td><a href="{{.Link}}">{{trunc 100 .Title}}</a>{{if .Review}} <span class="pill">review</span>{{end}}</td>
+<td class="small">{{kindLabel .Kind}}</td><td class="small">{{.With}}</td><td class="mut small">{{.Host}}</td><td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td><td class="mut small">{{ago .Updated}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">{{if .Q}}No chats match.{{else}}Nothing here yet. <a href="/new">Start something.</a>{{end}}</div>{{end}}
 {{end}}

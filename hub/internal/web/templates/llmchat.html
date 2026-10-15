@@ -1,5 +1,5 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">
-<div class="top"><div><p class="eyebrow">Plain chat · through the account gateway</p><h1 class="title">{{.C.Title}}</h1></div><div class="meta"><a href="/chats">all chats</a> · <a class="btn primary" href="/chats/new">+ New chat</a></div></div>
+<div class="top"><div><p class="eyebrow">Model chat</p><h1 class="title">{{.C.Title}}</h1></div><div class="meta"><a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 <div class="transcript convo" id="llmconvo">
 {{range .Msgs}}{{if eq .Role "user"}}<div class="msg user" id="l{{.ID}}"><div class="who">you</div><div class="txt">{{.Content}}</div></div>

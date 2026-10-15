@@ -47,6 +47,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	p("POST /api/agent/inventory", s.apiInventory)
 	// chats
 	g("GET /chats", s.chatsList)
+	g("GET /new", s.newPage)
 	g("GET /chats/new", s.newChat)
 	p("POST /chats/new", s.newChatPost)
 	g("GET /agents", s.agentsPage)
@@ -201,6 +202,7 @@ func agentRow(a store.AgentSession) chatRow {
 func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	kind := r.URL.Query().Get("kind")
 	as, err := s.Store.SearchAgentSessions(ctx, q, 200)
 	if err != nil {
 		s.fail(w, err)
@@ -226,15 +228,38 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, c := range cs {
-			rows = append(rows, chatRow{Kind: "plain", Link: idPath(c.ID, "/llms/%d"), Title: c.Title, With: c.Model, Host: "gateway",
+			rows = append(rows, chatRow{Kind: "plain", Link: idPath(c.ID, "/llms/%d"), Title: c.Title, With: llm.Label(c.Model), Host: "gateway",
 				Status: "chat", Updated: c.UpdatedAt})
 		}
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Updated > rows[j].Updated })
+	type kindOpt struct {
+		Value, Label string
+		N            int
+	}
+	kinds := []kindOpt{{"", "All", len(rows)}, {"terminal", "Terminals", 0}, {"agent", "Tasks", 0}, {"plain", "Model chats", 0}}
+	var shown []chatRow
+	for _, row := range rows {
+		for i := range kinds[1:] {
+			if kinds[i+1].Value == row.Kind {
+				kinds[i+1].N++
+			}
+		}
+		if kind == "" || row.Kind == kind {
+			shown = append(shown, row)
+		}
+	}
+	sort.SliceStable(shown, func(i, j int) bool { return shown[i].Updated > shown[j].Updated })
 	s.render(w, "chats", "layout", struct {
 		page
-		Rows []chatRow
-	}{page{Title: "Chats", Nav: "chats", Q: q}, rows})
+		Rows  []chatRow
+		Kind  string
+		Kinds []kindOpt
+	}{page{Title: "Chats", Nav: "chats", Q: q}, shown, kind, kinds})
+}
+
+// newPage is "+ New": pick a terminal, a task or a model chat.
+func (s *Server) newPage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "new", "layout", struct{ page }{page{Title: "New", Nav: "chats"}})
 }
 
 // plainChats finds plain chats for the list: by title and model, and by message text through the search
@@ -280,12 +305,13 @@ type pickGroup struct {
 
 type newChatForm struct {
 	With, Host, Folder, Model, Perm, Prompt, Vars, WtBase, WtSlug string
+	Kind                                                          string // agent (a task) | model (a model chat)
 	Bypass                                                        bool
 }
 
 func (s *Server) newChat(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := newChatForm{Host: q.Get("host"), Folder: q.Get("folder"), Prompt: q.Get("prompt")}
+	f := newChatForm{Host: q.Get("host"), Folder: q.Get("folder"), Prompt: q.Get("prompt"), Kind: q.Get("kind")}
 	if id, err := strconv.ParseInt(q.Get("saved"), 10, 64); err == nil {
 		if p, err := s.Store.SavedPrompt(r.Context(), id); err == nil {
 			f.Prompt = p.Body
@@ -311,7 +337,7 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 			gwErr = err.Error()
 		}
 		for _, g := range llm.Grouped(ms) {
-			pg := pickGroup{Label: "Plain chat · " + g.Vendor}
+			pg := pickGroup{Label: g.Vendor}
 			for _, m := range g.Models {
 				pg.Opts = append(pg.Opts, pickOpt{"plain:" + m.ID, llm.Label(m.ID)})
 			}
@@ -329,7 +355,7 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 			}
 		}
 	}
-	ag := pickGroup{Label: "Agent · tools in a folder"}
+	ag := pickGroup{Label: "Agents"}
 	for _, p := range agent.Providers {
 		if have[p] {
 			ag.Opts = append(ag.Opts, pickOpt{"agent:" + p, agent.ProviderName(p)})
@@ -341,6 +367,19 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 	if f.With == "" {
 		f.With, _ = s.Store.Setting(ctx, store.KeyChatLast)
 	}
+	if f.Kind != "agent" && f.Kind != "model" { // from the last choice, else a task
+		f.Kind = "agent"
+		if strings.HasPrefix(f.With, "plain:") {
+			f.Kind = "model"
+		}
+	}
+	var kept []pickGroup
+	for _, g := range groups {
+		if len(g.Opts) > 0 && strings.HasPrefix(g.Opts[0].Value, "plain:") == (f.Kind == "model") {
+			kept = append(kept, g)
+		}
+	}
+	groups = kept
 	found := false
 	for _, g := range groups {
 		for _, o := range g.Opts {
@@ -362,14 +401,14 @@ func (s *Server) newChatPage(w http.ResponseWriter, r *http.Request, f newChatFo
 		Err     string
 		Hosts   []store.AgentHost
 		Prompts []store.SavedPrompt
-	}{page{Title: "New chat", Nav: "chats"}, f, groups, gwErr, errMsg, hosts, prompts})
+	}{page{Title: map[bool]string{true: "New model chat", false: "New task"}[f.Kind == "model"], Nav: "chats"}, f, groups, gwErr, errMsg, hosts, prompts})
 }
 
 func (s *Server) newChatPost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := newChatForm{With: r.PostFormValue("with"), Host: r.PostFormValue("host"), Folder: r.PostFormValue("folder"),
 		Model: strings.TrimSpace(r.PostFormValue("model")), Perm: r.PostFormValue("perm"), Prompt: r.PostFormValue("prompt"),
-		Vars: r.PostFormValue("vars"), WtBase: strings.TrimSpace(r.PostFormValue("wt_base")), WtSlug: strings.TrimSpace(r.PostFormValue("wt_slug")),
+		Kind: r.PostFormValue("kind"), Vars: r.PostFormValue("vars"), WtBase: strings.TrimSpace(r.PostFormValue("wt_base")), WtSlug: strings.TrimSpace(r.PostFormValue("wt_slug")),
 		Bypass: r.PostFormValue("bypass") == "1"}
 	kind, val, _ := strings.Cut(f.With, ":")
 	fail := func(err error) {

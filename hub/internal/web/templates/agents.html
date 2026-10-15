@@ -1,5 +1,5 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">
-<div class="top"><div><h1>Agents</h1><p class="mut">Sessions the hub started or continued, and the machines that can run them.</p></div><div class="meta"><a class="btn primary" href="/chats/new">+ New chat</a> · <a href="/chats">chats</a></div></div>
+<div class="top"><div><h1>Agents</h1><p class="mut">Sessions the hub started or continued, and the machines that can run them.</p></div><div class="meta"><a href="/chats">chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 <h2>Hosts</h2>
 {{if .Hosts}}<div class="wrap"><table><tr><th>Host</th><th>Agent</th><th>CLIs</th><th>Roots</th><th>Folders</th></tr>

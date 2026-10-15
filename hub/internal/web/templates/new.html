@@ -1,0 +1,8 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+<div class="top"><div><h1>Start something</h1><p class="mut">Everything you start shows up in <a href="/chats">Chats</a>.</p></div></div>
+<div class="choose">
+<a href="/terminals/new"><b>Terminal</b><span>Claude Code, Codex or a shell, live on the command line in any folder on your Macs. Full permissions; it keeps running until you end it.</span><em>Best for real work</em></a>
+<a href="/chats/new?kind=agent"><b>Task</b><span>Give Claude, Codex or Gemini one job at a time in a folder. Each answer is saved; ask the other model to review it.</span><em>Good from a phone</em></a>
+<a href="/chats/new?kind=model"><b>Model chat</b><span>Ask any model the gateway serves: Claude, GPT, and more. No tools, no folder.</span><em>Quick questions</em></a>
+</div>
+{{end}}

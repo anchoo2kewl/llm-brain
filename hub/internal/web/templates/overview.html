@@ -12,7 +12,7 @@
 </section>
 {{with topCallouts .Callouts 3}}<section class="callouts" aria-label="Findings"><ul>{{range .}}<li class="co co-{{.Level}}"><span class="co-i" aria-hidden="true">{{calloutIcon .Level}}</span><span>{{.Text}}</span> <a class="small" href="/insights?range=24h{{.Href}}">see chart</a></li>{{end}}</ul>
 <p class="small"><a href="/insights">All insights →</a></p></section>{{end}}{{end}}
-{{if .ChatOn}}<p class="chat-count small"><a href="/chat">From chat: {{.Chat.Total}} messages in 24h{{if .Chat.Mentions}} · {{.Chat.Mentions}} mention you{{end}} →</a></p>{{end}}
+{{if .ChatOn}}<p class="chat-count small"><a href="/slack">From Slack: {{.Chat.Total}} messages in 24h{{if .Chat.Mentions}} · {{.Chat.Mentions}} mention you{{end}} →</a></p>{{end}}
 
 {{with .Status}}
 <h2 id="pipeline">Issue pipeline <span class="mut small">· {{len .Owned}}/{{.MaxInFlight}} slots in use</span></h2>
