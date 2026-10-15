@@ -47,7 +47,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-slot-body .termpane-x{height:100%}
 .ws-slot-msg:empty{display:none}.ws-slot-msg{font-size:12px;color:var(--mut);padding:2px 8px}
 .ws-slot-empty{position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:6px;padding:20px;text-align:center}
-.ws-slot{position:relative}.ws-slot-empty[hidden]{display:none}.ws-slot-empty p{flex-basis:100%;margin:0 0 4px}
+.ws-slot{position:relative}.ws-slot[hidden]{display:none}.ws-slot-empty[hidden]{display:none}.ws-slot-empty p{flex-basis:100%;margin:0 0 4px}
 .ws-park{position:fixed;left:-10000px;top:0;width:900px;height:600px;visibility:hidden}
 .ws-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
 .ws-empty[hidden]{display:none}
