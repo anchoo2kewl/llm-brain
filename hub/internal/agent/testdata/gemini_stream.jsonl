@@ -1,0 +1,7 @@
+{"type":"init","timestamp":"2026-10-14T20:00:00.000Z","session_id":"c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10","model":"gemini-2.5-pro"}
+{"type":"message","timestamp":"2026-10-14T20:00:00.100Z","role":"user","content":"review this"}
+{"type":"tool_use","timestamp":"2026-10-14T20:00:01.000Z","tool_name":"run_shell_command","tool_id":"t1","parameters":{"command":"git diff main...HEAD"}}
+{"type":"tool_result","timestamp":"2026-10-14T20:00:02.000Z","tool_id":"t1","status":"success","output":"diff --git a/x b/x"}
+{"type":"message","timestamp":"2026-10-14T20:00:03.000Z","role":"assistant","content":"## Verdict: ","delta":true}
+{"type":"message","timestamp":"2026-10-14T20:00:03.100Z","role":"assistant","content":"CLEAN","delta":true}
+{"type":"result","timestamp":"2026-10-14T20:00:04.000Z","status":"success","stats":{"total_tokens":100}}

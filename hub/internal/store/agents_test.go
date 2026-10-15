@@ -87,11 +87,11 @@ func TestPromptsAndHosts(t *testing.T) {
 	if ps, _ := st.SavedPrompts(ctx); len(ps) != 0 {
 		t.Fatal(ps)
 	}
-	if err := st.SetAgentInventory(ctx, "laptop", "v1", []string{"/w"}, []AgentFolder{{Path: "/w/app", Branch: "main"}}); err != nil {
+	if err := st.SetAgentInventory(ctx, "laptop", "v1", []string{"/w"}, []AgentFolder{{Path: "/w/app", Branch: "main"}}, []string{"claude"}); err != nil {
 		t.Fatal(err)
 	}
 	h, err := st.AgentHost(ctx, "laptop")
-	if err != nil || !h.Live() || len(h.Folders) != 1 || h.Roots[0] != "/w" {
+	if err != nil || !h.Live() || len(h.Folders) != 1 || len(h.Providers) != 1 || h.Roots[0] != "/w" {
 		t.Fatalf("%+v %v", h, err)
 	}
 }

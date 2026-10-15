@@ -26,6 +26,7 @@ type AgentSession struct {
 	PID             int
 	ReviewOf        int64
 	Adopted         bool
+	Scratch         bool
 	Turns           int
 	LastResult      string
 	Error           string
@@ -62,11 +63,12 @@ type AgentFolder struct {
 }
 
 type AgentHost struct {
-	Host     string
-	Version  string
-	Roots    []string
-	Folders  []AgentFolder
-	LastPoll string
+	Host      string
+	Version   string
+	Roots     []string
+	Folders   []AgentFolder
+	Providers []string
+	LastPoll  string
 }
 
 // AgentLiveWindow: a host agent that polled this recently is live.
@@ -91,15 +93,15 @@ func insertID(ctx context.Context, tx *sql.Tx, q string, args ...any) (int64, er
 
 // ---------------------------------------------------------------- agent sessions
 
-const agentCols = `id, host, cwd, provider, model, perm, bypass_ok, title, provider_session, status, pid, review_of, adopted,
+const agentCols = `id, host, cwd, provider, model, perm, bypass_ok, title, provider_session, status, pid, review_of, adopted, scratch,
 	turns, last_result, error, created_at, updated_at`
 
 func scanAgent(sc interface{ Scan(...any) error }) (AgentSession, error) {
 	var a AgentSession
-	var bypass, adopted int
+	var bypass, adopted, scratch int
 	err := sc.Scan(&a.ID, &a.Host, &a.Cwd, &a.Provider, &a.Model, &a.Perm, &bypass, &a.Title, &a.ProviderSession, &a.Status,
-		&a.PID, &a.ReviewOf, &adopted, &a.Turns, &a.LastResult, &a.Error, &a.CreatedAt, &a.UpdatedAt)
-	a.BypassOK, a.Adopted = bypass != 0, adopted != 0
+		&a.PID, &a.ReviewOf, &adopted, &scratch, &a.Turns, &a.LastResult, &a.Error, &a.CreatedAt, &a.UpdatedAt)
+	a.BypassOK, a.Adopted, a.Scratch = bypass != 0, adopted != 0, scratch != 0
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -119,9 +121,9 @@ func (s *Store) CreateAgentSession(ctx context.Context, a AgentSession, first *C
 		a.Status = "idle"
 	}
 	id, err := insertID(ctx, tx, `INSERT INTO agent_sessions (host, cwd, provider, model, perm, bypass_ok, title, provider_session,
-		status, review_of, adopted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		status, review_of, adopted, scratch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.Host, a.Cwd, a.Provider, a.Model, a.Perm, b2i(a.BypassOK), a.Title, a.ProviderSession, a.Status, a.ReviewOf,
-		b2i(a.Adopted), now, now)
+		b2i(a.Adopted), b2i(a.Scratch), now, now)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -153,6 +155,16 @@ func (s *Store) AgentSessions(ctx context.Context, limit int) ([]AgentSession, e
 		limit = 300
 	}
 	return s.agentList(ctx, `SELECT `+agentCols+` FROM agent_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
+}
+
+// SearchAgentSessions lists agent sessions whose title, folder, host or provider contains q.
+func (s *Store) SearchAgentSessions(ctx context.Context, q string, limit int) ([]AgentSession, error) {
+	if strings.TrimSpace(q) == "" {
+		return s.AgentSessions(ctx, limit)
+	}
+	like := "%" + strings.NewReplacer("%", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(q))) + "%"
+	return s.agentList(ctx, `SELECT `+agentCols+` FROM agent_sessions WHERE lower(title) LIKE ? OR lower(cwd) LIKE ?
+		OR lower(host) LIKE ? OR provider LIKE ? OR last_result LIKE ? ORDER BY updated_at DESC LIMIT ?`, like, like, like, like, like, limit)
 }
 
 // Reviews lists the review sessions of an agent session, newest first.
@@ -446,23 +458,27 @@ func (s *Store) TouchAgentHost(ctx context.Context, host, version string) error 
 }
 
 // SetAgentInventory records a host's roots and folders.
-func (s *Store) SetAgentInventory(ctx context.Context, host, version string, roots []string, folders []AgentFolder) error {
+func (s *Store) SetAgentInventory(ctx context.Context, host, version string, roots []string, folders []AgentFolder, providers []string) error {
 	r, _ := json.Marshal(roots)
 	f, _ := json.Marshal(folders)
+	p, _ := json.Marshal(providers)
+	if providers == nil {
+		p = []byte("[]")
+	}
 	if roots == nil {
 		r = []byte("[]")
 	}
 	if folders == nil {
 		f = []byte("[]")
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_hosts (host, version, roots, folders, last_poll) VALUES (?, ?, ?, ?, ?)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_hosts (host, version, roots, folders, providers, last_poll) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (host) DO UPDATE SET version = excluded.version, roots = excluded.roots, folders = excluded.folders,
-		last_poll = excluded.last_poll`, host, version, string(r), string(f), Now())
+		providers = excluded.providers, last_poll = excluded.last_poll`, host, version, string(r), string(f), string(p), Now())
 	return err
 }
 
 func (s *Store) AgentHosts(ctx context.Context) ([]AgentHost, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT host, version, roots, folders, last_poll FROM agent_hosts ORDER BY host`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT host, version, roots, folders, providers, last_poll FROM agent_hosts ORDER BY host`)
 	if err != nil {
 		return nil, err
 	}
@@ -470,12 +486,13 @@ func (s *Store) AgentHosts(ctx context.Context) ([]AgentHost, error) {
 	var out []AgentHost
 	for rows.Next() {
 		var h AgentHost
-		var roots, folders string
-		if err := rows.Scan(&h.Host, &h.Version, &roots, &folders, &h.LastPoll); err != nil {
+		var roots, folders, provs string
+		if err := rows.Scan(&h.Host, &h.Version, &roots, &folders, &provs, &h.LastPoll); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(roots), &h.Roots)
 		_ = json.Unmarshal([]byte(folders), &h.Folders)
+		_ = json.Unmarshal([]byte(provs), &h.Providers)
 		out = append(out, h)
 	}
 	return out, rows.Err()

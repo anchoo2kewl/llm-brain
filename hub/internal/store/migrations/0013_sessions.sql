@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   pid              INTEGER NOT NULL DEFAULT 0,
   review_of        INTEGER NOT NULL DEFAULT 0, -- the agent session this one reviews
   adopted          INTEGER NOT NULL DEFAULT 0, -- started outside the hub, continued from it
+  scratch          INTEGER NOT NULL DEFAULT 0, -- a chat in its own scratch folder under the host's state dir
   turns            INTEGER NOT NULL DEFAULT 0,
   last_result      TEXT NOT NULL DEFAULT '',  -- the last turn's final answer (a review's findings)
   error            TEXT NOT NULL DEFAULT '',
@@ -60,5 +61,6 @@ CREATE TABLE IF NOT EXISTS agent_hosts (
   version   TEXT NOT NULL DEFAULT '',
   roots     TEXT NOT NULL DEFAULT '[]',
   folders   TEXT NOT NULL DEFAULT '[]',
+  providers TEXT NOT NULL DEFAULT '[]', -- agent CLIs installed there: claude, codex, gemini
   last_poll TEXT NOT NULL DEFAULT ''
 );
