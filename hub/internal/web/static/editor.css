@@ -25,4 +25,5 @@ body.embed .ed{height:100dvh}
 .ed-banner[hidden]{display:none}.ed-banner button{padding:2px 8px;font-size:12px}
 .ed-editor{flex:1;min-height:0}
 .ed-status{display:flex;gap:14px;padding:3px 12px;font-size:11.5px;color:var(--mut);border-top:1px solid var(--line);background:var(--card)}.ed-status .grow{flex:1}
-@media (max-width:760px){.ed{grid-template-columns:1fr;grid-template-rows:38vh 1fr;height:auto}.ed-main{height:70dvh}}
+body.embed .ed{grid-template-columns:clamp(150px,28%,240px) minmax(0,1fr)}
+@media (max-width:760px){body:not(.embed) .ed{grid-template-columns:1fr;grid-template-rows:38vh 1fr;height:auto}body:not(.embed) .ed-main{height:70dvh}}
