@@ -1,0 +1,9 @@
+/* files and browse (files.go, files.js) */
+.browsebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 8px}
+.browsebar input{flex:1 1 280px;font-family:ui-monospace,Menlo,monospace}
+.btn.upl{cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:5px 10px;background:var(--card);color:var(--acc)}
+.crumbs{margin:2px 0 8px;display:flex;flex-wrap:wrap;gap:2px}.crumbs a{padding:1px 4px}
+#blist td{padding:7px 10px}#blist .act{white-space:nowrap;text-align:right}
+#blist button{padding:2px 8px;font-size:12px}
+.dropzone{outline:2px dashed var(--acc);outline-offset:4px}
+.dropmsg{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--acc);border-radius:10px;padding:8px 14px;z-index:20;box-shadow:0 6px 20px rgba(0,0,0,.3)}
