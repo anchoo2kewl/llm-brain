@@ -20,26 +20,26 @@
 <h2 id="llm">LLM usage <span class="mut small">· from Claude transcripts, every host</span> <a class="small" href="/api/insights/llm?range={{.Range.Key}}">data</a></h2>
 <div class="cgrid">
 <figure class="card"><figcaption><b>Tokens by model</b><span class="mut small">{{fmti .LLM.Totals.Total}} total</span></figcaption>
-{{area "tok-model" "Tokens by model" .Labels .LLM.TokensByModel "count" true}}{{legend .LLM.TokensByModel "count"}}</figure>
+{{area "tok-model" "Tokens by model" .Axis .LLM.TokensByModel "count" true}}{{legend .LLM.TokensByModel "count"}}</figure>
 <figure class="card"><figcaption><b>Input and output</b><span class="mut small">{{printf "%.0f" .LLM.CacheShare}}% of input from cache</span></figcaption>
-{{area "tok-kind" "Tokens by kind" .Labels .LLM.TokenKinds "count" true}}{{legend .LLM.TokenKinds "count"}}</figure>
+{{area "tok-kind" "Tokens by kind" .Axis .LLM.TokenKinds "count" true}}{{legend .LLM.TokenKinds "count"}}</figure>
 </div>
 
 <h2 id="gateway">Gateway <span class="mut small">· every request the account gateway routed</span></h2>
 {{if .LLM.GwRequests}}<div class="cgrid">
 <figure class="card"><figcaption><b>Requests by account</b><span class="mut small">{{.LLM.GwRequests}} requests</span></figcaption>
-{{bars "gw-acct" "Gateway requests by account" .Labels .LLM.GwRequestsByAcct "count"}}{{legend .LLM.GwRequestsByAcct "count"}}</figure>
+{{bars "gw-acct" "Gateway requests by account" .Axis .LLM.GwRequestsByAcct "count"}}{{legend .LLM.GwRequestsByAcct "count"}}</figure>
 <figure class="card"><figcaption><b>Tokens by model</b></figcaption>
-{{area "gw-model" "Gateway tokens by model" .Labels .LLM.GwTokensByModel "count" true}}{{legend .LLM.GwTokensByModel "count"}}</figure>
+{{area "gw-model" "Gateway tokens by model" .Axis .LLM.GwTokensByModel "count" true}}{{legend .LLM.GwTokensByModel "count"}}</figure>
 <figure class="card" id="share"><figcaption><b>Personal vs work</b><span class="mut small">work served {{printf "%.0f" .LLM.WorkTokenPct}}% of tokens</span></figcaption>
 <div class="donut-row">{{donut "share-donut" "Gateway tokens by account class" (shareSlices .LLM.Share) (printf "%.0f%%" .LLM.WorkTokenPct) "count"}}
 <div>{{sliceLegend (shareSlices .LLM.Share) "count"}}<p class="mut small">Centre: work share. {{if .LLM.WorkRequests}}{{.LLM.WorkWhileCapped}} of {{.LLM.WorkRequests}} work requests came while a personal window was at its cap.{{else}}No work-account requests in this range.{{end}}</p></div></div>
-{{if .LLM.WorkRequests}}<p class="small"><b>When work was used</b> <span class="mut">(local hour)</span></p>{{bars "work-hours" "Work-account requests by hour of day" hourLabels (workHours .LLM.WorkHours) "count"}}{{end}}
+{{if .LLM.WorkRequests}}<p class="small"><b>When work was used</b> <span class="mut">(local hour)</span></p>{{bars "work-hours" "Work-account requests by hour of day" hourAxis (workHours .LLM.WorkHours) "count"}}{{end}}
 </figure>
 <figure class="card" id="latency"><figcaption><b>Latency p95 by model</b><span class="mut small">successful requests</span></figcaption>
 {{hbars "lat" "Latency p95 by model" (latencyBars .LLM.Latency) "ms"}}
 <p class="small" id="errors"><b>Errors</b> <span class="mut">{{.LLM.GwFailed}} failed ({{pctOf .LLM.GwFailed .LLM.GwRequests}}){{if .LLM.GwRateLimited}}, {{.LLM.GwRateLimited}} rate-limited (429){{end}}{{range $code, $n := .LLM.GwErrorsByCode}} · HTTP {{$code}}: {{$n}}{{end}}</span></p>
-{{if .LLM.GwFailed}}{{bars "gw-err" "Gateway requests, OK and failed" .Labels .LLM.GwErrorSeries "count"}}{{legend .LLM.GwErrorSeries "count"}}{{end}}
+{{if .LLM.GwFailed}}{{bars "gw-err" "Gateway requests, OK and failed" .Axis .LLM.GwErrorSeries "count"}}{{legend .LLM.GwErrorSeries "count"}}{{end}}
 </figure>
 </div>{{else}}<div class="empty">No gateway requests in this range.</div>{{end}}
 
@@ -50,7 +50,7 @@
 {{gauge .}}
 <p class="small {{if .RunsOutAt.IsZero}}mut{{else}}warn{{end}}">{{.Verdict}}</p>
 <p class="mut small">{{if .BurnPerHour}}{{printf "%.1f" .BurnPerHour}}%/h{{if eq .BurnFrom "average"}} (average since the window opened){{end}} · {{end}}{{.Account}}</p>
-{{if .HasHistory}}{{linechart (printf "qh-%s" .ID) (printf "%s %s used over time" .Provider .Window) $.R.Labels (slice1 .History) "percent" 100}}{{end}}
+{{if .HasHistory}}{{linechart (printf "qh-%s" .ID) (printf "%s %s used over time" .Provider .Window) $.R.Axis (slice1 .History) "percent" 100}}{{end}}
 </article>{{end}}</div>
 {{else}}<div class="empty">No quota reported yet: windows appear after an account serves a request through the gateway.</div>{{end}}
 
@@ -59,7 +59,7 @@
 <figure class="card"><figcaption><b>Value from your subscriptions</b><span class="mut small">{{.Range.Label}}</span></figcaption>
 <p class="hero">{{fmt "dollars" .Cost.Total}}</p>
 <p class="mut small">What the transcript tokens would have cost on the pay-as-you-go API{{if .Cost.Prev}}; previous {{.Range.Label}}: {{fmt "dollars" .Cost.Prev}}{{end}}. Gateway-routed requests (Claude and Codex): {{fmt "dollars" .Cost.Gateway}}.</p>
-{{area "cost-model" "Estimated dollars by model" .Labels .Cost.Series "dollars" true}}{{legend .Cost.Series "dollars"}}</figure>
+{{area "cost-model" "Estimated dollars by model" .Axis .Cost.Series "dollars" true}}{{legend .Cost.Series "dollars"}}</figure>
 <figure class="card"><figcaption><b>By model</b></figcaption>
 <div class="wrap"><table class="small"><tr><th>Model</th><th>Input</th><th>Cache write</th><th>Cache read</th><th>Output</th><th>Estimate</th></tr>
 {{range .Cost.Models}}<tr><td>{{.Model}}</td><td>{{fmti .Tokens.Input}}</td><td>{{fmti .Tokens.CacheWrite}}</td><td>{{fmti .Tokens.CacheRead}}</td><td>{{fmti .Tokens.Output}}</td><td>{{if .Priced}}{{fmt "dollars" .Dollars}}{{else}}<span class="mut">no price</span>{{end}}</td></tr>{{else}}<tr><td colspan="6" class="mut">No usage in this range.</td></tr>{{end}}
@@ -82,13 +82,13 @@
 </div>
 <div class="cgrid">
 <figure class="card"><figcaption><b>Activity by host</b><span class="mut small">message blocks</span></figcaption>
-{{area "blocks-host" "Message blocks by host" .Labels .Sessions.BlocksByHost "count" true}}{{legend .Sessions.BlocksByHost "count"}}</figure>
+{{area "blocks-host" "Message blocks by host" .Axis .Sessions.BlocksByHost "count" true}}{{legend .Sessions.BlocksByHost "count"}}</figure>
 <figure class="card"><figcaption><b>Sessions started</b><span class="mut small">by host and provider</span></figcaption>
-{{bars "started-host" "Sessions started by host and provider" .Labels .Sessions.StartedByHost "count"}}{{legend .Sessions.StartedByHost "count"}}</figure>
+{{bars "started-host" "Sessions started by host and provider" .Axis .Sessions.StartedByHost "count"}}{{legend .Sessions.StartedByHost "count"}}</figure>
 <figure class="card" id="heat"><figcaption><b>When you work</b><span class="mut small">prompts by weekday and hour{{if .Sessions.HeatPeak}} · peak {{.Sessions.HeatPeak}}{{end}}</span></figcaption>
 {{heat .Sessions.Heat}}</figure>
 <figure class="card"><figcaption><b>Prompts by provider</b></figcaption>
-{{bars "prompts-prov" "Prompts by provider" .Labels .Sessions.PromptsByProvider "count"}}{{legend .Sessions.PromptsByProvider "count"}}</figure>
+{{bars "prompts-prov" "Prompts by provider" .Axis .Sessions.PromptsByProvider "count"}}{{legend .Sessions.PromptsByProvider "count"}}</figure>
 <figure class="card"><figcaption><b>Top projects</b><span class="mut small">message blocks</span></figcaption>
 {{hbars "projects" "Top projects" (homeBars .Sessions.Projects) "count"}}</figure>
 <figure class="card" id="tools"><figcaption><b>Tools</b><span class="mut small">calls, with error rate</span></figcaption>
@@ -106,10 +106,10 @@
 {{if .Fleet.MedianCycleMin}}<div><b>{{minutes .Fleet.MedianCycleMin}}</b><span>median first-run-to-last-run per issue/PR</span></div>{{end}}
 </div>
 <div class="cgrid">
-<figure class="card"><figcaption><b>Runs by kind</b></figcaption>{{bars "runs-kind" "Fleet runs by kind" .Labels .Fleet.ByKind "count"}}{{legend .Fleet.ByKind "count"}}</figure>
-<figure class="card"><figcaption><b>Runs by outcome</b></figcaption>{{bars "runs-outcome" "Fleet runs by outcome" .Labels .Fleet.ByOutcome "count"}}{{legend .Fleet.ByOutcome "count"}}</figure>
+<figure class="card"><figcaption><b>Runs by kind</b></figcaption>{{bars "runs-kind" "Fleet runs by kind" .Axis .Fleet.ByKind "count"}}{{legend .Fleet.ByKind "count"}}</figure>
+<figure class="card"><figcaption><b>Runs by outcome</b></figcaption>{{bars "runs-outcome" "Fleet runs by outcome" .Axis .Fleet.ByOutcome "count"}}{{legend .Fleet.ByOutcome "count"}}</figure>
 <figure class="card" id="reviews"><figcaption><b>Review verdicts</b><span class="mut small">{{.Fleet.Approve}} approve · {{.Fleet.Comment}} comment · {{.Fleet.Red}} red · {{.Fleet.Optional}} optional</span></figcaption>
-{{bars "verdicts" "Review verdicts" .Labels .Fleet.Verdicts "count"}}{{legend .Fleet.Verdicts "count"}}
+{{bars "verdicts" "Review verdicts" .Axis .Fleet.Verdicts "count"}}{{legend .Fleet.Verdicts "count"}}
 {{if .Fleet.Blockers}}<p class="small"><b>Blockers cited</b></p>{{hbars "blockers" "Blocker categories" .Fleet.Blockers "count"}}{{end}}</figure>
 <figure class="card"><figcaption><b>Busiest repos</b></figcaption>{{hbars "repos" "Runs by repository" .Fleet.Repos "count"}}</figure>
 </div>
@@ -121,8 +121,8 @@
 
 <h2 id="chat">Chat <a class="small" href="/api/insights/chat?range={{.Range.Key}}">data</a></h2>
 {{if .Chat.Enabled}}<div class="cgrid">
-<figure class="card"><figcaption><b>Messages by conversation</b><span class="mut small">{{.Chat.Total}} messages</span></figcaption>{{bars "chat-conv" "Chat messages by conversation" .Labels .Chat.ByConv "count"}}{{legend .Chat.ByConv "count"}}</figure>
-<figure class="card"><figcaption><b>To you</b><span class="mut small">{{.Chat.Mentions}} mentions · {{.Chat.DMs}} DMs</span></figcaption>{{bars "chat-me" "Mentions and DMs to you" .Labels .Chat.ToMe "count"}}{{legend .Chat.ToMe "count"}}</figure>
+<figure class="card"><figcaption><b>Messages by conversation</b><span class="mut small">{{.Chat.Total}} messages</span></figcaption>{{bars "chat-conv" "Chat messages by conversation" .Axis .Chat.ByConv "count"}}{{legend .Chat.ByConv "count"}}</figure>
+<figure class="card"><figcaption><b>To you</b><span class="mut small">{{.Chat.Mentions}} mentions · {{.Chat.DMs}} DMs</span></figcaption>{{bars "chat-me" "Mentions and DMs to you" .Axis .Chat.ToMe "count"}}{{legend .Chat.ToMe "count"}}</figure>
 <figure class="card"><figcaption><b>Who writes most</b></figcaption>{{hbars "chat-people" "Messages by person" .Chat.People "count"}}</figure>
 <figure class="card"><figcaption><b>Busiest threads</b></figcaption>
 {{if .Chat.Threads}}<ol class="threads">{{range .Chat.Threads}}<li><a href="/chat?src={{.ConvID}}">{{.Conv}}</a> <span class="mut small">{{.Replies}} messages · {{.People}} people · last {{ago .Last}}</span></li>{{end}}</ol>{{else}}<p class="mut small">No threads in this range.</p>{{end}}</figure>

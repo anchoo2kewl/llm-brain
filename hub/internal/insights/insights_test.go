@@ -280,33 +280,134 @@ func TestForSession(t *testing.T) {
 	}
 }
 
-func TestBuckets(t *testing.T) {
+func TestBucketsBoundedAreExactWindows(t *testing.T) {
 	loc := time.FixedZone("X", -4*3600)
 	n := time.Date(2026, 3, 11, 13, 20, 0, 0, loc) // Wednesday
-	b := NewBuckets(ParseRange("7d"), n, time.Time{}, loc)
-	if b.Step != 6*time.Hour || b.N != 28 || !b.End.Equal(time.Date(2026, 3, 11, 18, 0, 0, 0, loc)) {
-		t.Fatalf("7d: %+v", b)
+	for _, c := range []struct {
+		key  string
+		n    int
+		step time.Duration
+	}{{"24h", 24, time.Hour}, {"7d", 28, 6 * time.Hour}, {"30d", 30, 24 * time.Hour}} {
+		r := ParseRange(c.key)
+		b := NewBuckets(r, n, time.Time{}, loc)
+		if b.N != c.n || b.Step != c.step {
+			t.Fatalf("%s: %d buckets of %v, want %d of %v", c.key, b.N, b.Step, c.n, c.step)
+		}
+		// The window is exactly the range, ending now, and the buckets tile it exactly.
+		if d := b.To.Sub(b.From); d != r.Dur || b.To.Sub(n) > time.Millisecond || n.Before(b.From) {
+			t.Fatalf("%s: window %v..%v (%v)", c.key, b.From, b.To, d)
+		}
+		if !b.BucketStart(b.N).Equal(b.To) {
+			t.Fatalf("%s: buckets end at %v, window at %v", c.key, b.BucketStart(b.N), b.To)
+		}
+		if b.Index(n) != b.N-1 || b.Index(b.From) != 0 || b.Index(b.From.Add(-time.Millisecond)) != -1 || b.Index(b.To) != -1 {
+			t.Fatalf("%s: index edges", c.key)
+		}
+		p := b.Prev()
+		if !p.To.Equal(b.From) || p.To.Sub(p.From) != r.Dur {
+			t.Fatalf("%s: previous window %v..%v", c.key, p.From, p.To)
+		}
+		ax := b.Axis()
+		if len(ax.Labels) != b.N || len(ax.Tips) != b.N {
+			t.Fatalf("%s: axis", c.key)
+		}
 	}
-	if i := b.Index(n); i != b.N-1 {
-		t.Fatalf("now is in the last bucket, got %d", i)
+}
+
+func TestBucketsAllTimeAlignsTheEarliestBucket(t *testing.T) {
+	loc := time.UTC
+	n := time.Date(2026, 3, 11, 13, 20, 0, 0, loc) // Wednesday
+	// Earliest datum on a Sunday a year back: its week (from the Monday before) must be the first bucket.
+	first := time.Date(2025, 3, 9, 23, 0, 0, 0, loc) // Sunday
+	a := NewBuckets(ParseRange("all"), n, first, loc)
+	if a.Days != 7 || !a.From.Equal(time.Date(2025, 3, 3, 0, 0, 0, 0, loc)) {
+		t.Fatalf("weekly from the Monday of the earliest week, got %v", a.From)
 	}
-	if b.Index(b.Start.Add(-time.Second)) != -1 || b.Index(b.End) != -1 {
-		t.Fatal("outside is -1")
+	if a.Index(first) != 0 || a.Index(n) != a.N-1 || !a.BucketStart(a.N-1).Equal(time.Date(2026, 3, 9, 0, 0, 0, 0, loc)) {
+		t.Fatalf("earliest in bucket 0 (%d), now in the last (%d of %d)", a.Index(first), a.Index(n), a.N)
 	}
-	p := b.Prev()
-	if !p.End.Equal(b.Start) || p.Start.After(b.Start.Add(-7*24*time.Hour)) {
-		t.Fatalf("prev %v..%v", p.Start, p.End)
+	// A short history is hourly from the earliest hour, not a 7-day default.
+	h := NewBuckets(ParseRange("all"), n, n.Add(-150*time.Minute), loc)
+	if h.Step != time.Hour || h.N != 4 || !h.From.Equal(time.Date(2026, 3, 11, 10, 0, 0, 0, loc)) {
+		t.Fatalf("hourly all-time: %+v", h)
 	}
-	d := NewBuckets(ParseRange("30d"), n, time.Time{}, loc)
-	if d.Days != 1 || d.Index(n) != d.N-1 || d.Labels()[d.N-1] != "Mar 11" {
-		t.Fatalf("30d: %+v %v", d, d.Labels()[d.N-1])
-	}
-	a := NewBuckets(ParseRange("all"), n, n.AddDate(-1, 0, 0), loc)
-	if a.Days != 7 || a.Start.Weekday() != time.Monday {
-		t.Fatalf("all over a year is weekly from a Monday: %+v", a)
+	// Daily: the earliest day is bucket 0.
+	d := NewBuckets(ParseRange("all"), n, time.Date(2026, 2, 1, 22, 0, 0, 0, loc), loc)
+	if d.Days != 1 || d.N != 39 || d.Index(time.Date(2026, 2, 1, 22, 0, 0, 0, loc)) != 0 {
+		t.Fatalf("daily all-time: %+v", d)
 	}
 	if ParseRange("bogus").Key != "7d" {
 		t.Fatal("default range")
+	}
+}
+
+func TestReportTotalsUseExactWindows(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	run := `INSERT INTO runs (host, path, key, kind, started_at, status) VALUES ('h', ?, 'issue-1', 'issue', ?, 'succeeded')`
+	// Inside the 24h window by a minute, outside by a minute, and inside the previous window.
+	exec(t, st, run, "/a", ts(24*time.Hour-time.Minute))
+	exec(t, st, run, "/b", ts(24*time.Hour+time.Minute))
+	exec(t, st, run, "/c", ts(47*time.Hour))
+	exec(t, st, run, "/d", ts(49*time.Hour))
+	r, err := Build(context.Background(), st, ParseRange("24h"), now, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Fleet.Runs != 1 || r.Fleet.PrevRuns != 2 {
+		t.Fatalf("24h counts runs in [now-24h, now) = 1 and [now-48h, now-24h) = 2; got %d and %d", r.Fleet.Runs, r.Fleet.PrevRuns)
+	}
+}
+
+func TestAllTimeStartsAtTheEarliestSource(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	// No sessions at all: a fleet run 20 days ago and a chat message 40 days ago.
+	exec(t, st, `INSERT INTO runs (host, path, key, kind, started_at, status) VALUES ('h', '/a', 'issue-1', 'issue', ?, 'succeeded')`, ts(20*24*time.Hour))
+	exec(t, st, `INSERT INTO chat_messages (source, conv_id, conv_name, conv_kind, ts, text, at) VALUES ('slack', 'C1', 'eng', 'channel', '1.1', 'x', ?)`,
+		ts(40*24*time.Hour))
+	if e := Earliest(context.Background(), st.DB); !e.Equal(now.Add(-40 * 24 * time.Hour).Truncate(time.Millisecond)) {
+		t.Fatalf("earliest %v", e)
+	}
+	r, err := Build(context.Background(), st, ParseRange("all"), now, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.buckets.Days != 1 || r.From.After(now.Add(-40*24*time.Hour)) || r.Fleet.Runs != 1 || r.Chat.Total != 1 {
+		t.Fatalf("all time covers 40 days of daily buckets from the chat message: from %v, runs %d, chat %d", r.From, r.Fleet.Runs, r.Chat.Total)
+	}
+}
+
+func TestCapSpansCloseAtReset(t *testing.T) {
+	at := func(h int) time.Time { return now.Add(time.Duration(h) * time.Hour) }
+	reset := at(2).Unix()
+	// Capped at 0h with a reset at 2h; the next observation (uncapped) only comes at 5h.
+	sp := capSpans([]capPoint{{at(0), 100, reset}, {at(1), 100, reset}, {at(5), 10, at(10).Unix()}})
+	if len(sp) != 1 || !sp[0].from.Equal(at(0)) || !sp[0].to.Equal(at(2)) {
+		t.Fatalf("closes at the reset, not at the next observation: %+v", sp)
+	}
+	// Uncapped before the reset closes it there.
+	sp = capSpans([]capPoint{{at(0), 97, reset}, {at(1), 30, reset}})
+	if len(sp) != 1 || !sp[0].to.Equal(at(1)) {
+		t.Fatalf("%+v", sp)
+	}
+	// Still capped at the last observation: open until the reset; with no reset known, open-ended.
+	if sp = capSpans([]capPoint{{at(0), 100, reset}}); !sp[0].to.Equal(at(2)) {
+		t.Fatalf("%+v", sp)
+	}
+	if sp = capSpans([]capPoint{{at(0), 100, 0}}); !sp[0].to.IsZero() {
+		t.Fatalf("%+v", sp)
+	}
+	// Capped again in the next window: a second interval.
+	sp = capSpans([]capPoint{{at(0), 100, reset}, {at(3), 100, at(8).Unix()}, {at(4), 50, at(8).Unix()}})
+	if len(sp) != 2 || !sp[0].to.Equal(at(2)) || !sp[1].from.Equal(at(3)) || !sp[1].to.Equal(at(4)) {
+		t.Fatalf("%+v", sp)
 	}
 }
 

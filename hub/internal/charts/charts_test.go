@@ -47,6 +47,13 @@ func TestAreaStacked(t *testing.T) {
 	}
 }
 
+func TestTipsOverrideTooltipHeading(t *testing.T) {
+	out := string(Bars(Opts{ID: "t", XLabels: []string{"Mon"}, Tips: []string{"Mon Jan 5 00:00 – 06:00"}}, []Series{{Name: "a", Values: []float64{1}}}))
+	if !strings.Contains(out, "<title>Mon Jan 5 00:00 – 06:00\na: 1</title>") || !strings.Contains(out, ">Mon</text>") {
+		t.Fatalf("tooltip uses Tips, axis uses XLabels:\n%s", out)
+	}
+}
+
 func TestAreaLinesAndEmpty(t *testing.T) {
 	out := string(Area(Opts{ID: "l", Lines: true, Max: 100, Format: Percent}, []Series{{Name: "a", Values: []float64{10, 90}}}))
 	c := wellFormed(t, out)
