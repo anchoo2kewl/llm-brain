@@ -32,7 +32,8 @@
     ws.onopen = function () {
       call("hello").then(function (r) {
         tries = 0;
-        $("edroot").textContent = r.root || folder;
+        $("edroot").textContent = folder; // as asked (~/…); the full path is in the tooltip
+        $("edroot").title = r.root || folder;
         say("connected · " + host);
         loadDir("", tree, 0);
         watch();
