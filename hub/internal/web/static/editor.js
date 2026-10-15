@@ -642,6 +642,8 @@
     g.addAction({ id: "sublime.wrap", label: "Toggle Word Wrap", keybindings: [A | KC.KeyZ], run: toggleOpt("wordWrap", "wrap") });
   }
 
+  window.__hubEditor = function () { return { allFiles: allFiles && allFiles.length, asking: !!asking, shown: shown.length, files: Object.keys(files), current: current }; }; // for debugging
+
   // ------------------------------------------------------------ Monaco
   window.MonacoEnvironment = { getWorkerUrl: function () { return "/static/monaco/vs/base/worker/workerMain.js"; } };
   window.require.config({ paths: { vs: "/static/monaco/vs" } });
