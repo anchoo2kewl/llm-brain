@@ -139,7 +139,7 @@ func (s *Store) LLMMessage(ctx context.Context, id int64) (LLMMessage, error) {
 
 // AddLLMTurn stores the person's message and an empty streaming reply from model, and makes model the
 // chat's current one. It returns the reply's id; ErrBusy when a reply is still streaming.
-func (s *Store) AddLLMTurn(ctx context.Context, chatID int64, model, text string) (int64, error) {
+func (s *Store) AddLLMTurn(ctx context.Context, chatID int64, model, text string, attach ...int64) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -153,9 +153,15 @@ func (s *Store) AddLLMTurn(ctx context.Context, chatID int64, model, text string
 		return 0, ErrBusy
 	}
 	now := Now()
-	if _, err := insertID(ctx, tx, `INSERT INTO llm_messages (chat_id, role, model, content, status, created_at, updated_at)
-		VALUES (?, 'user', '', ?, 'done', ?, ?)`, chatID, text, now, now); err != nil {
+	uid, err := insertID(ctx, tx, `INSERT INTO llm_messages (chat_id, role, model, content, status, created_at, updated_at)
+		VALUES (?, 'user', '', ?, 'done', ?, ?)`, chatID, text, now, now)
+	if err != nil {
 		return 0, err
+	}
+	for _, a := range attach {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO llm_attachments (message_id, asset_id) VALUES (?, ?) ON CONFLICT DO NOTHING`, uid, a); err != nil {
+			return 0, err
+		}
 	}
 	id, err := insertID(ctx, tx, `INSERT INTO llm_messages (chat_id, role, model, content, status, created_at, updated_at)
 		VALUES (?, 'assistant', ?, '', 'streaming', ?, ?)`, chatID, model, now, now)
@@ -228,4 +234,25 @@ func (s *Store) LLMMessagesByID(ctx context.Context, ids []int64) ([]LLMIndexMes
 	}
 	q, args := inList(`SELECT `+llmIdxCols+` FROM llm_messages m JOIN llm_chats c ON c.id = m.chat_id WHERE m.id IN `, ids)
 	return s.llmIdx(ctx, q, args...)
+}
+
+// LLMAttachments: the files attached to a chat's messages, by message id.
+func (s *Store) LLMAttachments(ctx context.Context, chatID int64) (map[int64][]Asset, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT l.message_id, a.id, a.host, a.path, a.name, a.size, a.sha256, a.source, a.created_at
+		FROM llm_attachments l JOIN assets a ON a.id = l.asset_id JOIN llm_messages m ON m.id = l.message_id
+		WHERE m.chat_id = ? ORDER BY l.message_id, a.id`, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]Asset{}
+	for rows.Next() {
+		var mid int64
+		var a Asset
+		if err := rows.Scan(&mid, &a.ID, &a.Host, &a.Path, &a.Name, &a.Size, &a.SHA256, &a.Source, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[mid] = append(out[mid], a)
+	}
+	return out, rows.Err()
 }

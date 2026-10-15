@@ -1,11 +1,17 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
+	"mime"
+	"os"
+	"path/filepath"
 	"strings"
+	"unicode/utf8"
 	"sync"
 	"time"
 
@@ -19,6 +25,8 @@ type Chats struct {
 	C       *Client
 	Log     *log.Logger
 	Timeout time.Duration // per reply; default 10 minutes
+
+	AssetDir string // where hub assets live (<state>/assets): attached files are read from here
 
 	mu   sync.Mutex
 	live map[int64]*reply
@@ -39,11 +47,14 @@ var modelOK = func(m string) bool {
 }
 
 // Start makes a chat and sends its first message.
-func (c *Chats) Start(ctx context.Context, model, text string) (int64, int64, error) {
-	if err := check(model, text); err != nil {
+func (c *Chats) Start(ctx context.Context, model, text string, attach ...int64) (int64, int64, error) {
+	if err := check(model, text, len(attach)); err != nil {
 		return 0, 0, err
 	}
 	t := strings.TrimSpace(text)
+	if t == "" {
+		t = "Attached files"
+	}
 	if i := strings.IndexByte(t, '\n'); i >= 0 {
 		t = t[:i]
 	}
@@ -54,15 +65,18 @@ func (c *Chats) Start(ctx context.Context, model, text string) (int64, int64, er
 	if err != nil {
 		return 0, 0, err
 	}
-	rid, err := c.Send(ctx, id, model, text)
+	rid, err := c.Send(ctx, id, model, text, attach...)
 	return id, rid, err
 }
 
-func check(model, text string) error {
+func check(model, text string, files int) error {
 	if !modelOK(model) {
 		return InputError("pick a model")
 	}
-	if strings.TrimSpace(text) == "" {
+	if files > 20 {
+		return InputError("attach at most 20 files")
+	}
+	if strings.TrimSpace(text) == "" && files == 0 {
 		return InputError("write a message")
 	}
 	if len(text) > maxMessage {
@@ -77,14 +91,19 @@ type InputError string
 func (e InputError) Error() string { return string(e) }
 
 // Send adds the person's message and starts the reply from model (which may differ from the last one).
-func (c *Chats) Send(ctx context.Context, chatID int64, model, text string) (int64, error) {
-	if err := check(model, text); err != nil {
+func (c *Chats) Send(ctx context.Context, chatID int64, model, text string, attach ...int64) (int64, error) {
+	if err := check(model, text, len(attach)); err != nil {
 		return 0, err
 	}
 	if _, err := c.S.LLMChat(ctx, chatID); err != nil {
 		return 0, err
 	}
-	rid, err := c.S.AddLLMTurn(ctx, chatID, model, text)
+	for _, a := range attach { // only the hub's own files, by id
+		if _, err := c.S.Asset(ctx, a); err != nil {
+			return 0, InputError("an attached file is gone; attach it again")
+		}
+	}
+	rid, err := c.S.AddLLMTurn(ctx, chatID, model, text, attach...)
 	if errors.Is(err, store.ErrBusy) {
 		return 0, InputError("the last reply is still coming")
 	}
@@ -152,9 +171,14 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 		finish("", "error", err.Error())
 		return
 	}
+	atts, _ := c.S.LLMAttachments(ctx, chatID)
 	var hist []Message
 	for _, m := range ms {
 		if m.ID == rid || (m.Role == "assistant" && (m.Status != "done" || m.Content == "")) {
+			continue
+		}
+		if m.Role == "user" && len(atts[m.ID]) > 0 {
+			hist = append(hist, Message{Role: m.Role, Content: c.parts(m.Content, atts[m.ID])})
 			continue
 		}
 		hist = append(hist, Message{Role: m.Role, Content: m.Content})
@@ -186,4 +210,37 @@ func (c *Chats) generate(chatID, rid int64, model string, r *reply) {
 		return
 	}
 	finish(text, "done", "")
+}
+
+// Attachment limits: images go to the model as data URLs, text files inline.
+const (
+	maxImage    = 8 << 20
+	maxTextFile = 256 << 10
+)
+
+// parts turns a message with attachments into content parts: the text, each image, each text file.
+func (c *Chats) parts(text string, atts []store.Asset) []Part {
+	var out []Part
+	if strings.TrimSpace(text) != "" {
+		out = append(out, Part{Type: "text", Text: text})
+	}
+	for _, a := range atts {
+		ctype := mime.TypeByExtension(strings.ToLower(filepath.Ext(a.Name)))
+		mt, _, _ := mime.ParseMediaType(ctype)
+		b, err := os.ReadFile(filepath.Join(c.AssetDir, a.SHA256))
+		switch {
+		case err != nil:
+			out = append(out, Part{Type: "text", Text: fmt.Sprintf("[attached file %s is no longer on the hub]", a.Name)})
+		case (mt == "image/png" || mt == "image/jpeg" || mt == "image/gif" || mt == "image/webp") && len(b) <= maxImage:
+			out = append(out, Part{Type: "image_url", ImageURL: &ImageURL{URL: "data:" + mt + ";base64," + base64.StdEncoding.EncodeToString(b)}})
+		case len(b) <= maxTextFile && utf8.Valid(b) && !bytes.ContainsRune(b, 0):
+			out = append(out, Part{Type: "text", Text: fmt.Sprintf("Attached file %s:\n```\n%s\n```", a.Name, b)})
+		default:
+			out = append(out, Part{Type: "text", Text: fmt.Sprintf("[attached file %s (%s, %d bytes) can't be read in a plain chat; open it in a terminal to work on it]", a.Name, mt, len(b))})
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, Part{Type: "text", Text: "(no text)"})
+	}
+	return out
 }

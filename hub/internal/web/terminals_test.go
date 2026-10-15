@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -62,6 +63,35 @@ func TestTerminalEndToEnd(t *testing.T) {
 		t.Fatalf("terminal never became %s", want)
 	}
 	waitStatus("live")
+	// The workspace's list, rename and the JSON create.
+	{
+		resp, err := rig.cl.Get(rig.ts.URL + "/api/terminals")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ts []map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&ts)
+		resp.Body.Close()
+		if len(ts) != 1 || ts[0]["status"] != "live" || ts[0]["cli"] != "Shell" {
+			t.Fatalf("api/terminals: %v", ts)
+		}
+		if resp, _ := rig.cl.PostForm(rig.ts.URL+"/terminals/1/rename", url.Values{"title": {"build box"}}); resp == nil || resp.StatusCode != 200 {
+			t.Fatal("rename failed")
+		}
+		if tm, _ := rig.st.Terminal(ctx, 1); tm.Title != "build box" {
+			t.Fatalf("title %q", tm.Title)
+		}
+		resp, _ = rig.cl.PostForm(rig.ts.URL+"/terminals/new", url.Values{"host": {"nope"}, "cli": {"shell"}, "format": {"json"}})
+		var j map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&j)
+		resp.Body.Close()
+		if resp.StatusCode != 400 || j["error"] == nil {
+			t.Fatalf("json create error: %d %v", resp.StatusCode, j)
+		}
+		if code, body, _ := rig.get(t, "/workspace"); code != 200 || !strings.Contains(body, `id="wsgrid"`) || !strings.Contains(body, `name="format" value="json"`) {
+			t.Fatalf("workspace page: %d", code)
+		}
+	}
 	// The agent's inventory fed the folder picker: home, its folders, and this terminal's folder as recent.
 	resp, err = rig.cl.Get(rig.ts.URL + "/terminals/new")
 	if err != nil {

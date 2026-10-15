@@ -2,11 +2,13 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -242,5 +244,28 @@ func TestPickerOrderEdges(t *testing.T) {
 	}
 	if l := Label("gpt-4o-2024-08-06"); l != "GPT-4o (2024-08-06)" {
 		t.Fatalf("label %q", l)
+	}
+}
+
+func TestPartsFromAttachments(t *testing.T) {
+	dir := t.TempDir()
+	write := func(sum string, b []byte) { _ = os.WriteFile(filepath.Join(dir, sum), b, 0o600) }
+	write("img", []byte("\x89PNG fake"))
+	write("txt", []byte("a,b\n1,2\n"))
+	write("bin", []byte{0, 1, 2})
+	c := &Chats{AssetDir: dir}
+	ps := c.parts("what is this?", []store.Asset{{Name: "shot.png", SHA256: "img"}, {Name: "data.csv", SHA256: "txt"}, {Name: "blob.bin", SHA256: "bin"}, {Name: "gone.md", SHA256: "nope"}})
+	if len(ps) != 5 || ps[0].Text != "what is this?" {
+		t.Fatalf("parts: %+v", ps)
+	}
+	if ps[1].Type != "image_url" || !strings.HasPrefix(ps[1].ImageURL.URL, "data:image/png;base64,") {
+		t.Fatalf("image: %+v", ps[1])
+	}
+	if !strings.Contains(ps[2].Text, "a,b\n1,2") || !strings.Contains(ps[3].Text, "can't be read") || !strings.Contains(ps[4].Text, "no longer") {
+		t.Fatalf("files: %+v", ps[2:])
+	}
+	b, _ := json.Marshal(Message{Role: "user", Content: ps[:2]})
+	if !strings.Contains(string(b), `"type":"image_url","image_url":{"url":"data:image/png`) {
+		t.Fatalf("wire: %s", b)
 	}
 }

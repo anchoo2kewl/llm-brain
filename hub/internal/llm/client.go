@@ -253,9 +253,21 @@ func Grouped(ms []Model) []Group {
 	return out
 }
 
+// Message is one chat message. Content is a string, or []Part when files are attached.
 type Message struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// Part is a piece of a message with attachments: {type:"text", text} or {type:"image_url", image_url:{url}}.
+type Part struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL string `json:"url"`
 }
 
 // Stream asks model for the next reply and calls onDelta with each piece as it arrives. It returns the whole
