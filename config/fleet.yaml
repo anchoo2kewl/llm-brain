@@ -119,3 +119,11 @@ chat:
   insights: true
   provider: claude
   model: ""                     # e.g. sonnet: a quick model is plenty for a digest
+
+# Shared agent memory (hub /memory). With `enabled`, every worker's prompt gets the context pack for its repo,
+# issue/PR and folder (bin/brain-context: what other agents learned, and who else is on it right now) and is
+# told to save lessons with bin/brain-remember. It fails open: no hub, no change to the prompt.
+memory:
+  enabled: false
+  hub_url: http://127.0.0.1:8787
+  k: 8                          # memories per prompt
