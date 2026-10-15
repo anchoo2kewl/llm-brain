@@ -131,3 +131,6 @@ a.newbtn:hover,a.btn.primary:hover{text-decoration:none;opacity:.9}
 @media(max-width:640px){a.newbtn{order:2;margin-left:auto}.gsearch{order:4}}
 /* a page shown inside the workspace */
 body.embed main.wrapw{max-width:none;padding:6px 12px 12px}body.embed .top h1{font-size:15px}body.embed .stats,body.embed dl.kv,body.embed details.block{display:none}
+[data-rename]{cursor:text;border-radius:5px}[data-rename]:hover{background:color-mix(in srgb,var(--acc) 8%,transparent)}
+[data-rename].renaming{outline:2px solid var(--acc);background:var(--card);padding:0 4px}
+.renamebtn{border:0;background:none;color:var(--mut);font-size:.6em;vertical-align:middle;padding:0 6px;cursor:pointer}.renamebtn:hover{color:var(--acc)}.renamebtn.bad{color:var(--bad)}

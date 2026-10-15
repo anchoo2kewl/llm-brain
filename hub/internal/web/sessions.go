@@ -69,6 +69,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	p("POST /prompts/{id}/delete", s.promptDelete)
 	s.terminalRoutes(g, p, mux)
 	s.fileRoutes(g, p, mux)
+	s.renameRoutes(p)
 }
 
 // sameSite wraps sameOrigin (chat.go) for every POST here.

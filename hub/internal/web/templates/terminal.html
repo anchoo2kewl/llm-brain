@@ -1,5 +1,5 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css"><link rel="stylesheet" href="/static/files.css">
-<div class="top termtop"><div><p class="eyebrow">Terminal · {{.With}} · {{.T.Host}}</p><h1 class="title">{{.T.Title}}</h1></div>
+<div class="top termtop"><div><p class="eyebrow">Terminal · {{.With}} · {{.T.Host}}</p><h1 class="title"><span data-rename="/terminals/{{.T.ID}}/rename">{{.T.Title}}</span></h1></div>
 <div class="meta"><span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .T.Error}}<pre class="err small">{{.T.Error}}</pre>{{end}}

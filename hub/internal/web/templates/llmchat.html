@@ -1,5 +1,5 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/files.css">
-<div class="top"><div><p class="eyebrow">Model chat</p><h1 class="title">{{.C.Title}}</h1></div><div class="meta"><a href="/chats">all chats</a></div></div>
+<div class="top"><div><p class="eyebrow">Model chat</p><h1 class="title"><span data-rename="/llms/{{.C.ID}}/rename">{{.C.Title}}</span></h1></div><div class="meta"><a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 <div class="transcript convo" id="llmconvo">
 {{range .Msgs}}{{if eq .Role "user"}}<div class="msg user" id="l{{.ID}}"><div class="who">you</div>{{if .Files}}<div class="attshow">{{range .Files}}{{if viewable .Name}}{{if imageName .Name}}<a href="/files/{{.ID}}?view=1" target="_blank" rel="noopener"><img src="/files/{{.ID}}?view=1" alt="{{.Name}}"></a>{{else}}<a class="attchip" href="/files/{{.ID}}">{{.Name}}</a>{{end}}{{else}}<a class="attchip" href="/files/{{.ID}}">{{.Name}}</a>{{end}}{{end}}</div>{{end}}{{if .Content}}<div class="txt">{{.Content}}</div>{{end}}</div>

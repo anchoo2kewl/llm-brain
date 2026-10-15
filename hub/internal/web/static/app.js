@@ -96,4 +96,40 @@
       setTimeout(tick, 4000);
     }
   }
+
+  // Rename: click a title (or its ✎) to edit it; Enter saves, Escape cancels. The hub renames the linked
+  // terminal / task / transcript too, and tells Claude (/rename) when it's a Claude terminal.
+  document.querySelectorAll("[data-rename]").forEach((el) => {
+    const pen = document.createElement("button");
+    pen.type = "button"; pen.className = "renamebtn"; pen.textContent = "✎"; pen.title = "Rename"; pen.setAttribute("aria-label", "Rename");
+    el.after(pen);
+    let before = "";
+    const start = () => {
+      if (el.isContentEditable) return;
+      before = el.textContent;
+      el.contentEditable = "true"; el.classList.add("renaming"); el.focus();
+      document.getSelection().selectAllChildren(el);
+    };
+    const stop = async (save) => {
+      if (!el.isContentEditable) return;
+      el.contentEditable = "false"; el.classList.remove("renaming");
+      const name = el.textContent.replace(/\s+/g, " ").trim();
+      if (!save || !name || name === before) { el.textContent = before; return; }
+      try {
+        const body = new URLSearchParams({ title: name });
+        const r = await fetch(el.dataset.rename, { method: "POST", body });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || r.status);
+        el.textContent = j.title;
+        document.title = j.title + " · llm-brain hub";
+      } catch (e) { el.textContent = before; pen.title = "Rename failed: " + e.message; pen.classList.add("bad"); }
+    };
+    el.addEventListener("click", start);
+    pen.addEventListener("click", start);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); stop(true); }
+      if (e.key === "Escape") { e.preventDefault(); stop(false); }
+    });
+    el.addEventListener("blur", () => stop(true));
+  });
 })();
