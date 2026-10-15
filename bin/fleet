@@ -109,14 +109,25 @@ cmd_dispatch() {
   done < <(intake_queue)
 }
 
-fleet_prs() { # JSON array of my open PRs whose body carries the fleet marker
-  local marker owner
+fleet_prs() { # JSON array of my open PRs for fleet issues: the body marker, or (for an issue the fleet owns) a mention of it
+  local marker owner repo owned
   marker="$(cfg '.pr_marker')"
+  repo="$(cfg '.intake.repos[0]')"
+  owned="$(in_flight | jq -R 'select(length > 0)' | jq -sc .)"
   for owner in $(cfg '.pr_owners[]'); do
-    gh search prs --owner "$owner" --author "@me" --state open "llm-brain" --match body \
-      --json url,number,repository,updatedAt,body --limit 100
-  done | jq -s --arg m "$marker" 'add // [] | map(select(.body | contains($m))
-      | . + {issue: (.body | capture("llm-brain:issue=(?<n>[0-9]+)").n // null)} | del(.body))'
+    gh search prs --owner "$owner" --author "@me" --state open \
+      --json url,number,repository,updatedAt,title,body --limit 100
+  done | jq -s --arg m "$marker" --arg repo "$repo" --argjson owned "$owned" '
+    ($repo | split("/")[1]) as $name
+    | add // [] | unique_by(.url) | map(
+        ((.body // "") + "\n" + (.title // "")) as $t
+        | ((.body // "") | capture(($m | gsub("[.]"; "\\.")) + "(?<n>[0-9]+)").n // null) as $mk
+        # A companion PR opened without the marker still counts when it names an issue the fleet owns
+        # ("blue-stack#17446" or the issue URL).
+        | ($mk // ([$owned[] | select(. as $n | $t | test("(^|[^A-Za-z0-9_.-])" + $name + "#" + $n + "([^0-9]|$)")
+              or test("github\\.com/" + $repo + "/issues/" + $n + "([^0-9]|$)"))][0])) as $issue
+        | select($issue != null)
+        | {url, number, repository, updatedAt, issue: $issue, marked: ($mk != null)})'
 }
 
 cmd_babysit() {
@@ -143,6 +154,7 @@ cmd_babysit() {
     local pf="$BRAIN_STATE/runs/$key.prompt"
     prompt_env babysit
     NOTES="$(notes_for $refs)" PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
+      MARKER="$(cfg '.pr_marker')${issue:-?}" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
       render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
     spawn "$key" "$(implementer)" write "$(cfg '.limits.babysit_timeout')" "$pf"
@@ -318,6 +330,7 @@ case "${1:-}" in
   babysit) cmd_babysit ;;
   review) shift; cmd_review "$@" ;;
   status) cmd_status ;;
+  prs) fleet_prs | jq . ;;
   labels) cmd_labels ;;
   pause) touch "$BRAIN_LOCAL/PAUSE"; log "paused $HOST" ;;
   resume) rm -f "$BRAIN_LOCAL/PAUSE"; log "resumed $HOST" ;;

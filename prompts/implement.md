@@ -32,7 +32,10 @@ someone else is taking it, stop: comment on the issue, remove `agent:working`, a
 # PR
 - Title: conventional, with `#{{ISSUE}}`. Body: what changed, why, how it was tested, how to verify, and this exact line at the end:
   `<!-- {{MARKER}} -->`
-  (the babysitter finds PRs by this marker).
+  (the babysitter finds PRs by this marker). **Every** PR you open for this issue gets it, in any repo, including
+  companion PRs (an API change for a UI PR, mock parity, a follow-up). A PR without it is never shepherded to merge.
+  To add it to an existing PR, edit the body with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@file`
+  (`gh pr edit` fails on some repos with a "Projects (classic)" error).
 - Request review from: {{REVIEWERS}}.
 - Add label `agent:pr-open` to the issue and comment on the issue with the PR link(s).
 

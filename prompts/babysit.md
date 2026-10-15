@@ -5,7 +5,11 @@ Nobody is watching this session. Do not ask questions — decide, or mark blocke
 Shepherd PR {{PR_URL}} to merge. Something changed on it since the last pass (commits, reviews, comments, or CI).
 
 1. Read the PR, every review, every inline comment and CI: `gh pr view {{PR_URL}} --comments`, `gh api` for review comments, `gh pr checks {{PR_URL}}`.
-   The issue number is in the PR body marker `llm-brain:issue=N`; read that issue too.
+   The issue number is in the PR body marker `llm-brain:issue=N`; read that issue too. If this PR's body doesn't end with
+   `<!-- {{MARKER}} -->` yet, add it (`gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@file`; `gh pr edit` can fail
+   with a "Projects (classic)" error).
+   **Any new PR you open** (a companion API/mock PR, a follow-up) ends its body with that same line, `<!-- {{MARKER}} -->`,
+   or nothing will ever shepherd it to merge.
 2. Address every unresolved review comment (people you'll see: {{PEOPLE}}, and review bots), and every chat note below that isn't done yet. Fix in the PR's branch (make a worktree for
    it if needed). Reply on each thread with what you changed, or why you disagree — disagreeing is fine when you're right; be specific.
 3. CI failures: read the logs (`gh run view --log-failed`) and fix real failures. Re-run only proven flakes.
