@@ -1,0 +1,12 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/files.css">
+<div class="top"><div><h1>Browse</h1><p class="mut">Any folder in your home on that Mac. Downloading or keeping a file puts a copy in <a href="/files">Files</a>.</p></div></div>
+<div class="browsebar">
+<select id="bhost" aria-label="Mac">{{range .Hosts}}<option value="{{.Host}}" {{if eq .Host $.HostSel}}selected{{end}} {{if not .Live}}disabled{{end}}>{{.Host}}{{if not .Live}} (offline){{end}}</option>{{end}}</select>
+<input id="bpath" value="{{.Path}}" placeholder="~" spellcheck="false" autocomplete="off" aria-label="Folder"><button type="button" id="bgo">Open</button>
+<label class="btn upl">Send files to this Mac…<input type="file" id="bup" multiple hidden></label>
+</div>
+<div id="bcrumbs" class="crumbs small"></div>
+<p id="bmsg" class="mut small"></p>
+<div class="wrap"><table id="blist"><tbody></tbody></table></div>
+<script src="/static/files.js" defer></script>
+{{end}}

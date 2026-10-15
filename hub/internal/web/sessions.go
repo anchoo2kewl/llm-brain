@@ -33,6 +33,7 @@ type Sessions struct {
 	Chats *llm.Chats // nil: no plain chat (no gateway)
 
 	bridges bridges // terminals waiting for their host agent (terminals.go)
+	xfers   xfers   // file transfers waiting for their host agent (files.go)
 }
 
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
@@ -67,6 +68,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	p("POST /prompts", s.promptSave)
 	p("POST /prompts/{id}/delete", s.promptDelete)
 	s.terminalRoutes(g, p, mux)
+	s.fileRoutes(g, p, mux)
 }
 
 // sameSite wraps sameOrigin (chat.go) for every POST here.

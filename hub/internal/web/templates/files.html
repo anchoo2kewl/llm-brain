@@ -1,0 +1,9 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/files.css">
+<div class="top"><div><h1>Files</h1><p class="mut">The hub's own copy of every file you downloaded, kept or dropped in. They stay here after the Mac cleans up.</p></div>
+<div class="meta">Browse a Mac: {{range .Hosts}}<a class="btn" href="/browse?host={{.Host}}">{{.Host}}</a> {{end}}</div></div>
+<form class="filters" method="get" action="/files"><input type="search" name="q" value="{{.Q}}" placeholder="Search files…" aria-label="Search files"><button type="submit">Search</button></form>
+{{if .Assets}}<div class="wrap"><table><tr><th>File</th><th>From</th><th>Size</th><th>How</th><th>Kept</th><th></th></tr>
+{{range .Assets}}<tr><td><a href="/files/{{.ID}}">{{.Name}}</a></td><td class="mut small">{{.Host}} · {{home .Path}}</td><td class="mut small nowrap">{{bytes .Size}}</td>
+<td class="small">{{.Source}}</td><td class="mut small nowrap">{{ago .CreatedAt}}</td><td class="nowrap"><a href="/files/{{.ID}}">download</a>{{if viewable .Name}} · <a href="/files/{{.ID}}?view=1" target="_blank" rel="noopener">view</a>{{end}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">{{if .Q}}No files match.{{else}}Nothing kept yet. <a href="/browse">Browse a Mac</a> and download or keep a file, or drop one onto a terminal.{{end}}</div>{{end}}
+{{end}}

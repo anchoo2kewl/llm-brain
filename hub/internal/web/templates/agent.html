@@ -20,8 +20,8 @@
 
 <div class="composer" id="composer">
 <form method="post" action="/agents/{{.A.ID}}/send" class="send">
-<textarea name="prompt" rows="3" data-enter-send placeholder="{{if .A.Busy}}Wait for this turn to finish…{{else}}Message {{.With}} — Enter to send, Shift+Enter for a new line{{end}}" {{if not .HostLive}}disabled{{end}} required></textarea>
-<div class="row">{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}
+<textarea name="prompt" rows="3" data-enter-send data-drop-host="{{.A.Host}}" data-drop-into="a{{.A.ID}}" placeholder="{{if .A.Busy}}Wait for this turn to finish…{{else}}Message {{.With}} — Enter to send, Shift+Enter for a new line. Drop or paste files to attach.{{end}}" {{if not .HostLive}}disabled{{end}} required></textarea>
+<div class="row"><label class="btn upl small">Attach…<input type="file" data-attach multiple hidden></label> <a class="small" href="/browse?host={{.A.Host}}&amp;path={{.A.Cwd}}">files</a>{{if .Prompts}}<select data-fill-prompt aria-label="Insert a saved prompt"><option value="">Saved prompts…</option>{{range .Prompts}}<option data-body="{{.Body}}">{{.Name}}</option>{{end}}</select>{{end}}
 <span class="grow"></span><button type="submit" class="primary" {{if not .HostLive}}disabled{{end}}>Send</button></div>
 </form>
 <div class="row actions">
@@ -62,4 +62,5 @@
 <div class="row actions"><form method="post" action="/sessions/{{.S.ID}}/review" class="inline"><input name="base" placeholder="base: default branch" size="16" aria-label="Base branch"> <button type="submit">Review with {{.Other}}</button></form>
 <span class="mut small">By hand on {{.S.Host}}: <code class="copy">{{.Resume}}</code></span></div>
 {{end}}
-</section>{{end}}
+</section><link rel="stylesheet" href="/static/files.css"><script src="/static/drop.js" defer></script>
+{{end}}

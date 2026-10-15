@@ -150,3 +150,12 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// QueueFile queues a file command for a live host.
+func (c *Control) QueueFile(ctx context.Context, host, kind string, r FileReq) (int64, error) {
+	if _, err := c.liveHost(ctx, host); err != nil {
+		return 0, err
+	}
+	b, _ := json.Marshal(r)
+	return c.S.QueueCommand(ctx, store.Command{Host: host, Kind: kind, Payload: b})
+}

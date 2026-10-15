@@ -111,3 +111,17 @@
     es.onerror = () => { es.close(); setTimeout(() => location.reload(), 3000); };
   }
 })();
+
+// Tasks: drop, paste or attach files on the composer; their paths on the host go into the message.
+document.addEventListener("DOMContentLoaded", function () {
+  if (!window.hubDrop) return;
+  document.querySelectorAll("textarea[data-drop-host]").forEach(function (ta) {
+    var take = window.hubDrop(ta, ta.getAttribute("data-drop-host"), ta.getAttribute("data-drop-into"), function (paths) {
+      var add = paths.map(function (p) { return "Attached: " + p; }).join("\n");
+      ta.value = ta.value ? ta.value.replace(/\s*$/, "") + "\n" + add + "\n" : add + "\n";
+      ta.focus();
+    });
+    var form = ta.form, input = form && form.querySelector("input[data-attach]");
+    if (input) input.addEventListener("change", function () { take(input.files); input.value = ""; });
+  });
+});

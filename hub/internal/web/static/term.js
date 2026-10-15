@@ -106,6 +106,17 @@
     line.value = "";
   });
 
+  // Dropped / pasted / attached files: upload to the host, then type their paths in (bracketed paste).
+  if (window.hubDrop) {
+    var typePaths = function (paths) {
+      send("\x1b[200~" + paths.map(function (p) { return /\s/.test(p) ? "'" + p + "'" : p; }).join(" ") + " \x1b[201~");
+      term.focus();
+    };
+    var take = window.hubDrop(el, el.getAttribute("data-host"), "t" + id, typePaths);
+    var fileIn = document.getElementById("termfile");
+    if (fileIn) fileIn.addEventListener("change", function () { take(fileIn.files); fileIn.value = ""; });
+  }
+
   var endForm = document.querySelector("form.endform");
   if (endForm) endForm.addEventListener("submit", function () { wanted = false; });
 
