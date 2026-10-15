@@ -93,6 +93,9 @@ type Inventory struct {
 	Terminals []store.TermSeen `json:"terminals,omitempty"`
 	TermsAt   time.Time        `json:"terms_at,omitempty"` // taken just before tmux was listed
 	Tmux      bool             `json:"tmux,omitempty"`
+	// Home and the folders directly in it, for the terminal folder picker.
+	Home   string   `json:"home,omitempty"`
+	Places []string `json:"places,omitempty"`
 }
 
 // Hub is the executor's side of the queue.

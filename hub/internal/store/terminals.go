@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 )
 
 // Terminal is an interactive CLI running in tmux on a host (migration 0015).
@@ -214,4 +216,53 @@ func (s *Store) SyncTerminals(ctx context.Context, host string, seen []TermSeen,
 		}
 	}
 	return ended, revived, tx.Commit()
+}
+
+// SetAgentPlaces records a host's home folder and the folders directly in it.
+func (s *Store) SetAgentPlaces(ctx context.Context, host, home string, places []string) error {
+	if places == nil {
+		places = []string{}
+	}
+	b, _ := json.Marshal(places)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_places (host, home, places) VALUES (?, ?, ?)
+		ON CONFLICT (host) DO UPDATE SET home = excluded.home, places = excluded.places`, host, home, string(b))
+	return err
+}
+
+// AgentPlaces is a host's home and the folders in it ('' and nil before its agent reports them).
+func (s *Store) AgentPlaces(ctx context.Context, host string) (string, []string, error) {
+	var home, places string
+	err := s.DB.QueryRowContext(ctx, `SELECT home, places FROM agent_places WHERE host = ?`, host).Scan(&home, &places)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, nil
+	}
+	var out []string
+	_ = json.Unmarshal([]byte(places), &out)
+	return home, out, err
+}
+
+// RecentFolders are the folders under home where the host's Claude/Codex sessions and terminals ran lately,
+// most recent first.
+func (s *Store) RecentFolders(ctx context.Context, host, home string, limit int) ([]string, error) {
+	if home == "" {
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT cwd, max(at) AS last FROM (
+			SELECT cwd, file_mtime AS at FROM sessions WHERE host = ? AND cwd LIKE ? AND file_mtime > ?
+			UNION ALL SELECT cwd, updated_at AS at FROM terminals WHERE host = ? AND cwd LIKE ?)
+		GROUP BY cwd ORDER BY last DESC LIMIT ?`,
+		host, home+"/%", T(time.Now().AddDate(0, 0, -30)), host, home+"/%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var cwd, last string
+		if err := rows.Scan(&cwd, &last); err != nil {
+			return nil, err
+		}
+		out = append(out, cwd)
+	}
+	return out, rows.Err()
 }

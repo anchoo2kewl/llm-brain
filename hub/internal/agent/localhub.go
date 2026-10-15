@@ -137,6 +137,14 @@ func (h *LocalHub) Inventory(ctx context.Context, inv Inventory) error {
 	if err := h.S.SetAgentInventory(ctx, inv.Host, inv.Version, inv.Roots, inv.Folders, provs); err != nil {
 		return err
 	}
+	if inv.Home != "" {
+		if len(inv.Places) > 200 {
+			inv.Places = inv.Places[:200]
+		}
+		if err := h.S.SetAgentPlaces(ctx, inv.Host, inv.Home, inv.Places); err != nil {
+			return err
+		}
+	}
 	if inv.Tmux && !inv.TermsAt.IsZero() {
 		// 10 s of slack for the two Macs' clocks: a listing is only trusted for what was settled before it.
 		ended, revived, err := h.S.SyncTerminals(ctx, inv.Host, inv.Terminals, store.T(inv.TermsAt.Add(-10*time.Second)))

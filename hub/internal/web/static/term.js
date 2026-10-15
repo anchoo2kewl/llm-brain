@@ -2,19 +2,21 @@
 // `tmux attach` on the host. Binary frames are terminal bytes; text frames are JSON control.
 (function () {
   "use strict";
-  // New terminal form: only offer the folders of the chosen Mac.
-  var hostSel = document.getElementById("termhost"), folderSel = document.getElementById("termfolder");
-  if (hostSel && folderSel) {
-    var only = function () {
-      folderSel.querySelectorAll("optgroup").forEach(function (g) {
-        var on = g.getAttribute("data-host") === hostSel.value;
-        g.hidden = !on; g.disabled = !on;
+  // New terminal form: the chosen Mac's quick picks, recent folders and folder suggestions.
+  var hostSel = document.getElementById("termhost"), pathIn = document.getElementById("termpath");
+  if (hostSel && pathIn) {
+    var showPicks = function () {
+      document.querySelectorAll(".folderpicks .picks").forEach(function (p) {
+        var on = p.getAttribute("data-host") === hostSel.value;
+        p.hidden = !on;
+        if (on) pathIn.setAttribute("list", p.getAttribute("data-list"));
       });
-      var o = folderSel.selectedOptions[0];
-      if (o && o.parentElement && o.parentElement.disabled) folderSel.value = "";
     };
-    hostSel.addEventListener("change", only);
-    only();
+    hostSel.addEventListener("change", showPicks);
+    showPicks();
+    document.querySelectorAll(".folderpicks .chip").forEach(function (b) {
+      b.addEventListener("click", function () { pathIn.value = b.getAttribute("data-path"); pathIn.focus(); });
+    });
   }
   var el = document.getElementById("term");
   if (!el || !window.Terminal) return;
