@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -55,7 +56,7 @@ func iget(t *testing.T, url string) (int, string) {
 }
 
 func TestInsightsPage(t *testing.T) {
-	ts, _ := insightsServer(t)
+	ts, st := insightsServer(t)
 	for _, rg := range []string{"", "?range=24h", "?range=30d", "?range=all", "?range=bogus"} {
 		code, body := iget(t, ts.URL+"/insights"+rg)
 		if code != 200 {
@@ -70,7 +71,31 @@ func TestInsightsPage(t *testing.T) {
 			t.Errorf("%s: inline style attributes break the CSP", rg)
 		}
 	}
-	_, body := iget(t, ts.URL+"/insights?range=24h")
+	// Session pages carry the stats strip.
+	if _, body := iget(t, ts.URL+"/sessions/1"); !strings.Contains(body, `class="strip"`) || !strings.Contains(body, "tool calls") {
+		t.Errorf("session page has no stats strip")
+	}
+	// Run pages: stats strip from the run's conversation, and a long log split into earlier + last lines.
+	var lg strings.Builder
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&lg, "step %d\n", i)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO runs (host, path, key, kind, started_at, ended_at, status, log, log_bytes, prompt, session_id)
+		VALUES ('laptop', '/l/issue-1.log', 'issue-1', 'issue', ?, ?, 'succeeded', ?, ?, 'do it', 1)`,
+		store.Now(), store.Now(), lg.String(), lg.Len()); err != nil {
+		t.Fatal(err)
+	}
+	_, body := iget(t, ts.URL+"/runs/1")
+	for _, want := range []string{`class="strip"`, `id="runlog"`, "Earlier log", "step 299", "Prompt"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run page missing %q", want)
+		}
+	}
+	// The overview shows KPI tiles.
+	if _, body := iget(t, ts.URL+"/"); !strings.Contains(body, `class="kpi"`) {
+		t.Error("overview has no KPI tiles")
+	}
+	_, body = iget(t, ts.URL+"/insights?range=24h")
 	if !strings.Contains(body, `aria-current="page">24h<`) {
 		t.Error("range picker marks the current range")
 	}
@@ -116,5 +141,36 @@ func TestInsightsAPI(t *testing.T) {
 	srv.tailnetOnly(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("public peer got %d", rec.Code)
+	}
+}
+
+func TestLogSplit(t *testing.T) {
+	short := strings.Repeat("line\n", 50)
+	if p := logSplit(short); p.Head != "" || p.Tail != short {
+		t.Fatal("short logs stay whole")
+	}
+	var b strings.Builder
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, "l%d\n", i)
+	}
+	p := logSplit(b.String())
+	if p.Head+p.Tail != b.String() || p.TailLines != logTailLines || !strings.HasPrefix(p.Tail, "l240\n") {
+		t.Fatalf("head %d lines, tail %d lines starting %q", p.HeadLines, p.TailLines, p.Tail[:6])
+	}
+}
+
+func TestGroupTools(t *testing.T) {
+	mk := func(kind, tool string, isErr bool) item {
+		return item{Message: store.Message{Kind: kind, ToolName: tool, IsError: isErr}}
+	}
+	items := []item{mk("text", "", false), mk("tool_use", "Bash", false), mk("tool_use", "Bash", false),
+		mk("tool_use", "Read", false), mk("tool_result", "", true), mk("text", "", false), mk("tool_use", "Edit", false)}
+	items[2].Result = &store.Message{IsError: true}
+	g := groupTools(items)
+	if len(g) != 4 || g[1].Run == nil || len(g[1].Run) != 4 || g[3].Run != nil {
+		t.Fatalf("want text, [4 tools], text, lone tool; got %d groups", len(g))
+	}
+	if g[1].Summary != "4 tool calls · Bash ×2, Read ×1, result ×1 · 2 failed" {
+		t.Fatalf("summary %q", g[1].Summary)
 	}
 }

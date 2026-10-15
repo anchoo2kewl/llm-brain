@@ -50,7 +50,7 @@
 {{gauge .}}
 <p class="small {{if .RunsOutAt.IsZero}}mut{{else}}warn{{end}}">{{.Verdict}}</p>
 <p class="mut small">{{if .BurnPerHour}}{{printf "%.1f" .BurnPerHour}}%/h{{if eq .BurnFrom "average"}} (average since the window opened){{end}} · {{end}}{{.Account}}</p>
-{{if .HasHistory}}{{lines (printf "qh-%s" .ID) (printf "%s %s used over time" .Provider .Window) $.R.Labels (slice1 .History) "percent" 100}}{{end}}
+{{if .HasHistory}}{{linechart (printf "qh-%s" .ID) (printf "%s %s used over time" .Provider .Window) $.R.Labels (slice1 .History) "percent" 100}}{{end}}
 </article>{{end}}</div>
 {{else}}<div class="empty">No quota reported yet: windows appear after an account serves a request through the gateway.</div>{{end}}
 

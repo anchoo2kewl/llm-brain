@@ -239,7 +239,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Chat       store.ChatCounts
 		ChatOn     bool
 		Now        time.Time
+		Insight    *insights.Report // last 24h, for KPI tiles, gauges and sparklines (nil if it can't be built)
 	}{page: page{Title: "Overview", Nav: "overview"}, Now: time.Now()}
+	data.Insight, _ = s.Insights.Get(ctx, insights.Ranges[0])
 	st, err := readStatus(filepath.Join(s.StateDir, "status.json"))
 	if err != nil {
 		data.StatusErr = err.Error()
@@ -344,7 +346,8 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		page
 		Run     store.Run
 		Session *store.Session
-	}{page{Title: run.Key, Nav: "runs"}, run, sess})
+		Stats   *insights.SessionStats
+	}{page{Title: run.Key, Nav: "runs"}, run, sess, s.sessionStats(r, run.SessionID)})
 }
 
 // runLog serves the log from a byte offset, for live tailing.
@@ -491,7 +494,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		HasLater   bool
 		Subagents  []store.Session
 		ParentID   int64
-	}{page{Title: sess.DisplayTitle(), Nav: "sessions"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID})
+		Stats      *insights.SessionStats
+	}{page{Title: sess.DisplayTitle(), Nav: "sessions"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id)})
 }
 
 // sessionMore returns transcript items after an id as an HTML fragment, for live sessions.

@@ -3,61 +3,83 @@
 {{with .Status}}{{.Host}} · snapshot {{ago .At}}{{if .Stale}} <span class="bad">(stale — scheduler not running?)</span>{{end}}{{if .Paused}} · <span class="bad">PAUSED</span>{{end}}
 {{else}}<span class="mut">no status.json snapshot on this host</span>{{end}}</div></div>
 
-<nav class="section-nav" aria-label="Overview sections"><a href="#chat">Chat</a><a href="#capacity">Usage &amp; capacity</a><a href="#models">LLMs</a><a href="#routing">Routing</a><a href="#agents">Live agents</a><a href="#pipeline">Issue pipeline</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a></nav>
+<nav class="section-nav" aria-label="Overview sections"><a href="/insights">Insights</a><a href="#pipeline">Issue pipeline</a><a href="#capacity">Usage &amp; capacity</a><a href="#hosts">Hosts</a><a href="#agents">Live agents</a><a href="#models">LLMs</a><a href="#recent">Recent runs</a><a href="#scheduler">Scheduler</a>{{if .ChatOn}}<a href="#chat">Chat</a>{{end}}</nav>
+
+{{with .Insight}}<section class="kpis" aria-label="Last 24 hours">{{range .KPIs}}{{$d := kpiDelta .}}
+<a class="kpi" href="/insights?range=24h{{.Href}}"><span class="kpi-l">{{.Label}} · 24h</span>
+<b>{{fmt .Unit .Value}}</b>{{if $d.Text}}<span class="kpi-d {{$d.Class}}" title="previous 24 hours: {{fmt .Unit .Prev}}">{{$d.Text}} vs prior 24h</span>{{end}}
+{{spark .Spark (printf "%s per hour, last 24 hours" .Label) "s0"}}</a>{{end}}
+</section>
+{{with topCallouts .Callouts 3}}<section class="callouts" aria-label="Findings"><ul>{{range .}}<li class="co co-{{.Level}}"><span class="co-i" aria-hidden="true">{{calloutIcon .Level}}</span><span>{{.Text}}</span> <a class="small" href="/insights?range=24h{{.Href}}">see chart</a></li>{{end}}</ul>
+<p class="small"><a href="/insights">All insights →</a></p></section>{{end}}{{end}}
 {{if .ChatOn}}<p class="chat-count small"><a href="/chat">From chat: {{.Chat.Total}} messages in 24h{{if .Chat.Mentions}} · {{.Chat.Mentions}} mention you{{end}} →</a></p>{{end}}
-{{with .Status}}<div class="grid">
-<div class="tile"><b>{{len .Owned}}/{{.MaxInFlight}}</b><span>issues in flight</span></div>
-<div class="tile"><b>{{.Queued}}</b><span>queued</span></div>
-<div class="tile"><b>{{len .PRs}}</b><span>open fleet PRs</span></div>
-<div class="tile"><b>{{.CountVerdict "APPROVE"}}</b><span>reviews approved</span></div>
-<div class="tile"><b>{{.CountVerdict "COMMENT"}}</b><span>reviews with blockers</span></div>
-<div class="tile"><b>{{len .Workers}}</b><span>workers running</span></div>
 
-</div>{{end}}
+{{with .Status}}
+<h2 id="pipeline">Issue pipeline <span class="mut small">· {{len .Owned}}/{{.MaxInFlight}} slots in use</span></h2>
+<ol class="pipeline" aria-label="Issues by stage">
+<li><b>{{.Queued}}</b><span>queued</span></li>
+<li class="{{if ownedWith .Owned "working"}}hot{{end}}"><b>{{ownedWith .Owned "working"}}</b><span>working</span></li>
+<li class="{{if ownedWith .Owned "pr-open"}}hot{{end}}"><b>{{ownedWith .Owned "pr-open"}}</b><span>PR open · {{len .PRs}} fleet PRs</span></li>
+<li class="{{if ownedWith .Owned "blocked"}}blocked{{end}}"><b>{{ownedWith .Owned "blocked"}}</b><span>blocked on a person</span></li>
+</ol>
+<p class="mut small">{{len .Workers}} workers running · reviews posted: {{.CountVerdict "APPROVE"}} approved, {{.CountVerdict "COMMENT"}} with blockers. Merged issues leave the snapshot, so they show in <a href="/insights#fleet">fleet insights</a> as runs.</p>
+{{if .Owned}}<details class="block" id="d-owned"><summary>Issues in flight <span class="mut small">{{len .Owned}}</span></summary><div class="wrap"><table><tr><th>Issue</th><th>From</th><th>State</th><th>Updated</th></tr>
+{{range .Owned}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td>
+<td>{{range agentLabels .}}<span class="pill {{labelClass .}}">{{.}}</span> {{end}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
+</table></div></details>{{end}}
+{{if .Queue}}<details class="block" id="d-queue"><summary>Queue (next up) <span class="mut small">{{len .Queue}}</span></summary><div class="wrap"><table><tr><th>Issue</th><th>From</th><th>Filed</th><th>Note</th></tr>
+{{range .Queue}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td><td class="mut">{{ago .CreatedAt}}</td>
+<td class="mut">{{if .ByHand}}being worked by hand (open PR){{else}}waits for a free slot{{end}}</td></tr>{{end}}
+</table></div></details>{{end}}
+{{if .PRs}}<details class="block" id="d-prs" open><summary>Fleet PRs <span class="mut small">{{len .PRs}}</span></summary><div class="wrap"><table><tr><th>PR</th><th>CI</th><th>Review</th><th>Merge</th><th>Updated</th></tr>
+{{range .PRs}}<tr><td><a href="{{.URL}}" rel="noreferrer">{{.Title}}</a></td><td class="{{statusClass .CI}}">{{.CI}}</td>
+<td>{{if .ReviewDecision}}{{.ReviewDecision}}{{else}}—{{end}}</td><td class="mut">{{.MergeStateStatus}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
+</table></div></details>{{end}}
+{{if .Reviews}}<details class="block" id="d-reviews"><summary>PR reviews posted <span class="mut small">{{.CountVerdict "APPROVE"}} approve · {{.CountVerdict "COMMENT"}} comment</span></summary><div class="wrap"><table><tr><th>PR</th><th>Verdict</th><th>Detail</th><th>When</th><th></th></tr>
+{{range .Reviews}}<tr><td>{{with deref .URL}}<a href="{{.}}" rel="noreferrer">{{short .}}</a>{{else}}—{{end}}</td>
+<td class="{{if eq .Verdict "APPROVE"}}ok{{else if eq .Verdict "COMMENT"}}warn{{else}}bad{{end}}">{{.Verdict}}</td>
+<td class="mut">{{.Detail}}</td><td class="mut">{{ago .At}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
+</table></div></details>{{end}}
+{{if .Workers}}<details class="block" id="d-workers"><summary>Running workers <span class="mut small">{{len .Workers}} · {{.Host}} snapshot</span></summary><div class="wrap"><table><tr><th>Worker</th><th>Started</th><th></th></tr>
+{{range .Workers}}<tr><td>{{.Key}}</td><td class="mut">{{ago .Since}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
+</table></div></details>{{end}}
+{{end}}
 
-{{with .Status}}{{with .Chat}}<section class="panel" id="chat">
-<div class="panel-heading"><h2>From chat</h2><span class="pill">{{ago .At}}</span></div>
+{{with .Status}}{{with .Chat}}<details class="block" id="chat"><summary><b>From chat</b> <span class="mut small">{{ago .At}}{{if .Asks}} · {{len .Asks}} asks of you{{end}}</span> <span class="mut small">{{trunc 140 .Digest}}</span></summary>
 <div class="txt">{{.Digest}}</div>
 {{if .Asks}}<h3>Asks of you</h3><ul>{{range .Asks}}<li>{{.}}</li>{{end}}</ul>{{end}}
 <p class="mut small"><a href="/log/{{.Log}}">How this was read</a></p>
-</section>{{end}}{{end}}
+</details>{{end}}{{end}}
 
 <div class="inspect-grid">
 <section class="panel" id="capacity">
-<div class="panel-heading"><h2>Usage &amp; capacity</h2><span class="pill">{{if .Status}}fleet snapshot{{else}}no snapshot{{end}}</span></div>
+<div class="panel-heading"><h2>Usage &amp; capacity</h2><a href="/insights#quota">Quota insights →</a></div>
+{{with .Insight}}{{if .Quota}}<div class="gauges">{{range .Quota}}<a href="/insights#{{.ID}}" title="{{.Verdict}}">{{gauge .}}<span>{{.Provider}} · {{.Class}}</span></a>{{end}}</div>{{end}}{{end}}
 {{with .Status}}
-<div class="capacity-number">{{.SlotsLeft}} <span>of {{.MaxInFlight}} issue slots available</span></div>
+<p class="small"><b>{{.SlotsLeft}}</b> of {{.MaxInFlight}} issue slots available{{if .Paused}} · <span class="bad">scheduler paused</span>{{else if .Stale}} · <span class="warn">snapshot stale</span>{{end}}</p>
 {{if gt .MaxInFlight 0}}<meter min="0" max="{{.MaxInFlight}}" value="{{len .Owned}}" aria-label="Issue slots in use">{{len .Owned}} / {{.MaxInFlight}}</meter>{{end}}
-<details id="capacity-details" class="inspect"><summary>See capacity breakdown</summary>
-<dl class="kv"><dt>In flight</dt><dd>{{len .Owned}} issues (working or PR open)</dd><dt>Waiting for a slot</dt><dd>{{.Queued}} issues</dd><dt>Workers</dt><dd>{{len .Workers}} on {{.Host}}</dd><dt>Scheduler</dt><dd>{{if .Paused}}Paused{{else if .Stale}}Snapshot stale{{else}}Active{{end}}</dd><dt>Snapshot</dt><dd>{{.At}}</dd></dl>
-<a href="#pipeline">Inspect the issue queue →</a>
-</details>
-{{else}}<p class="mut">Waiting for a fleet snapshot to report available issue slots.</p>{{end}}
-<h3>Subscription usage left</h3>
-{{range .Quotas}}<details class="quota-card" id="quota-{{.Provider}}-{{.Host}}-{{.LimitID}}"><summary><strong>{{.Provider}} · {{.Host}}</strong> <span class="pill {{if .Stale}}warn{{end}}">{{if .Stale}}stale observation{{else}}observed {{ago .ObservedAt}}{{end}}</span><span class="model-name">{{.LimitID}}{{if .Plan}} · {{.Plan}}{{end}}</span>{{with .Primary}}<span class="quota-summary">{{if expired .Reset}}Awaiting quota update{{else}}{{remaining .Used}}% left · {{quotaWindow .Minutes}} window{{end}}</span>{{end}}{{with .Secondary}}<span class="mut small"> · {{if expired .Reset}}Awaiting quota update{{else}}{{remaining .Used}}% left · {{quotaWindow .Minutes}} window{{end}}</span>{{end}}</summary>
-<p class="mut small">Observed {{ago .ObservedAt}}. This host's active account was reported by the source session; account identity is unavailable. Hosts may share an allowance.</p>
+{{end}}
+{{if .Quotas}}<details class="inspect" id="quota-sessions"><summary>Quota seen by sessions <span class="mut small">{{len .Quotas}}</span></summary>
+{{range .Quotas}}<div class="quota-card" id="quota-{{.Provider}}-{{.Host}}-{{.LimitID}}"><strong>{{.Provider}} · {{.Host}}</strong> <span class="pill {{if .Stale}}warn{{end}}">{{if .Stale}}stale observation{{else}}observed {{ago .ObservedAt}}{{end}}</span><span class="model-name">{{.LimitID}}{{if .Plan}} · {{.Plan}}{{end}}</span>
 {{with .Primary}}{{template "quota-window" .}}{{end}}{{with .Secondary}}{{template "quota-window" .}}{{end}}
-{{if not (or .Primary .Secondary)}}<p class="mut">No quota windows reported.</p>{{end}}
-</details>{{else}}<p class="mut">Waiting for a Codex session to report its quota. Existing ingested history is not replayed; new session activity supplies observations.</p>{{end}}
-{{template "gateway-accounts" .}}
+{{if not (or .Primary .Secondary)}}<p class="mut">No quota windows reported.</p>{{end}}</div>{{end}}
+</details>{{end}}
+<details class="inspect" id="accounts-details"><summary>Gateway accounts <span class="mut small">{{len .Gateway}}</span></summary>{{template "gateway-accounts" .}}</details>
 </section>
 <section class="panel" id="routing">
 <div class="panel-heading"><h2>Routing</h2><span class="pill">resolved roles</span></div>
 {{with .Status}}
 <ol class="route"><li><span>01 · Implement</span><strong>{{if .Roles.Implementer}}{{.Roles.Implementer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=issue">Issue runs →</a></li><li><span>02 · Internal check</span><strong>{{if .Roles.InternalReviewer}}{{.Roles.InternalReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=pr">PR follow-ups →</a></li><li><span>03 · PR review</span><strong>{{if .Roles.PRReviewer}}{{.Roles.PRReviewer}}{{else}}Not reported{{end}}</strong><a href="/runs?kind=review">Review runs →</a></li></ol>
-<details id="routing-details" class="inspect"><summary>How provider routing works</summary><p>The fleet uses the configured implementer when its CLI is available, then falls back to the first available provider. Internal review uses a different available provider when possible; with one provider it uses a fresh session.</p><p class="mut">Roles above come from {{.Host}}'s {{if .Stale}}stale {{end}}snapshot ({{ago .At}}). Account choice comes from the gateway below: highest priority first (personal), work only while personal is exhausted.</p></details>
-{{template "gateway-requests" $}}
+<details id="routing-details" class="inspect"><summary>How provider routing works</summary><p>The fleet uses the configured implementer when its CLI is available, then falls back to the first available provider. Internal review uses a different available provider when possible; with one provider it uses a fresh session.</p><p class="mut">Roles above come from {{.Host}}'s {{if .Stale}}stale {{end}}snapshot ({{ago .At}}). Account choice comes from the gateway: highest priority first (personal), work only while personal is exhausted.</p></details>
 {{else}}<p class="mut">Resolved role routing appears when the scheduler writes its first snapshot.</p>{{end}}
+{{if .GwRequests}}<details class="inspect" id="recent-calls"><summary>Recent gateway calls <span class="mut small">{{len .GwRequests}}</span></summary>{{template "gateway-requests" $}}</details>{{end}}
 </section>
 </div>
-<section class="panel" id="models">
-<div class="panel-heading"><h2>LLMs &amp; models</h2><a href="/sessions">Explore all sessions →</a></div>
-<p class="mut small">Recorded activity across all hosts, including subagents. Session counts are history, not remaining subscription quota. Expand a model to see its activity.</p>
-<div class="model-grid">{{range .Models}}
-<details class="model-card" id="model-{{.Provider}}-{{.Model}}"><summary><span class="model-heading"><strong>{{.Provider}}</strong><span class="pill {{if .Live}}ok{{end}}">{{.Live}} active</span></span><span class="model-name">{{if .Model}}{{.Model}}{{else}}Model not reported{{end}}</span><span class="mut small">{{.Sessions}} sessions · {{.Messages}} message blocks</span></summary>
-<dl class="kv"><dt>Provider</dt><dd>{{.Provider}}</dd><dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}Not present in source transcript{{end}}</dd><dt>Recorded sessions</dt><dd>{{.Sessions}} (including subagents)</dd><dt>Message blocks</dt><dd>{{.Messages}}</dd><dt>Active sessions</dt><dd>{{.Live}} top-level transcripts updated in the last 2 minutes</dd><dt>Last activity</dt><dd title="{{.LastAt}}">{{ago .LastAt}}</dd></dl><a href="/sessions?provider={{.Provider}}{{if .Model}}&amp;model={{.Model}}{{end}}">Browse model sessions →</a> <a href="/runs?provider={{.Provider}}">Runs →</a>
-</details>{{else}}<div class="empty">No model activity recorded yet. Models appear as conversations are ingested.</div>{{end}}</div>
-</section>
+
+<h2 id="hosts">Hosts <span class="mut small">· message blocks per hour, last 24h</span></h2>
+<div class="hostrow">{{range $h := .Hosts}}<div><div class="model-heading"><a href="/sessions?host={{.Host}}"><b>{{.Host}}</b></a><span class="mut small">{{if .LastSeen}}seen {{ago .LastSeen}}{{else}}never checked in{{end}}</span></div>
+<span class="mut small">{{.Sessions}} sessions · {{.Runs}} runs</span>
+{{with $.Insight}}{{spark (hostSpark .Sessions.HostSpark $h.Host) (printf "%s activity, last 24 hours" $h.Host) "s0"}}{{end}}</div>{{end}}</div>
 
 <h2 id="agents">Agents running now <span class="mut small">· all hosts</span></h2>
 {{if or .Runs .Live}}<div class="wrap"><table>
@@ -78,46 +100,24 @@
 </tr>{{end}}
 </table></div>{{else}}<div class="empty">Nothing running.</div>{{end}}
 
-{{with .Status}}
-<h2 id="pipeline">Issues in flight</h2>
-{{if .Owned}}<div class="wrap"><table><tr><th>Issue</th><th>From</th><th>State</th><th>Updated</th></tr>
-{{range .Owned}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td>
-<td>{{range agentLabels .}}<span class="pill {{labelClass .}}">{{.}}</span> {{end}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">None.</div>{{end}}
-
-<h2>Queue (next up)</h2>
-{{if .Queue}}<div class="wrap"><table><tr><th>Issue</th><th>From</th><th>Filed</th><th>Note</th></tr>
-{{range .Queue}}<tr><td><a href="{{.URL}}" rel="noreferrer">#{{.Number}}</a> {{.Title}}</td><td>{{who .Author.Login}}</td><td class="mut">{{ago .CreatedAt}}</td>
-<td class="mut">{{if .ByHand}}being worked by hand (open PR){{else}}waits for a free slot{{end}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">None.</div>{{end}}
-
-<h2>Fleet PRs</h2>
-{{if .PRs}}<div class="wrap"><table><tr><th>PR</th><th>CI</th><th>Review</th><th>Merge</th><th>Updated</th></tr>
-{{range .PRs}}<tr><td><a href="{{.URL}}" rel="noreferrer">{{.Title}}</a></td><td class="{{statusClass .CI}}">{{.CI}}</td>
-<td>{{if .ReviewDecision}}{{.ReviewDecision}}{{else}}—{{end}}</td><td class="mut">{{.MergeStateStatus}}</td><td class="mut">{{ago .UpdatedAt}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">None.</div>{{end}}
-
-<h2>PR reviews posted</h2>
-{{if .Reviews}}<div class="wrap"><table><tr><th>PR</th><th>Verdict</th><th>Detail</th><th>When</th><th></th></tr>
-{{range .Reviews}}<tr><td>{{with deref .URL}}<a href="{{.}}" rel="noreferrer">{{short .}}</a>{{else}}—{{end}}</td>
-<td class="{{if eq .Verdict "APPROVE"}}ok{{else if eq .Verdict "COMMENT"}}warn{{else}}bad{{end}}">{{.Verdict}}</td>
-<td class="mut">{{.Detail}}</td><td class="mut">{{ago .At}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">None.</div>{{end}}
-
-<h2>Running workers <span class="mut small">· {{.Host}} snapshot</span></h2>
-{{if .Workers}}<div class="wrap"><table><tr><th>Worker</th><th>Started</th><th></th></tr>
-{{range .Workers}}<tr><td>{{.Key}}</td><td class="mut">{{ago .Since}}</td><td>{{if .Log}}<a href="/log/{{.Log}}?host={{$.Status.Host}}">log</a>{{end}}</td></tr>{{end}}
-</table></div>{{else}}<div class="empty">None.</div>{{end}}
-{{end}}
+<section class="panel" id="models">
+<div class="panel-heading"><h2>LLMs &amp; models</h2><a href="/insights#llm">Token usage →</a></div>
+<p class="mut small">Recorded activity across all hosts, including subagents. Expand a model to see its activity.</p>
+<div class="model-grid">{{range .Models}}
+<details class="model-card" id="model-{{.Provider}}-{{.Model}}"><summary><span class="model-heading"><strong>{{.Provider}}</strong><span class="pill {{if .Live}}ok{{end}}">{{.Live}} active</span></span><span class="model-name">{{if .Model}}{{.Model}}{{else}}Model not reported{{end}}</span><span class="mut small">{{.Sessions}} sessions · {{.Messages}} message blocks</span></summary>
+<dl class="kv"><dt>Provider</dt><dd>{{.Provider}}</dd><dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}Not present in source transcript{{end}}</dd><dt>Recorded sessions</dt><dd>{{.Sessions}} (including subagents)</dd><dt>Message blocks</dt><dd>{{.Messages}}</dd><dt>Active sessions</dt><dd>{{.Live}} top-level transcripts updated in the last 2 minutes</dd><dt>Last activity</dt><dd title="{{.LastAt}}">{{ago .LastAt}}</dd></dl><a href="/sessions?provider={{.Provider}}{{if .Model}}&amp;model={{.Model}}{{end}}">Browse model sessions →</a> <a href="/runs?provider={{.Provider}}">Runs →</a>
+</details>{{else}}<div class="empty">No model activity recorded yet. Models appear as conversations are ingested.</div>{{end}}</div>
+</section>
 
 <h2 id="recent">Recent runs <a class="small" href="/runs">all runs →</a></h2>
 {{template "runrows" .RecentRuns}}
 
 <h2 id="scheduler">Scheduler log <span class="mut small">· fleet.log, all hosts</span></h2>
-{{if .Events}}<pre class="log">{{range .Events}}<span class="mut">{{clock .TS}} {{.Host}}</span> <span class="{{if eq .Level "error"}}bad{{else if eq .Level "notice"}}ok{{end}}">{{.Text}}</span>
-{{end}}</pre>{{else if .Status}}<pre class="log">{{.Status.Log}}</pre>{{else}}<div class="empty">No scheduler log yet.</div>{{end}}
+{{if .Events}}<details class="block" id="d-scheduler"><summary><span class="mut small">{{len .Events}} lines · latest:</span> {{with lastEvent .Events}}<span class="mut small">{{clock .TS}}</span> {{trunc 120 .Text}}{{end}}</summary>
+<pre class="log">{{range .Events}}<span class="mut">{{clock .TS}} {{.Host}}</span> <span class="{{if eq .Level "error"}}bad{{else if eq .Level "notice"}}ok{{end}}">{{.Text}}</span>
+{{end}}</pre></details>{{else if .Status}}<details class="block" id="d-scheduler"><summary>Scheduler log tail</summary><pre class="log">{{.Status.Log}}</pre></details>{{else}}<div class="empty">No scheduler log yet.</div>{{end}}
 
-<p class="mut small foot">{{range .Hosts}}{{.Host}}: {{.Sessions}} sessions, {{.Runs}} runs, seen {{ago .LastSeen}} · {{end}}refreshes every 15 s</p>
+<p class="mut small foot">refreshes every 15 s</p>
 </div>{{end}}
 
 {{define "quota-window"}}<div class="quota-window"><div class="model-heading"><strong>{{if expired .Reset}}Reset passed · awaiting update{{else}}{{remaining .Used}}% left{{end}}</strong><span class="mut small">{{quotaWindow .Minutes}} window</span></div>{{if not (expired .Reset)}}<meter min="0" max="100" value="{{.Used}}" aria-label="Quota percentage used">{{.Used}}% used</meter>{{end}}<p class="mut small">Reported used: {{.Used}}% · Resets {{resetTime .Reset}}</p></div>{{end}}

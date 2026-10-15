@@ -12,6 +12,7 @@ import (
 
 	"github.com/anchoo2kewl/llm-brain/hub/internal/charts"
 	"github.com/anchoo2kewl/llm-brain/hub/internal/insights"
+	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
 // registerInsights adds the /insights page and its JSON API.
@@ -251,7 +252,7 @@ func init() {
 			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title + ", " + strconv.Itoa(len(labels)) + " intervals",
 				XLabels: labels, Stacked: stacked, Format: unitFormat(unit)}, s)
 		},
-		"lines": func(id, title string, labels []string, s []charts.Series, unit string, top float64) template.HTML {
+		"linechart": func(id, title string, labels []string, s []charts.Series, unit string, top float64) template.HTML {
 			return charts.Area(charts.Opts{ID: id, Title: title, Desc: title, XLabels: labels, Lines: true, Max: top, Format: unitFormat(unit), Height: 140}, s)
 		},
 		"bars": func(id, title string, labels []string, s []charts.Series, unit string) template.HTML {
@@ -324,6 +325,40 @@ func init() {
 			return false
 		},
 		"joinStr": strings.Join,
+		// ownedWith counts issues carrying a label that contains part (working, pr-open, blocked).
+		"ownedWith": func(is []Issue, part string) int {
+			n := 0
+			for _, i := range is {
+				for _, l := range i.Labels {
+					if strings.Contains(l.Name, part) {
+						n++
+						break
+					}
+				}
+			}
+			return n
+		},
+		"logSplit":   logSplit,
+		"groupTools": groupTools,
+		"span": func(a, b time.Time) string {
+			if a.IsZero() || b.IsZero() {
+				return "—"
+			}
+			return minutes(b.Sub(a).Minutes())
+		},
+		"lastEvent": func(es []store.Event) *store.Event {
+			if len(es) == 0 {
+				return nil
+			}
+			return &es[len(es)-1]
+		},
+		"hostSpark": func(m map[string][]float64, host string) []float64 { return m[host] },
+		"topCallouts": func(cs []insights.Callout, n int) []insights.Callout {
+			if len(cs) > n {
+				return cs[:n]
+			}
+			return cs
+		},
 		"homeBars": func(b []charts.Bar) []charts.Bar {
 			out := make([]charts.Bar, len(b))
 			for i, x := range b {
@@ -336,6 +371,101 @@ func init() {
 		"add":    func(a, b int) int { return a + b },
 		"int64":  func(a int) int64 { return int64(a) },
 	} {
+		if _, taken := funcs[k]; taken {
+			panic("insights: template func " + k + " already defined")
+		}
 		funcs[k] = v
 	}
+}
+
+// logParts is a run log split for display: a long log shows its last lines, the rest behind an expander.
+type logParts struct {
+	Head, Tail           string
+	HeadLines, TailLines int
+}
+
+const logTailLines = 60
+
+func logSplit(s string) logParts {
+	n := strings.Count(s, "\n")
+	if n <= logTailLines*2 {
+		return logParts{Tail: s}
+	}
+	cut := len(s)
+	for i := 0; i <= logTailLines; i++ {
+		j := strings.LastIndexByte(s[:cut], '\n')
+		if j < 0 {
+			return logParts{Tail: s}
+		}
+		cut = j
+	}
+	head, tail := s[:cut+1], s[cut+1:]
+	return logParts{Head: head, Tail: tail, HeadLines: strings.Count(head, "\n"), TailLines: strings.Count(tail, "\n")}
+}
+
+// toolGroup is either one transcript item or a run of consecutive tool calls shown collapsed.
+type toolGroup struct {
+	One     item
+	Run     []item
+	Summary string
+}
+
+// minToolRun is the shortest run of consecutive tool calls folded into one expander.
+const minToolRun = 3
+
+func isTool(it item) bool { return it.Kind == "tool_use" || it.Kind == "tool_result" }
+
+func groupTools(items []item) []toolGroup {
+	var out []toolGroup
+	for i := 0; i < len(items); {
+		j := i
+		for j < len(items) && isTool(items[j]) {
+			j++
+		}
+		if j-i >= minToolRun {
+			out = append(out, toolGroup{Run: items[i:j], Summary: toolRunSummary(items[i:j])})
+			i = j
+			continue
+		}
+		if j == i {
+			j = i + 1
+		}
+		for ; i < j; i++ {
+			out = append(out, toolGroup{One: items[i]})
+		}
+	}
+	return out
+}
+
+func toolRunSummary(run []item) string {
+	counts := map[string]int{}
+	var order []string
+	errs := 0
+	for _, it := range run {
+		name := it.ToolName
+		if name == "" {
+			name = "result"
+		}
+		if counts[name] == 0 {
+			order = append(order, name)
+		}
+		counts[name]++
+		if it.IsError || (it.Result != nil && it.Result.IsError) {
+			errs++
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool { return counts[order[a]] > counts[order[b]] })
+	parts := make([]string, 0, 4)
+	for i, n := range order {
+		if i == 4 {
+			parts = append(parts, fmt.Sprintf("+%d more", len(order)-4))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s ×%d", n, counts[n]))
+	}
+	s := fmt.Sprintf("%d tool calls · %s", len(run), strings.Join(parts, ", "))
+	if errs > 0 {
+		s += fmt.Sprintf(" · %d failed", errs)
+	}
+	return s
 }

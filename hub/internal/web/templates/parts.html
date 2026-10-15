@@ -7,7 +7,7 @@
 <td>{{if .Target}}<a href="{{.Target}}" rel="noreferrer">{{short .Target}}</a>{{end}}</td>
 <td class="mut nowrap" title="{{.StartedAt}}">{{ago .StartedAt}}</td>
 <td class="mut nowrap">{{duration .StartedAt .EndedAt}}</td>
-<td class="mut">{{.Summary}}</td>
+<td class="mut">{{if gt (len .Summary) 200}}<details class="sum"><summary>{{trunc 160 .Summary}}</summary>{{.Summary}}</details>{{else}}{{.Summary}}{{end}}</td>
 </tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
 
 {{define "sessrows"}}{{if .}}<div class="wrap"><table>
@@ -55,3 +55,11 @@
 <table class="small"><tr><th>When</th><th>Account</th><th>Model</th><th>Tokens</th><th>Latency</th></tr>
 {{range .GwRequests}}<tr><td class="mut">{{ago .TS}}</td><td>{{.Account}}</td><td>{{.Model}}</td><td>{{tokens .Total}}</td><td class="{{if .Failed}}bad{{end}}">{{if .Failed}}failed {{.StatusCode}}{{else}}{{.LatencyMS}} ms{{end}}</td></tr>{{end}}
 </table>{{end}}{{end}}
+{{define "stats-strip"}}{{with .}}<div class="strip" aria-label="Conversation totals">
+<div><b>{{if .Responses}}{{fmti .Tokens.Total}}{{else}}—{{end}}</b><span>{{if .Responses}}tokens{{if .Subagents}} · incl. {{.Subagents}} subagents{{end}}{{else}}tokens not recorded (Codex){{end}}</span></div>
+<div><b>{{if .Responses}}{{fmt "dollars" .Dollars}}{{else}}—{{end}}</b><span>API-equivalent, estimate</span></div>
+<div><b>{{.ToolCalls}}</b><span>tool calls{{if .ToolErrors}} · <span class="bad">{{.ToolErrors}} errors</span>{{end}}</span></div>
+<div><b>{{.Prompts}}</b><span>prompts typed</span></div>
+<div><b>{{if .Responses}}{{span .First .Last}}{{else}}—{{end}}</b><span>{{.Responses}} model responses</span></div>
+<div>{{spark .Spark "Tokens over the conversation" "s0"}}<span>tokens over time{{with .Models}} · {{joinStr . ", "}}{{end}}</span></div>
+</div>{{with .TopTools}}<p class="mut small">Top tools: {{range $i, $t := .}}{{if $i}} · {{end}}{{$t.Tool}} ×{{$t.Calls}}{{if $t.Errors}} <span class="bad">({{$t.Errors}} failed)</span>{{end}}{{end}}</p>{{end}}{{end}}{{end}}
