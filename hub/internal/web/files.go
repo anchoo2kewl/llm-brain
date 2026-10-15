@@ -320,7 +320,17 @@ func (s *Server) harvestOnce(ctx context.Context) {
 		_ = s.Store.SetSettings(ctx, map[string]string{keyHarvest: strconv.FormatInt(last, 10)})
 	}
 	// 2. Copy what's due, per item: an offline Mac or a slow copy only delays its own files.
-	due, err := s.Store.DueAssets(ctx, 50)
+	hosts, err := s.Store.AgentHosts(ctx)
+	if err != nil {
+		return
+	}
+	var live []string
+	for _, h := range hosts {
+		if h.Live() {
+			live = append(live, h.Host)
+		}
+	}
+	due, err := s.Store.DueAssets(ctx, live, 50)
 	if err != nil {
 		s.Log.Printf("files: harvest: %v", err)
 		return
@@ -329,8 +339,7 @@ func (s *Server) harvestOnce(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !s.Agents.Ctl.HostLive(ctx, d[0]) {
-			_ = s.Store.RetryAsset(ctx, d[0], d[1], s.Store.AssetTries(ctx, d[0], d[1]))
+		if !s.Agents.Ctl.HostLive(ctx, d[0]) { // went offline mid-batch: wait, don't count it
 			continue
 		}
 		_, err := s.keepFromHost(ctx, d[0], d[1], "auto")
