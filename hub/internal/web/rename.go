@@ -80,6 +80,8 @@ func (s *Server) rename(ctx context.Context, kind string, id int64, name string)
 			s.titleSession(ctx, x, name)
 		} else if t.SessionUUID != "" && t.Open() {
 			s.renameLater(t, name) // no transcript yet: Claude writes it with the first message
+		} else if t.SessionUUID != "" && t.Open() {
+			s.renameLater(t, name) // no transcript yet: Claude writes it with the first message
 		}
 	case "session":
 		x, err := s.Store.Session(ctx, id)
@@ -127,6 +129,31 @@ func (s *Server) titleSession(ctx context.Context, x store.Session, name string)
 	if err := s.Agents.Ctl.TitleSession(ctx, x, name); err != nil && s.Log != nil {
 		s.Log.Printf("rename session %d: %v", x.ID, err)
 	}
+}
+
+// renameLater applies a terminal's name to its transcript once the transcript shows up (up to 30 minutes),
+// unless the terminal was renamed again meanwhile.
+func (s *Server) renameLater(t store.Terminal, name string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		for ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Second):
+			}
+			cur, err := s.Store.Terminal(ctx, t.ID)
+			if err != nil || cur.Title != name {
+				return // renamed again (that rename takes over) or gone
+			}
+			if x, err := s.Store.TerminalSession(ctx, cur); err == nil {
+				_ = s.Store.RenameSession(ctx, x.ID, name)
+				s.titleSession(ctx, x, name)
+				return
+			}
+		}
+	}()
 }
 
 // renameLater applies a terminal's name to its transcript once the transcript shows up (up to 30 minutes),
