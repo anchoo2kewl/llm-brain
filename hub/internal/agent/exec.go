@@ -135,7 +135,7 @@ func (e *Executor) Run(ctx context.Context) {
 	var lastInv time.Time
 	for ctx.Err() == nil {
 		if time.Since(lastInv) > time.Minute {
-			if err := e.Hub.Inventory(ctx, e.inventory()); err != nil && ctx.Err() == nil {
+			if err := e.Hub.Inventory(ctx, e.inventory(ctx)); err != nil && ctx.Err() == nil {
 				e.logf("agent: inventory: %v", err)
 			} else {
 				lastInv = time.Now()
@@ -157,7 +157,7 @@ func (e *Executor) Run(ctx context.Context) {
 	e.wg.Wait() // every turn has stopped its process group and sent its final report
 }
 
-func (e *Executor) inventory() Inventory {
+func (e *Executor) inventory(ctx context.Context) Inventory {
 	provs := e.Providers
 	if provs == nil {
 		provs = AvailableProviders()
@@ -165,7 +165,10 @@ func (e *Executor) inventory() Inventory {
 	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
 	if e.HubURL != "" {
 		inv.TermsAt = time.Now()
-		inv.Terminals, inv.Tmux = e.Terminals(context.Background())
+		inv.Terminals, inv.Tmux = e.Terminals(ctx)
+		if ctx.Err() != nil { // stopping: a listing cut short proves nothing
+			inv.Terminals, inv.Tmux = nil, false
+		}
 	}
 	return inv
 }

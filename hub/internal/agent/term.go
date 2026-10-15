@@ -121,6 +121,15 @@ func (e *Executor) tmux() (tmux, error) {
 	return tmux{bin: bin, conf: conf, sock: sock}, nil
 }
 
+// socketPath is where tmux -L puts the server's socket: $TMUX_TMPDIR (or /tmp)/tmux-<uid>/<name>.
+func (t tmux) socketPath() string {
+	dir := os.Getenv("TMUX_TMPDIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), t.sock)
+}
+
 func (t tmux) cmd(args ...string) *exec.Cmd {
 	c := exec.Command(t.bin, append([]string{"-L", t.sock, "-f", t.conf}, args...)...)
 	c.Env = termEnv(nil)
@@ -151,7 +160,13 @@ func termEnv(extra []string) []string {
 		}
 		env = append(env, kv)
 	}
-	return append(append(env, "PATH="+searchPath(), "TERM=xterm-256color", "COLORTERM=truecolor"), extra...)
+	env = append(env, "PATH="+searchPath(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	// launchd gives no locale; without a UTF-8 one tmux turns every non-ASCII byte (and a tab in -F
+	// output) into '_', so the CLIs' glyphs and our own listing come out mangled.
+	if os.Getenv("LC_ALL") == "" && os.Getenv("LC_CTYPE") == "" && !strings.Contains(strings.ToUpper(os.Getenv("LANG")), "UTF-8") {
+		env = append(env, "LANG=en_US.UTF-8")
+	}
+	return append(env, extra...)
 }
 
 // Terminals lists this host's live terminals and the folder each started in; ok is false when the list
@@ -161,16 +176,17 @@ func (e *Executor) Terminals(ctx context.Context) ([]store.TermSeen, bool) {
 	if err != nil {
 		return nil, false
 	}
-	out, err := t.run(ctx, "list-sessions", "-F", "#{session_name}\t#{session_path}")
+	out, err := t.run(ctx, "list-sessions", "-F", "#{session_name} #{session_path}")
 	if err != nil {
-		if strings.Contains(out, "no server running") || strings.Contains(out, "error connecting") || strings.Contains(out, "No such file") {
+		// Only a missing socket means "no terminals"; any other failure (a signal at shutdown, say) is unknown.
+		if _, serr := os.Stat(t.socketPath()); errors.Is(serr, os.ErrNotExist) {
 			return nil, true
 		}
 		return nil, false
 	}
 	var seen []store.TermSeen
 	for _, l := range strings.Split(out, "\n") {
-		name, cwd, _ := strings.Cut(strings.TrimSpace(l), "\t")
+		name, cwd, _ := strings.Cut(strings.TrimSpace(l), " ") // our session names have no spaces
 		if s, ok := strings.CutPrefix(name, "llmb-"); ok {
 			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
 				seen = append(seen, store.TermSeen{ID: id, Cwd: cwd})

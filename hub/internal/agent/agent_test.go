@@ -397,7 +397,7 @@ func newRig(t *testing.T) *rig {
 	ex := &Executor{Host: "studio", Version: "test", Hub: hub, Roots: NewRoots([]string{root}), StateDir: t.TempDir(), Runner: run,
 		Providers: []string{"claude", "codex"}}
 	ex.init()
-	if err := hub.Inventory(context.Background(), ex.inventory()); err != nil {
+	if err := hub.Inventory(context.Background(), ex.inventory(context.Background())); err != nil {
 		t.Fatal(err)
 	}
 	return &rig{st: st, ctl: &Control{S: st}, hub: hub, ex: ex, run: run, repo: repo}

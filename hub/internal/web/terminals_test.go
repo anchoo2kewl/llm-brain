@@ -26,6 +26,9 @@ func TestTerminalEndToEnd(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 	t.Setenv("SHELL", "/bin/bash")
+	for _, k := range []string{"LANG", "LC_ALL", "LC_CTYPE"} { // launchd starts the hub with no locale
+		t.Setenv(k, "")
+	}
 	rig := newSessRig(t)
 	sock := fmt.Sprintf("llmb-test-%d", os.Getpid())
 	t.Cleanup(func() { _ = exec.Command(tmuxBin, "-L", sock, "kill-server").Run() })
@@ -59,6 +62,9 @@ func TestTerminalEndToEnd(t *testing.T) {
 		t.Fatalf("terminal never became %s", want)
 	}
 	waitStatus("live")
+	if seen, ok := ex.Terminals(ctx); !ok || len(seen) != 1 || seen[0].ID != 1 {
+		t.Fatalf("tmux listing: %+v %v", seen, ok)
+	}
 
 	// Another site's page can't open the websocket.
 	if _, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(rig.ts.URL, "http")+"/terminals/1/ws",
@@ -72,11 +78,11 @@ func TestTerminalEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ws.Write(wctx, websocket.MessageBinary, []byte("echo hub-$((40+2))\r")); err != nil {
+	if err := ws.Write(wctx, websocket.MessageBinary, []byte("echo hub-$((40+2)) ❯\r")); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	for !strings.Contains(out.String(), "hub-42") {
+	for !strings.Contains(out.String(), "hub-42 ❯") {
 		_, b, err := ws.Read(wctx)
 		if err != nil {
 			t.Fatalf("read: %v; got %q", err, out.String())
