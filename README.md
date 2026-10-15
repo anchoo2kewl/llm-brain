@@ -106,19 +106,30 @@ Go + [Turso](https://github.com/tursodatabase/turso) (the Rust rewrite of SQLite
   - Where it shows up: `/chat` groups messages by source and thread, and search takes `type:chat channel: from: mentions:me`.
   - Fleet scripts read `GET /api/chat/messages?after=<id>` and `GET /api/chat/me`.
 
+- **Chats** (`/chats`, **+ New chat** in the nav): start a conversation on any Mac from the hub. One picker says who you talk to:
+  - **Agent chat:** Claude Code, Codex or Gemini CLI (whichever that Mac has), with tools, in a folder. With no folder picked it runs read-only in a scratch folder under the state dir. Options pick the host, a repo or worktree under the allowed roots (or a new `<repo>-wt-<name>` worktree from a base branch), the model, and the mode: read-only (`plan` / `read-only`), edits (`acceptEdits` / `workspace-write`, the default in a folder), or bypass, which needs its own tick box per session.
+  - **Plain chat:** any model the account gateway lists (`/v1/models`, grouped Claude / OpenAI / Gemini / other), no tools, streamed token by token, markdown rendered safely, and the model can change mid-conversation. It needs `CPA_API_KEY` in `--gateway-env`; when the gateway is down the page says so.
+  - Each turn runs headless (`claude -p --output-format stream-json`, `codex exec --json`, `gemini -o stream-json`), through the gateway the way `bin/llm-run` does, else on the CLI's own login. The session id is captured, so every later message resumes it. While a turn runs the page shows a typing indicator and its live output (the turn log is `logs/agent-<id>.<time>.log`, shipped and shown like a worker log); the transcript arrives through normal ingestion.
+  - Every session page, hub-started or not, gets a composer to continue it (when its Mac has a live agent), **Stop**, **Review with <the other LLM>** (a read-only review of `git diff <base>...HEAD` plus uncommitted work, using `bin/review-rules`, as its own linked chat), **Send review back** (a resume turn with the findings), and the exact `claude --resume <id>` / `codex resume <id>` to continue by hand.
+  - `/agents` lists every hub-run session, the hosts with a live agent, and the command log. `/prompts` is a prompt library with `{{VARS}}` (CWD, REPO, HOST and BASE are filled in).
+  - How it runs: the hub keeps a command queue. `hub serve` runs the session agent for its own Mac; `hub ship` runs it on the laptop and polls `GET /api/agent/commands` every 3 s, so nothing listens there. Folders are checked on the Mac that runs them, after resolving symlinks, against `--roots`. Every control endpoint is tailnet-only and refuses cross-site POSTs; every command is logged.
+
 Ingestion is incremental and idempotent: a byte offset per file advances in the same transaction as its rows; the hub re-scans every 10 s.
 
 ```
 make -C hub build     # -> bin/hub (darwin/arm64, no CGO)
 make -C hub check     # go vet + go test
-bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--people login=Name,...] [--gateway URL] [--slack-env PATH] [--chat-interval 2m|0]
-bin/hub ship --to http://<hub-host>:8787 [--once]
+bin/hub serve [--port 8787] [--db PATH] [--index PATH|off] [--people login=Name,...] [--gateway URL] [--gateway-env PATH] [--slack-env PATH] [--chat-interval 2m|0]
+bin/hub ship --to http://<hub-host>:8787 [--once] [--poll 3s]
+# both: [--agent=true|false] [--roots DIR,DIR] [--brain DIR]
 ```
+
+`--agent` (on by default) runs the session agent on that Mac; `--agent=false` makes it read-only again. `--roots` are the folders sessions may run in (default: `work_root` from the fleet config if it exists, else `~/projects`). `--brain` is the llm-brain checkout for `config/fleet.yaml` and `bin/review-rules` (default: the one the binary lives in).
 
 ## Caveats
 
 - Routing subscription OAuth logins through a proxy may not be covered by your provider's terms. Read them, and keep work data on work accounts if your employer requires it.
-- No auth on the hub: anyone on your tailnet can read every transcript. Keep it on a tailnet you control.
+- No auth on the hub: anyone on your tailnet can read every transcript, and can start agent sessions on any Mac running `hub serve` or `hub ship` with `--agent` on. Keep it on a tailnet you control, or run with `--agent=false`.
 - `hub.db` grows with your transcripts; there is no retention yet.
 
 ## License
