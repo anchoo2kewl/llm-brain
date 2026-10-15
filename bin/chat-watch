@@ -115,7 +115,9 @@ def resolve(short, repos):
     return None
 
 
-def refs(text, default_repo, repos):
+def refs(text, default_repo, repos, learned=None):
+    """learned: number -> repo from earlier explicit refs, so a later bare #17446 means the same repo#17446."""
+    learned = {} if learned is None else learned
     out = set()
     for o, n, num in re.findall(r"github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\d+)", text):
         out.add((f"{o}/{n}", int(num)))
@@ -124,9 +126,12 @@ def refs(text, default_repo, repos):
         r = resolve(short, repos)
         if r:
             out.add((r, int(num)))
-    if default_repo:
-        for num in re.findall(r"(?<![\w/#-])#(\d+)\b", body):
-            out.add((default_repo, int(num)))
+    for r, n in out:
+        learned[str(n)] = r
+    for num in re.findall(r"(?<![\w/#-])#(\d+)\b", body):
+        r = learned.get(num) or default_repo
+        if r:
+            out.add((r, int(num)))
     return out
 
 
@@ -154,6 +159,7 @@ def main():
     sf = CHAT / "state.json"
     st = json.loads(sf.read_text()) if sf.exists() else {}
     users = st.setdefault("users", {})
+    learned = st.setdefault("learned", {})
     trusted = cfg(".chat.trusted") or {}          # slack user id -> github handle
     people = cfg(".people") or {}                 # github handle -> display name
     me = cfg(".chat.me") or ""
@@ -203,7 +209,7 @@ def main():
                 "ts": m["ts"], "at": datetime.fromtimestamp(float(m["ts"])).strftime("%Y-%m-%d %H:%M:%S"),
                 "channel": cname, "who": name(uid), "github": trusted.get(uid, ""), "trusted": uid in trusted,
                 "to_me": bool(me) and f"<@{me}" in m.get("text", ""), "thread": m.get("thread_ts") if m.get("thread_ts") != m["ts"] else None,
-                "text": text, "refs": sorted(f"{r}#{n}" for r, n in refs(text, crepo, repos)),
+                "text": text, "refs": sorted(f"{r}#{n}" for r, n in refs(text, crepo, repos, learned)),
             })
 
     if a.dry_run:
