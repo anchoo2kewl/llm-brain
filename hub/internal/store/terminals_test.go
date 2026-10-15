@@ -90,3 +90,24 @@ func TestTerminalLifecycle(t *testing.T) {
 		t.Fatalf("a cancelled open was claimed: %+v", cs)
 	}
 }
+
+func TestRecentFoldersLiteralPrefix(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, cwd := range []string{"/Users/a_b/app", "/Users/axb/other", "/Users/a_b"} {
+		if _, err := s.CreateTerminal(ctx, Terminal{Host: "h", Provider: "shell", Cwd: cwd}, Command{Host: "h", Kind: "term_open"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.RecentFolders(ctx, "h", "/Users/a_b", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "/Users/a_b/app" {
+		t.Fatalf("recent: %v", got)
+	}
+}

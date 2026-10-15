@@ -134,7 +134,7 @@ func TestTermScript(t *testing.T) {
 	if _, _, err := agent.TermScript(agent.TermOpen{Provider: "claude", Model: "x; rm -rf ~"}, agent.Gateway{}, "/bin/zsh"); err == nil {
 		t.Fatal("a model name with shell in it was accepted")
 	}
-	if s, _, _ := agent.TermScript(agent.TermOpen{Provider: "codex", Ask: true}, agent.Gateway{}, "/bin/zsh"); s != "codex; exec /bin/zsh -l" {
+	if s, _, _ := agent.TermScript(agent.TermOpen{Provider: "codex", Ask: true}, agent.Gateway{}, "/bin/zsh"); s != "codex --ask-for-approval on-request --sandbox workspace-write; exec /bin/zsh -l" {
 		t.Fatalf("ask-first codex: %s", s)
 	}
 	s, _, _ = agent.TermScript(agent.TermOpen{Provider: "shell"}, agent.Gateway{}, "/bin/zsh")
