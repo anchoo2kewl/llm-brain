@@ -48,6 +48,9 @@ type Turn struct {
 	Scratch bool `json:"scratch,omitempty"`
 	// Review: ignore Prompt and review the folder's change against Base (read-only).
 	Review *Review `json:"review,omitempty"`
+	// InHome: a review of a terminal's folder, which may be anywhere in the home folder (a terminal is a
+	// full shell already); allowed only together with Review, so it stays read-only.
+	InHome bool `json:"in_home,omitempty"`
 }
 
 type Worktree struct {

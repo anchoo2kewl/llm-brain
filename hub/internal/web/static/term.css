@@ -19,3 +19,4 @@
 .startpick a.on{border-color:var(--acc);outline:1px solid var(--acc)}
 .startpick a b{display:block;margin-bottom:3px}
 @media (max-width:640px){.term{height:60vh}}
+.termbar form[data-confirm] button{min-width:4.5em}

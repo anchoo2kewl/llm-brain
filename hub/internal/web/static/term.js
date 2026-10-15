@@ -111,7 +111,7 @@
       if (f.getAttribute("data-armed")) { wanted = false; return; }
       e.preventDefault();
       f.setAttribute("data-armed", "1");
-      b.textContent = "Click again to end";
+      b.textContent = "Sure?"; // same width as "End": nothing shifts under the second click
       setTimeout(function () { f.removeAttribute("data-armed"); b.textContent = "End"; }, 4000);
     });
   });
