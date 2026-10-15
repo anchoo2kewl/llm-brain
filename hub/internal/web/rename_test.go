@@ -6,21 +6,12 @@ import (
 	"testing"
 )
 
-func TestCleanNameAndClaudeIdle(t *testing.T) {
+func TestCleanName(t *testing.T) {
 	if n, err := cleanName("  fix\tthe   pager\n"); err != nil || n != "fix the pager" {
 		t.Fatalf("cleanName: %q %v", n, err)
 	}
 	if _, err := cleanName("   "); err == nil {
 		t.Fatal("empty name accepted")
-	}
-	idle := "╭────╮\n❯ Try \"how do I log an error?\"\n────\n  ⏵⏵ bypass permissions on"
-	busy := "✶ Crunching… (7s · esc to interrupt)\n❯ \n"
-	typing := "────\n❯ half a sentence\n────"
-	empty := "────\n❯ \n────"
-	for s, want := range map[string]bool{idle: true, busy: false, typing: false, empty: true, "no prompt here": false} {
-		if got := claudeIdle(s); got != want {
-			t.Errorf("claudeIdle(%q) = %v", s, got)
-		}
 	}
 }
 

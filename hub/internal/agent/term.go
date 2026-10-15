@@ -36,12 +36,15 @@ import (
 // The tmux server runs on its own socket (-L llm-brain) with its own config, so it never touches the
 // person's own tmux.
 
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 const (
-	KindTermOpen    = "term_open"
-	KindTermAttach  = "term_attach"
-	KindTermKill    = "term_kill"
-	KindTermSend    = "term_send"    // type text and/or press keys (tmux send-keys)
-	KindTermCapture = "term_capture" // the screen (and some scrollback) as text
+	KindSessionTitle = "session_title" // name a Claude transcript (any session on this Mac, hub or not)
+	KindTermOpen     = "term_open"
+	KindTermAttach   = "term_attach"
+	KindTermKill     = "term_kill"
+	KindTermSend     = "term_send"    // type text and/or press keys (tmux send-keys)
+	KindTermCapture  = "term_capture" // the screen (and some scrollback) as text
 )
 
 // TermSend is a term_send payload: Text is typed literally, then each of Keys is pressed (tmux key names:
@@ -139,12 +142,13 @@ func TermProviderName(p string) string {
 
 // TermOpen is a term_open payload.
 type TermOpen struct {
-	Provider string    `json:"provider"`
-	Cwd      string    `json:"cwd"` // absolute, or ~/...; '' = a scratch folder
-	Model    string    `json:"model,omitempty"`
-	Prompt   string    `json:"prompt,omitempty"` // the first message, typed into the CLI
-	Worktree *Worktree `json:"worktree,omitempty"`
-	Ask      bool      `json:"ask,omitempty"` // the CLI's normal approval prompts instead of every permission
+	Provider  string    `json:"provider"`
+	Cwd       string    `json:"cwd"` // absolute, or ~/...; '' = a scratch folder
+	Model     string    `json:"model,omitempty"`
+	Prompt    string    `json:"prompt,omitempty"` // the first message, typed into the CLI
+	Worktree  *Worktree `json:"worktree,omitempty"`
+	Ask       bool      `json:"ask,omitempty"`        // the CLI's normal approval prompts instead of every permission
+	SessionID string    `json:"session_id,omitempty"` // claude --session-id, so the hub knows its transcript
 }
 
 // TermAttach is a term_attach payload.
@@ -326,6 +330,12 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 		argv = []string{"claude", "--dangerously-skip-permissions"}
 		if o.Ask { // explicit, so a bypass default in the CLI's own settings doesn't win
 			argv = []string{"claude", "--permission-mode", "manual"}
+		}
+		if o.SessionID != "" {
+			if !uuidRe.MatchString(o.SessionID) {
+				return "", nil, fmt.Errorf("bad session id %q", o.SessionID)
+			}
+			argv = append(argv, "--session-id", o.SessionID)
 		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
@@ -675,4 +685,57 @@ func homePlaces() (string, []string) {
 		out = append(out, filepath.Join(home, n))
 	}
 	return home, out
+}
+
+// SessionTitle is a session_title payload: the transcript file (under ~/.claude/projects) and its session id.
+type SessionTitle struct {
+	Path  string `json:"path"`
+	UUID  string `json:"uuid"`
+	Title string `json:"title"`
+}
+
+// sessionTitle appends the line Claude's own /rename writes ({"type":"custom-title",...}) to a transcript,
+// so `claude --resume`, the CLI and the hub all show the new name. One small O_APPEND write: safe next to a
+// Claude process that is writing the same file.
+func (e *Executor) sessionTitle(ctx context.Context, c store.Command) {
+	var r SessionTitle
+	if err := json.Unmarshal(c.Payload, &r); err != nil || r.Title == "" || !uuidRe.MatchString(r.UUID) {
+		e.report(ctx, c.ID, Report{Status: "failed", Error: "bad payload"})
+		return
+	}
+	fail := func(err error) { e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()}) }
+	home, _ := os.UserHomeDir()
+	root, err := filepath.EvalSymlinks(filepath.Join(home, ".claude", "projects"))
+	if err != nil {
+		fail(err)
+		return
+	}
+	real, err := filepath.EvalSymlinks(r.Path)
+	if err != nil || !strings.HasPrefix(real, root+string(filepath.Separator)) || filepath.Ext(real) != ".jsonl" ||
+		strings.TrimSuffix(filepath.Base(real), ".jsonl") != r.UUID {
+		fail(errors.New("not this session's Claude transcript"))
+		return
+	}
+	line, _ := json.Marshal(map[string]string{"type": "custom-title", "customTitle": r.Title, "sessionId": r.UUID})
+	f, err := os.OpenFile(real, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		fail(err)
+		return
+	}
+	defer f.Close()
+	// Start on a new line if the file doesn't end with one.
+	if st, err := f.Stat(); err == nil && st.Size() > 0 {
+		b := make([]byte, 1)
+		if rf, err := os.Open(real); err == nil {
+			if _, err := rf.ReadAt(b, st.Size()-1); err == nil && b[0] != '\n' {
+				line = append([]byte("\n"), line...)
+			}
+			rf.Close()
+		}
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		fail(err)
+		return
+	}
+	e.report(ctx, c.ID, Report{Status: "done"})
 }

@@ -12,27 +12,28 @@ import (
 
 // Terminal is an interactive CLI running in tmux on a host (migration 0015).
 type Terminal struct {
-	ID        int64
-	Host      string
-	Provider  string
-	Cwd       string
-	Model     string
-	Title     string
-	Status    string // starting | live | ended | failed
-	Error     string
-	CreatedAt string
-	UpdatedAt string
-	LiveAt    string
-	EndedAt   string
+	ID          int64
+	Host        string
+	Provider    string
+	Cwd         string
+	Model       string
+	Title       string
+	Status      string // starting | live | ended | failed
+	Error       string
+	CreatedAt   string
+	UpdatedAt   string
+	LiveAt      string
+	EndedAt     string
+	SessionUUID string // claude --session-id, set when the hub chose it
 }
 
 func (t Terminal) Open() bool { return t.Status == "starting" || t.Status == "live" }
 
-const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, live_at, ended_at`
+const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, live_at, ended_at, session_uuid`
 
 func scanTerm(sc interface{ Scan(...any) error }) (Terminal, error) {
 	var t Terminal
-	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.LiveAt, &t.EndedAt)
+	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.LiveAt, &t.EndedAt, &t.SessionUUID)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -47,8 +48,8 @@ func (s *Store) CreateTerminal(ctx context.Context, t Terminal, open Command) (i
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := Now()
-	id, err := insertID(ctx, tx, `INSERT INTO terminals (host, provider, cwd, model, title, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'starting', ?, ?)`, t.Host, t.Provider, t.Cwd, t.Model, t.Title, now, now)
+	id, err := insertID(ctx, tx, `INSERT INTO terminals (host, provider, cwd, model, title, status, created_at, updated_at, session_uuid)
+		VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?)`, t.Host, t.Provider, t.Cwd, t.Model, t.Title, now, now, t.SessionUUID)
 	if err != nil {
 		return 0, err
 	}
@@ -280,17 +281,30 @@ func (s *Store) RenameSession(ctx context.Context, id int64, name string) error 
 	return err
 }
 
-// TerminalSession is the transcript a hub terminal is running: same Mac, folder and CLI, the first one to
-// start after the terminal was opened.
+// TerminalSession is the transcript a hub terminal is running: by the session id the hub gave it (Claude),
+// else the first transcript with the same Mac, folder and CLI that started after the terminal opened and
+// isn't another terminal's.
 func (s *Store) TerminalSession(ctx context.Context, t Terminal) (Session, error) {
+	if t.SessionUUID != "" {
+		return s.SessionByProviderUUID(ctx, t.Host, t.Provider, t.SessionUUID)
+	}
 	return scanSession(s.DB.QueryRowContext(ctx, `SELECT `+sessCols+` FROM sessions s WHERE s.host = ? AND s.cwd = ? AND s.provider = ?
-		AND s.parent_uuid = '' AND s.first_at >= ? ORDER BY s.first_at LIMIT 1`, t.Host, t.Cwd, t.Provider, t.CreatedAt))
+		AND s.parent_uuid = '' AND s.first_at >= ?
+		AND s.session_uuid NOT IN (SELECT session_uuid FROM terminals WHERE session_uuid != '')
+		ORDER BY s.first_at LIMIT 1`, t.Host, t.Cwd, t.Provider, t.CreatedAt))
 }
 
 // SessionTerminal is the open hub terminal running this transcript, if any (the inverse of TerminalSession).
 func (s *Store) SessionTerminal(ctx context.Context, x Session) (Terminal, error) {
+	if x.UUID != "" {
+		t, err := scanTerm(s.DB.QueryRowContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND session_uuid = ?
+			ORDER BY id DESC LIMIT 1`, x.Host, x.UUID))
+		if err == nil || !errors.Is(err, ErrNotFound) {
+			return t, err
+		}
+	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+termCols+` FROM terminals WHERE host = ? AND cwd = ? AND provider = ?
-		AND status IN ('starting', 'live') AND created_at <= ? ORDER BY created_at DESC`, x.Host, x.Cwd, x.Provider, x.FirstAt)
+		AND session_uuid = '' AND status IN ('starting', 'live') AND created_at <= ? ORDER BY created_at DESC`, x.Host, x.Cwd, x.Provider, x.FirstAt)
 	if err != nil {
 		return Terminal{}, err
 	}
