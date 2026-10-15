@@ -376,7 +376,7 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 		return
 	}
 	gw := Gateway{}
-	if o.Provider == "claude" || o.Provider == "codex" {
+	if e.Config.TerminalGateway && (o.Provider == "claude" || o.Provider == "codex") {
 		gw = e.Config.ResolveGateway(ctx)
 	}
 	shell := userShell()
@@ -386,6 +386,9 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 		return
 	}
 	args := []string{"new-session", "-d", "-s", TmuxName(c.AgentID), "-x", "200", "-y", "50", "-c", cwd}
+	// LLM_BRAIN_REMOTE: nobody is at this Mac's screen, so a browser login must be approved elsewhere
+	// (skills read it, e.g. aws-sso-login uses --use-device-code).
+	env = append(env, "LLM_BRAIN_REMOTE=1", "LLM_BRAIN_TERMINAL="+strconv.FormatInt(c.AgentID, 10))
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}

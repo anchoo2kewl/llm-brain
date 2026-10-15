@@ -18,6 +18,9 @@ type Config struct {
 	GatewayEnabled bool
 	GatewayURL     string
 	GatewayEnv     string // file holding CPA_API_KEY
+	// TerminalGateway: interactive terminals go through the gateway too. Off by default, so a terminal
+	// uses the CLI's own login, like Claude/Codex on the laptop (terminals.gateway: true to turn it on).
+	TerminalGateway bool
 }
 
 func LoadConfig(brainDir string) Config {
@@ -46,10 +49,11 @@ func LoadConfig(brainDir string) Config {
 	merge(filepath.Join(expandHome(ov), "config.yaml"))
 	merge(local)
 	c := Config{
-		WorkRoot:       expandHome(kv["work_root"]),
-		GatewayEnabled: kv["gateway.enabled"] == "true",
-		GatewayURL:     strings.TrimRight(kv["gateway.url"], "/"),
-		GatewayEnv:     expandHome(kv["gateway.env_file"]),
+		WorkRoot:        expandHome(kv["work_root"]),
+		GatewayEnabled:  kv["gateway.enabled"] == "true",
+		GatewayURL:      strings.TrimRight(kv["gateway.url"], "/"),
+		GatewayEnv:      expandHome(kv["gateway.env_file"]),
+		TerminalGateway: kv["terminals.gateway"] == "true",
 	}
 	if c.GatewayEnv == "" {
 		c.GatewayEnv = filepath.Join(home, ".config/llm-brain/cpa.env")
