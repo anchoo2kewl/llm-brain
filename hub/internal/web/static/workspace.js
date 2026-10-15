@@ -82,9 +82,9 @@
   function refresh(then) {
     Promise.all([
       fetch("/api/terminals", { cache: "no-store" }).then(function (r) { return r.json(); }),
-      fetch("/api/live-sessions", { cache: "no-store" }).then(function (r) { return r.json(); }).catch(function () { return []; })
+      fetch("/api/live-sessions", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
     ]).then(function (both) {
-      var ts = both[0], live = both[1];
+      var ts = Array.isArray(both[0]) ? both[0] : [], live = Array.isArray(both[1]) ? both[1] : [];
       // Sessions running elsewhere (the laptop's own terminal, an IDE): keyed "s<id>", shown read-only.
       // One already in a pane stays listed after it goes quiet.
       live.forEach(function (x) { ts.push({ id: "s" + x.id, sid: x.id, kind: "session", title: x.title, host: x.host, cli: x.cli, cwd: x.cwd, status: "elsewhere", updated: x.updated }); });

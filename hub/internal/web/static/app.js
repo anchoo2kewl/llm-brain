@@ -88,9 +88,10 @@
           }
           if (last) after = last;
           quiet = r.headers.get("X-Live") === "true" ? 0 : quiet + 1;
-          if (quiet > 20) { const s = $("livestate"); if (s) s.textContent = "session went quiet"; return; }
+          // A page of its own gives up after a quiet spell; one inside the workspace keeps listening, slower.
+          if (quiet > 20 && !document.body.dataset.embed) { const s = $("livestate"); if (s) s.textContent = "session went quiet"; return; }
         } catch (e) {}
-        setTimeout(tick, 4000);
+        setTimeout(tick, quiet > 20 ? 15000 : 4000);
       };
       setTimeout(tick, 4000);
     }

@@ -656,11 +656,26 @@ func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	// Each open hub terminal claims one session: same Mac, folder and CLI, the first one to start after the
+	// terminal was opened. Every other session is somebody else's, even in the same folder.
 	ts, _ := s.Store.Terminals(ctx, "", 200)
-	mine := map[string]bool{}
+	mine := map[int64]bool{}
 	for _, t := range ts {
-		if t.Open() {
-			mine[t.Host+"|"+t.Cwd+"|"+t.Provider] = true
+		if !t.Open() {
+			continue
+		}
+		var best *store.Session
+		for i := range ss {
+			x := &ss[i]
+			if mine[x.ID] || x.ParentUUID != "" || x.Host != t.Host || x.Cwd != t.Cwd || x.Provider != t.Provider || x.FirstAt < t.CreatedAt {
+				continue
+			}
+			if best == nil || x.FirstAt < best.FirstAt {
+				best = x
+			}
+		}
+		if best != nil {
+			mine[best.ID] = true
 		}
 	}
 	type liveJSON struct {
@@ -674,7 +689,7 @@ func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []liveJSON{}
 	for _, x := range ss {
-		if x.ParentUUID != "" || mine[x.Host+"|"+x.Cwd+"|"+x.Provider] {
+		if x.ParentUUID != "" || mine[x.ID] {
 			continue
 		}
 		home, _, _ := s.Store.AgentPlaces(ctx, x.Host)
