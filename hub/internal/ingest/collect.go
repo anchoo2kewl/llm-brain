@@ -29,6 +29,8 @@ type Collector struct {
 	Sink      Sink
 	ChunkMax  int // bytes per chunk; a single longer line grows the chunk up to MaxLine
 	Log       *log.Logger
+	// Extra, when set, adds run keys that are alive but have no pid file (the session agent's turns).
+	Extra func() []string
 
 	promptSent map[string]time.Time
 }
@@ -109,6 +111,9 @@ func (c *Collector) Cycle(ctx context.Context) error {
 		}
 	}
 	hb := Heartbeat{Host: c.Host, Role: c.Role, TZ: c.TZ, Running: c.runningKeys()}
+	if c.Extra != nil {
+		hb.Running = append(hb.Running, c.Extra()...)
+	}
 	prompts := c.prompts()
 	hb.Prompts = prompts
 	if err := c.Sink.Heartbeat(ctx, hb); err != nil {
