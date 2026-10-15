@@ -1,5 +1,8 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">
 <div class="top"><div><h1>New chat</h1><p class="mut">Pick who to talk to and write. Agents work in a folder with tools; plain chats just talk.</p></div><div class="meta"><a href="/chats">← chats</a></div></div>
+<link rel="stylesheet" href="/static/term.css">
+<div class="startpick"><a class="on" href="/chats/new"><b>Chat</b><span class="mut small">Talk to a model, or give Claude/Codex one task at a time in a folder.</span></a>
+<a href="/terminals/new"><b>Terminal →</b><span class="mut small">Claude Code or Codex on the command line in any folder, every permission, runs until you end it.</span></a></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 <form method="post" action="/chats/new" class="newchat-form">
 <label class="pick"><span>Chat with</span>

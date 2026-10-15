@@ -47,9 +47,12 @@ type Executor struct {
 	Poll          time.Duration
 	MaxTurns      int
 	Providers     []string // the CLIs to offer; nil = whichever are on PATH
+	HubURL        string   // where terminal bridges dial back (term.go); '' = no terminals
+	TmuxSocket    string   // tmux -L name for terminals; '' = llm-brain
 
 	mu     sync.Mutex
 	active map[int64]*turn // by turn command id
+	busy   map[int64]bool  // terminal commands in hand, so the hub doesn't fail a slow one as lost
 	wg     sync.WaitGroup
 }
 
@@ -97,6 +100,9 @@ func (e *Executor) runningIDs() []int64 {
 	for id := range e.active {
 		out = append(out, id)
 	}
+	for id := range e.busy {
+		out = append(out, id)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
@@ -105,6 +111,7 @@ func (e *Executor) init() {
 	e.mu.Lock()
 	if e.active == nil {
 		e.active = map[int64]*turn{}
+		e.busy = map[int64]bool{}
 	}
 	e.mu.Unlock()
 	if e.Poll <= 0 {
@@ -152,7 +159,11 @@ func (e *Executor) inventory() Inventory {
 	if provs == nil {
 		provs = AvailableProviders()
 	}
-	return Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
+	inv := Inventory{Host: e.Host, Version: e.Version, Roots: e.Roots.Paths(), Folders: e.Roots.Scan(1000), Providers: provs}
+	if e.HubURL != "" {
+		inv.Terminals, inv.Tmux = e.Terminals(context.Background())
+	}
+	return inv
 }
 
 // PollOnce fetches and starts this host's new commands.
@@ -193,6 +204,22 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 			}(c)
 		case KindStop:
 			e.stop(ctx, c)
+		case KindTermOpen, KindTermAttach, KindTermKill:
+			e.mu.Lock()
+			e.busy[c.ID] = true
+			e.mu.Unlock()
+			e.wg.Add(1)
+			go func(c store.Command) {
+				defer func() {
+					e.mu.Lock()
+					delete(e.busy, c.ID)
+					e.mu.Unlock()
+					e.wg.Done()
+				}()
+				map[string]func(context.Context, store.Command){
+					KindTermOpen: e.termOpen, KindTermAttach: e.termAttach, KindTermKill: e.termKill,
+				}[c.Kind](ctx, c)
+			}(c)
 		default:
 			e.report(ctx, c.ID, Report{Status: "failed", Error: "unknown command " + c.Kind})
 		}

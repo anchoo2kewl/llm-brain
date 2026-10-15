@@ -1,0 +1,22 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/term.css">
+<div class="top"><div><h1>New terminal</h1><p class="mut">Claude Code or Codex on the command line, in a folder you pick, with every permission. It keeps running in tmux after you close the page.</p></div><div class="meta"><a href="/chats/new">← plain chat instead</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+{{if not .Hosts}}<p class="bad">No Mac has a session agent yet (run <code>hub serve</code> or <code>hub ship</code> there).</p>{{end}}
+<form method="post" action="/terminals/new" class="newchat-form termform">
+<fieldset class="clis"><legend>Run</legend>
+{{range .CLIs}}<label class="cli"><input type="radio" name="cli" value="{{.Value}}" {{if eq .Value $.F.Provider}}checked{{end}}><span><b>{{.Label}}</b><code>{{.Note}}</code></span></label>{{end}}
+</fieldset>
+<div class="grid2">
+<label>On<select name="host" id="termhost">{{range .Hosts}}<option value="{{.Host}}" {{if eq .Host $.F.Host}}selected{{end}} {{if not .Live}}disabled{{end}}>{{.Host}}{{if not .Live}} (offline){{end}}</option>{{end}}</select></label>
+<label>Folder<select name="folder" id="termfolder"><option value="">a new scratch folder</option>{{range .Hosts}}{{if .Live}}<optgroup label="{{.Host}}" data-host="{{.Host}}">{{$h := .Host}}{{range .Folders}}{{$v := printf "%s|%s" $h .Path}}<option value="{{$v}}" {{if eq $v $.F.Folder}}selected{{end}}>{{home .Path}}{{if .Branch}} ({{.Branch}}){{end}}</option>{{end}}</optgroup>{{end}}{{end}}</select></label>
+<label class="wide">…or any folder on that Mac<input name="path" value="{{.F.Path}}" placeholder="~/projects/my-app or /Users/me/code/thing" autocomplete="off" spellcheck="false"></label>
+<label>New worktree (optional)<input name="wt_slug" value="{{.F.WtSlug}}" placeholder="e.g. fix-pager" autocomplete="off"></label>
+<label>…from<input name="wt_base" value="{{.F.WtBase}}" placeholder="origin/main" autocomplete="off"></label>
+<label>Model (optional)<input name="model" value="{{.F.Model}}" placeholder="the CLI's default, e.g. opus" autocomplete="off"></label>
+<label class="wide">First message (optional)<textarea name="prompt" rows="3" placeholder="What to work on. You can also just type in the terminal.">{{.F.Prompt}}</textarea></label>
+</div>
+<p class="warn small">No approval prompts and no sandbox: it can run any command and change any file on that Mac, like you could in Terminal. When the CLI exits you're left in a shell in the same folder.</p>
+<div class="row"><span class="grow"></span><button type="submit" class="primary">Open terminal</button></div>
+</form>
+<script src="/static/term.js" defer></script>
+{{end}}

@@ -31,6 +31,8 @@ type Sessions struct {
 	Ctl   *agent.Control
 	Hub   *agent.LocalHub
 	Chats *llm.Chats // nil: no plain chat (no gateway)
+
+	bridges bridges // terminals waiting for their host agent (terminals.go)
 }
 
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
@@ -63,6 +65,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	g("GET /prompts", s.promptsPage)
 	p("POST /prompts", s.promptSave)
 	p("POST /prompts/{id}/delete", s.promptDelete)
+	s.terminalRoutes(g, p, mux)
 }
 
 // sameSite wraps sameOrigin (chat.go) for every POST here.
@@ -206,6 +209,15 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 	var rows []chatRow
 	for _, a := range as {
 		rows = append(rows, agentRow(a))
+	}
+	ts, err := s.Store.Terminals(ctx, q, 200)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for _, t := range ts {
+		rows = append(rows, chatRow{Kind: "terminal", Link: idPath(t.ID, "/terminals/%d"), Title: t.Title,
+			With: agent.TermProviderName(t.Provider), Host: t.Host, Status: t.Status, Updated: t.UpdatedAt})
 	}
 	if s.Agents.Chats != nil {
 		cs, err := s.plainChats(ctx, q)
