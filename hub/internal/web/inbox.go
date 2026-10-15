@@ -36,6 +36,7 @@ type Item struct {
 	ReplyTo  string // POST target for a prompt (tasks, sessions with a live agent)
 	TermID   int64  // a terminal: quick replies go to /api/terminals/{id}/send
 	Provider string
+	Close    string // POST here to end its process (a terminal, a session)
 }
 
 // Inbox is the whole list plus counts by state, for the badge and the stream.
@@ -115,6 +116,7 @@ func (s *Server) buildInbox(ctx context.Context) (Inbox, error) {
 			Where: x.Host + " · " + folderName(x.Cwd), Link: "/sessions/" + itoa(x.ID), At: x.FileMtime, Provider: x.Provider}
 		if t, ok := termBy[x.Host+"|"+x.UUID]; ok {
 			it.Kind, it.Key, it.Link, it.TermID = "terminal", "t:"+itoa(t.ID), "/terminals/"+itoa(t.ID), t.ID
+			it.Close = "/terminals/" + itoa(t.ID) + "/kill"
 			if t.Title != "" {
 				it.Title = t.Title
 			}
@@ -122,6 +124,11 @@ func (s *Server) buildInbox(ctx context.Context) (Inbox, error) {
 			continue
 		} else if s.Agents != nil && x.Live {
 			it.ReplyTo = "/sessions/" + itoa(x.ID) + "/send"
+		}
+		if it.TermID == 0 && closable(x.Session) {
+			it.Close = "/sessions/" + itoa(x.ID) + "/close"
+		} else if it.TermID == 0 && x.Closed() {
+			continue // closed from the hub: nothing is waiting any more
 		}
 		add(it)
 	}
@@ -223,10 +230,7 @@ func (s *Server) buildInbox(ctx context.Context) (Inbox, error) {
 }
 
 // headless: a one-shot run (claude -p, codex exec, an SDK script). Nobody waits on its last answer.
-func headless(originator string) bool {
-	o := strings.ToLower(originator)
-	return strings.HasPrefix(o, "sdk") || strings.Contains(o, "exec")
-}
+func headless(originator string) bool { return agent.HeadlessOriginator(originator) }
 
 func prDetail(p PR) string {
 	var parts []string

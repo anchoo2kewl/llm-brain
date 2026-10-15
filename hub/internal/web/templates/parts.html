@@ -11,14 +11,21 @@
 </tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
 
 {{define "sessrows"}}{{if .}}<div class="wrap"><table>
-<tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th></tr>
+<tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th>{{if canClose}}<th><span class="sr-only">Close</span></th>{{end}}</tr>
 {{range .}}<tr>
 <td>{{if .Live}}<span class="dot" title="live"></span> {{end}}<a href="/sessions/{{.ID}}">{{trunc 110 .DisplayTitle}}</a> <span class="mut small">{{.Provider}}{{if .Model}} · {{.Model}}{{end}}</span></td>
 <td class="mut">{{.Host}}</td>
 <td class="mut small">{{home .Cwd}}{{if .Branch}} <span class="pill">{{.Branch}}</span>{{end}}</td>
 <td class="mut">{{.MessageCount}}</td>
 <td class="mut nowrap" title="{{.FileMtime}}">{{ago .FileMtime}}</td>
+{{if canClose}}<td class="nowrap">{{template "sessclose" .}}</td>{{end}}
 </tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
+
+{{/* sessclose: a session's close state, or its Close button (a Session). */}}
+{{define "sessclose"}}{{if closing .}}<span class="chip s-working">closing…</span>{{else if .Closed}}<span class="mut small">closed</span>{{else if closable .}}{{template "close" (closeArgs (printf "/sessions/%d/close" .ID) "" "Close session" "Ends its CLI process on its Mac.")}}{{end}}{{end}}
+
+{{/* close: Close… then the real button, so nothing ends on one stray tap (a closeArgs). */}}
+{{define "close"}}<details class="closebox"><summary class="small danger">Close…</summary><form method="post" action="{{.Action}}" class="closeform">{{if .Back}}<input type="hidden" name="back" value="{{.Back}}">{{end}}{{if .Note}}<span class="small mut">{{.Note}}</span> {{end}}<button class="small danger" type="submit">{{.Label}}</button></form></details>{{end}}
 
 {{define "items"}}{{range .}}{{template "item" .}}{{end}}{{end}}
 

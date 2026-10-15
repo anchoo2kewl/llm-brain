@@ -319,3 +319,12 @@ a.searchlink{display:none}
   a.searchlink:hover{background:var(--sunk);color:var(--fg)}
   a.searchlink svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 }
+
+/* Close: Close… opens the real button in place (no confirm() under this CSP). */
+.closebox{display:inline-block;max-width:100%}
+.closebox>summary{list-style:none;cursor:pointer;color:var(--bad);border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:var(--card);display:inline-block;white-space:nowrap}
+.closebox>summary::-webkit-details-marker{display:none}
+.closebox[open]>summary{border-color:var(--bad)}
+.closebox .closeform{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 0;white-space:normal}
+.now-list li{display:flex;align-items:center}.now-list li>a.nrow{flex:1;min-width:0}.now-list li>.closebox{padding:6px 12px 6px 0;text-align:right}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

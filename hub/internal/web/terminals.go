@@ -308,7 +308,7 @@ func (s *Server) terminalKill(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.back(w, r, idPath(id, "/terminals/%d"), s.Agents.Ctl.KillTerminal(r.Context(), id))
+	s.back(w, r, backFrom(r, idPath(id, "/terminals/%d")), s.Agents.Ctl.KillTerminal(r.Context(), id))
 }
 
 func (s *Server) terminalReview(w http.ResponseWriter, r *http.Request) {
@@ -659,28 +659,8 @@ func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Each open hub terminal claims one session: same Mac, folder and CLI, the first one to start after the
-	// terminal was opened. Every other session is somebody else's, even in the same folder.
 	ts, _ := s.Store.Terminals(ctx, "", 200)
-	mine := map[int64]bool{}
-	for _, t := range ts {
-		if !t.Open() {
-			continue
-		}
-		var best *store.Session
-		for i := range ss {
-			x := &ss[i]
-			if mine[x.ID] || x.ParentUUID != "" || x.Host != t.Host || x.Cwd != t.Cwd || x.Provider != t.Provider || x.FirstAt < t.CreatedAt {
-				continue
-			}
-			if best == nil || x.FirstAt < best.FirstAt {
-				best = x
-			}
-		}
-		if best != nil {
-			mine[best.ID] = true
-		}
-	}
+	mine := claimTerminals(ts, ss)
 	type liveJSON struct {
 		ID       int64  `json:"id"`
 		Title    string `json:"title"`
@@ -692,7 +672,7 @@ func (s *Server) liveSessionsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []liveJSON{}
 	for _, x := range ss {
-		if x.ParentUUID != "" || mine[x.ID] {
+		if _, ok := mine[x.ID]; ok || x.ParentUUID != "" {
 			continue
 		}
 		home, _, _ := s.Store.AgentPlaces(ctx, x.Host)
