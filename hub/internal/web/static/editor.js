@@ -752,12 +752,15 @@
     var g = ed(), svc = g._standaloneKeybindingService, bad = [], ok = 0, known = {};
     g.getSupportedActions().forEach(function (a) { known[a.id] = true; });
     ["cursorUndo", "cursorRedo", "expandLineSelection", "cursorWordPartLeft", "cursorWordPartRight", "cursorWordPartLeftSelect", "cursorWordPartRightSelect",
-      "removeSecondaryCursors", "deleteAllRight", "deleteAllLeft", "deleteWordLeft", "redo", "scrollLineUp", "scrollLineDown", "actions.find", "actions.findWithSelection"].forEach(function (c) { known[c] = true; }); // core commands, not "actions"
+      "removeSecondaryCursors", "deleteAllRight", "deleteAllLeft", "deleteWordLeft", "redo", "scrollLineUp", "scrollLineDown", "actions.find", "actions.findWithSelection",
+      "editor.action.replaceOne", // a find-widget command, not a listed action
+      "editor.action.revealDefinition", "editor.action.goToReferences" // only where a language provides them (TS/JS/CSS/JSON/HTML)
+    ].forEach(function (c) { known[c] = true; }); // core commands, not "actions"
     sublimeMap().forEach(function (e, i) {
       if (typeof e[4] === "string" && e[4] !== "editor.foldLevel" && !known[e[4]] && !g.getAction(e[4])) bad.push(e[1] + ": no such command " + e[4]);
       if (!e[3].length || !e[4]) return;
       if (e[4] === "editor.foldLevel") { ok++; return; }
-      var kb = svc && svc.lookupKeybinding("sublime." + i);
+      var kb = svc && svc.lookupKeybinding(g.getId() + ":sublime." + i); // Monaco prefixes an action with its editor
       if (!kb) bad.push(e[1] + ": not bound");
       else ok++;
     });
