@@ -60,7 +60,7 @@ func TestFSSession(t *testing.T) {
 	}
 	gone := f.handle(fsReq{Op: "read", Path: "src/new.go"})
 	_ = os.Remove(filepath.Join(root, "src", "new.go"))
-	if w := f.handle(fsReq{Op: "write", Path: "src/new.go", Content: str("x"), Base: gone.SHA}); !w.Conflict {
+	if w := f.handle(fsReq{Op: "write", Path: "src/new.go", Content: str("x"), Base: gone.SHA}); !w.Conflict || !w.Deleted {
 		t.Fatalf("deleted file recreated silently: %+v", w)
 	}
 	_ = os.WriteFile(filepath.Join(root, "latin1.txt"), []byte{'c', 'a', 'f', 0xe9}, 0o644)
@@ -115,5 +115,21 @@ func TestFSSessionManage(t *testing.T) {
 	}
 	if r := f.handle(fsReq{Op: "delete", Path: ""}); r.Error == "" {
 		t.Fatal("deleted the root")
+	}
+	// Deleting a link trashes the link, not what it points to; a second same-named delete doesn't clobber.
+	_ = os.WriteFile(filepath.Join(real, "target.txt"), []byte("keep me"), 0o644)
+	_ = os.Symlink(filepath.Join(real, "target.txt"), filepath.Join(real, "link.txt"))
+	if r := f.handle(fsReq{Op: "delete", Path: "link.txt"}); r.Error != "" {
+		t.Fatalf("delete link: %+v", r)
+	}
+	if b, err := os.ReadFile(filepath.Join(real, "target.txt")); err != nil || string(b) != "keep me" {
+		t.Fatal("deleting a link moved its target")
+	}
+	f.handle(fsReq{Op: "create", Path: "docs/roadmap.md"})
+	if r := f.handle(fsReq{Op: "delete", Path: "docs/roadmap.md"}); r.Error != "" {
+		t.Fatalf("second delete: %+v", r)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(home, ".Trash")); len(ents) != 3 {
+		t.Fatalf("trash has %d entries, want 3 (nothing overwritten)", len(ents))
 	}
 }

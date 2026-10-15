@@ -108,7 +108,7 @@
     order.forEach(function (p) {
       var f = files[p], li = el("li", (p === current ? "on" : "") + (isDirty(f) ? " dirty" : ""));
       li.append(el("span", "nm", base(p)), el("span", "dirp", p.indexOf("/") > 0 ? p.slice(0, p.lastIndexOf("/")) : ""));
-      var x = el("button", "x", "✕"); x.type = "button"; x.title = "Close (⌥W)";
+      var x = el("button", "x", "✕"); x.type = "button"; x.title = "Close (⌃W)";
       x.onclick = function (e) { e.stopPropagation(); close(p); };
       li.appendChild(x);
       li.onclick = function () { show(p); };
@@ -165,25 +165,45 @@
       call("create", { path: name, dir: isDir }).then(function () { refreshTree(); if (!isDir) open(name); }).catch(function (e) { say(e.message); });
     });
   }
+  // saveAll(paths): resolves once every one of them is saved (rejects on a conflict or failure), so a
+  // move or a delete never leaves an edit behind.
+  function saveNow(path) {
+    var f = files[path];
+    if (!isDirty(f)) return Promise.resolve();
+    clearTimeout(f.timer);
+    var version = f.model.getAlternativeVersionId(), content = f.model.getValue();
+    return call("write", { path: path, content: content, base: f.sha }).then(function (r) {
+      if (r.conflict) { conflict(path, r); throw new Error(path + " changed on disk: resolve that first"); }
+      f.sha = r.sha; f.saved = version; f.tab.classList.toggle("dirty", isDirty(f)); renderOpen();
+      if (isDirty(f)) return saveNow(path);
+    });
+  }
+  function affected(p) { return Object.keys(files).filter(function (op) { return op === p || op.indexOf(p + "/") === 0; }); }
+  function freeze(paths, on) { paths.forEach(function (op) { var f = files[op]; if (f && !f.binary) groups.forEach(function (g) { if (g.getModel() === f.model) g.updateOptions({ readOnly: on }); }); }); }
   function renameItem(p) {
     ask("Rename " + p + " to", p, function (to) {
       if (to === p) return;
-      Object.keys(files).forEach(function (op) { if ((op === p || op.indexOf(p + "/") === 0) && isDirty(files[op])) save(op); });
-      call("rename", { path: p, to: to }).then(function () {
-        Object.keys(files).forEach(function (op) { // re-open moved tabs under the new name
-          if (op === p || op.indexOf(p + "/") === 0) { var np = to + op.slice(p.length), f = files[op]; f.saved = f.model.getAlternativeVersionId(); close(op); if (!f.binary) open(np); }
-        });
+      var tabs = affected(p);
+      freeze(tabs, true);
+      Promise.all(tabs.map(saveNow)).then(function () {
+        return call("rename", { path: p, to: to });
+      }).then(function () {
+        tabs.forEach(function (op) { var f = files[op]; if (!f) return; close(op); if (!f.binary) open(to + op.slice(p.length)); }); // all saved: nothing to lose
         refreshTree(); say("renamed to " + to);
-      }).catch(function (e) { say(e.message); });
+      }).catch(function (e) { freeze(tabs, false); say("not renamed: " + e.message); });
     });
   }
   function deleteItem(p, isDir) {
     ask("Move " + p + " to the Trash? Type its name (" + base(p) + ") to confirm", "", function (typed) {
       if (typed !== base(p)) { say("not deleted: the name didn't match"); return; }
-      call("delete", { path: p }).then(function () {
-        Object.keys(files).forEach(function (op) { if (op === p || op.indexOf(p + "/") === 0) { files[op].saved = files[op].model.getAlternativeVersionId(); close(op); } });
+      var tabs = affected(p);
+      freeze(tabs, true);
+      Promise.all(tabs.map(saveNow)).then(function () { // the Trash gets your latest text
+        return call("delete", { path: p });
+      }).then(function () {
+        tabs.forEach(close);
         refreshTree(); say((isDir ? "folder " : "") + base(p) + " moved to the Trash");
-      }).catch(function (e) { say(e.message); });
+      }).catch(function (e) { freeze(tabs, false); say("not deleted: " + e.message); });
     });
   }
   side.addEventListener("click", function (e) {
@@ -218,7 +238,7 @@
   }
   function addTab(path) {
     var t = el("div", "ed-tab"), name = el("span", "", base(path)), x = el("button", "x", "✕");
-    t.title = path; x.type = "button"; x.title = "Close (⌥W)";
+    t.title = path; x.type = "button"; x.title = "Close (⌃W)";
     t.append(name, x);
     t.onclick = function () { show(path); };
     t.onauxclick = function (e) { if (e.button === 1) close(path); };
@@ -323,7 +343,7 @@
     groups.forEach(function (g, i) { if (positions[i]) g.setPosition(positions[i]); });
   }
   function conflict(path, r) {
-    var f = files[path], b = $("edbanner"), gone = r.content === "";
+    var f = files[path], b = $("edbanner"), gone = !!r.deleted;
     show(path);
     b.textContent = "";
     b.appendChild(el("span", "", path + (gone ? " was deleted on disk" : " changed on disk") + " while you were editing."));
@@ -567,7 +587,7 @@
   // ------------------------------------------------------------ Sublime Text's macOS key map
   // One table drives the editor's key bindings, the command palette, the shortcut sheet and the self-test:
   // [section, label, keys as shown, bindings (KeyMod|KeyCode, or chords), Monaco command id or function].
-  // ⌘W/⌘T/⌘N/⌘⇧T belong to the browser, so those use ⌥ instead (app-level keys are handled further down).
+  // ⌘W/⌘T/⌘N/⌘⇧T belong to the browser, so those use ⌃ instead (⌥+letter types characters on a Mac).
   function sublimeMap() {
     var KM = M.KeyMod, KC = M.KeyCode, C = KM.CtrlCmd, W = KM.WinCtrl, S = KM.Shift, A = KM.Alt, K = function (k) { return KM.chord(C | KC.KeyK, k); };
     return [
@@ -647,14 +667,14 @@
       ["Files", "Save", "⌘S", [], function () { if (current) save(current); }],
       ["Files", "Save all", "⌘⌥S", [], saveAll],
       ["Files", "Save as", "⌘⇧S", [], saveAs],
-      ["Files", "New file", "⌥N", [], function () { newItem("", false); }],
-      ["Files", "Close file", "⌥W", [], function () { if (current) close(current); }],
-      ["Files", "Close all", "⌘K ⌘W", [], closeAll],
-      ["Files", "Reopen closed file", "⌥⇧T", [], reopen],
+      ["Files", "New file", "⌃N", [W | KC.KeyN], function () { newItem("", false); }],
+      ["Files", "Close file", "⌃W", [W | KC.KeyW], function () { if (current) close(current); }],
+      ["Files", "Close all", "⌘K ⌘W", [K(C | KC.KeyW)], closeAll],
+      ["Files", "Reopen closed file", "⌃⇧T", [W | S | KC.KeyT], reopen],
       ["Files", "Switch to file 1…9", "⌘1…⌘9", [], null],
       ["Files", "Next file", "⌘⌥→ / ⌘⇧]", [], function () { cycle(1); }],
       ["Files", "Previous file", "⌘⌥← / ⌘⇧[", [], function () { cycle(-1); }],
-      ["View", "Toggle side bar", "⌘K ⌘B", [], toggleSide],
+      ["View", "Toggle side bar", "⌘K ⌘B", [K(C | KC.KeyB)], toggleSide],
       ["View", "Single column", "⌘⌥1", [], function () { setColumns(1); }],
       ["View", "Two columns", "⌘⌥2", [], function () { setColumns(2); }],
       ["View", "Focus column 1 / 2", "⌃1 / ⌃2", [], function () { focusGroup(focusG ? 0 : 1); }],
@@ -662,10 +682,10 @@
       ["View", "Full screen", "⌃⌘F", [], fullscreen],
       ["View", "Distraction free", "⌃⌘⇧F", [], zen],
       ["View", "Font bigger / smaller / reset", "⌘= / ⌘- / ⌘0", [], function () { fontBy(1); }],
-      ["View", "Toggle word wrap", "⌥Z", [A | KC.KeyZ], toggleOpt("wordWrap", "wrap")],
+      ["View", "Toggle word wrap", "⌃⌥W", [W | A | KC.KeyW], toggleOpt("wordWrap", "wrap")],
       ["View", "Toggle minimap", "", [], toggleOpt("minimap", "minimap")],
       ["View", "Toggle whitespace", "", [], toggleOpt("renderWhitespace")],
-      ["View", "Keyboard shortcuts", "⌘K ⌘S", [], showKeys]
+      ["View", "Keyboard shortcuts", "⌘K ⌘S", [K(C | KC.KeyS)], showKeys]
     ];
   }
   function runEntry(e) {
@@ -692,19 +712,26 @@
   $("edkeysbtn").onclick = showKeys;
   $("edkeysclose").onclick = function () { $("edkeys").close(); };
 
-  // App keys run before the browser and Monaco see them (also when the editor isn't focused).
+  // App keys run before the browser and Monaco see them. Keys the table also binds in Monaco (⌘K chords,
+  // ⌃W, ⌃N, ⌃⇧T) are left to Monaco while the editor has focus, so a chord is never half-handled.
   var chordK = false, chordT = null;
   document.addEventListener("keydown", function (e) {
     var cmd = mac ? e.metaKey : e.ctrlKey, k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    var inEditor = !!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".monaco-editor"));
     var hit = function (f) { e.preventDefault(); e.stopPropagation(); f(); };
-    if (chordK && cmd && !e.shiftKey) {
-      chordK = false; clearTimeout(chordT);
-      if (e.code === "KeyB") return hit(toggleSide);
-      if (e.code === "KeyS") return hit(showKeys);
-      if (e.code === "KeyW") return hit(closeAll);
-      return; // the other ⌘K chords are the editor's (⌘K ⌘U, ⌘K ⌘K, ⌘K ⌘1…)
+    if (!inEditor) {
+      if (chordK && cmd && !e.shiftKey) {
+        chordK = false; clearTimeout(chordT);
+        if (e.code === "KeyB") return hit(toggleSide);
+        if (e.code === "KeyS") return hit(showKeys);
+        if (e.code === "KeyW") return hit(closeAll);
+      }
+      if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyK") { e.preventDefault(); chordK = true; clearTimeout(chordT); chordT = setTimeout(function () { chordK = false; }, 1500); return; }
+      if (e.ctrlKey && !e.metaKey && !e.altKey && mac && e.code === "KeyW" && !e.shiftKey) return hit(function () { if (current) close(current); });
+      if (e.ctrlKey && !e.metaKey && !e.altKey && mac && e.code === "KeyT" && e.shiftKey) return hit(reopen);
+      if (e.ctrlKey && !e.metaKey && !e.altKey && mac && e.code === "KeyN" && !e.shiftKey) return hit(function () { newItem("", false); });
+      if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyR") return hit(function () { ed().trigger("kb", "editor.action.quickOutline"); }); // not a page reload
     }
-    if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyK") { chordK = true; clearTimeout(chordT); chordT = setTimeout(function () { chordK = false; }, 1500); return; }
     if (cmd && !e.shiftKey && !e.altKey && (e.code === "KeyP" || e.code === "KeyT")) return hit(function () { palette(""); });
     if (cmd && e.shiftKey && !e.altKey && e.code === "KeyP") return hit(function () { palette(">"); });
     if (cmd && e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "KeyF") return hit(openFind);
@@ -716,12 +743,7 @@
     if (cmd && e.shiftKey && (e.code === "BracketRight" || e.code === "BracketLeft")) return hit(function () { cycle(e.code === "BracketRight" ? 1 : -1); });
     if (cmd && !e.altKey && !e.shiftKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) return hit(function () { var p = order[+e.code.slice(5) - 1]; if (p) show(p); });
     if (cmd && !e.altKey && !e.shiftKey && e.code === "Digit0") return hit(function () { fontSize = 13; fontBy(0); });
-    if (cmd && !e.shiftKey && !e.altKey && e.code === "KeyR" && !(document.activeElement && document.activeElement.closest(".monaco-editor"))) return hit(function () { ed().trigger("kb", "editor.action.quickOutline"); });
     if (mac && e.ctrlKey && !e.metaKey && !e.altKey && /^Digit[12]$/.test(e.code)) return hit(function () { if (e.shiftKey) toGroup(e.code === "Digit2" ? 1 : 0); else focusGroup(e.code === "Digit2" ? 1 : 0); });
-    // ⌥ keys by physical key (e.code), so they still work where ⌥ types a character on the layout.
-    if (e.altKey && !cmd && !e.ctrlKey && !e.shiftKey && e.code === "KeyW") return hit(function () { if (current) close(current); });
-    if (e.altKey && !cmd && !e.ctrlKey && e.shiftKey && e.code === "KeyT") return hit(reopen);
-    if (e.altKey && !cmd && !e.ctrlKey && !e.shiftKey && e.code === "KeyN") return hit(function () { newItem("", false); });
     if (cmd && !e.shiftKey && !e.altKey && (e.code === "Equal" || e.code === "Minus")) return hit(function () { fontBy(e.code === "Minus" ? -1 : 1); });
     if (e.ctrlKey && e.metaKey && !e.shiftKey && e.code === "KeyF") return hit(fullscreen);
     if (e.ctrlKey && e.metaKey && e.shiftKey && e.code === "KeyF") return hit(zen);
