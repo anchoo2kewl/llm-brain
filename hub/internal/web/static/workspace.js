@@ -81,10 +81,11 @@
 
   function refresh(then) {
     Promise.all([
-      fetch("/api/terminals", { cache: "no-store" }).then(function (r) { return r.json(); }),
+      fetch("/api/terminals", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("terminals " + r.status); return r.json(); }),
       fetch("/api/live-sessions", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
     ]).then(function (both) {
-      var ts = Array.isArray(both[0]) ? both[0] : [], live = Array.isArray(both[1]) ? both[1] : [];
+      if (!Array.isArray(both[0])) throw new Error("bad terminal list"); // keep the workspace as it is
+      var ts = both[0], live = Array.isArray(both[1]) ? both[1] : [];
       // Sessions running elsewhere (the laptop's own terminal, an IDE): keyed "s<id>", shown read-only.
       // One already in a pane stays listed after it goes quiet.
       live.forEach(function (x) { ts.push({ id: "s" + x.id, sid: x.id, kind: "session", title: x.title, host: x.host, cli: x.cli, cwd: x.cwd, status: "elsewhere", updated: x.updated }); });
