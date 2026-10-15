@@ -1,0 +1,15 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+<div class="top"><div><h1>Prompt library</h1><p class="mut">Saved prompts for new chats and follow-ups. <code>{{"{{NAME}}"}}</code> marks a variable; CWD, REPO, HOST and BASE are filled in for you.</p></div><div class="meta"><a href="/chats">chats</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+<section class="panel">
+<form method="post" action="/prompts" class="promptform">
+<input type="hidden" name="id" value="{{if .Edit.ID}}{{.Edit.ID}}{{end}}">
+<label>Name<input name="name" value="{{.Edit.Name}}" required maxlength="120"></label>
+<label>Text<textarea name="body" rows="8" required>{{.Edit.Body}}</textarea></label>
+<p><button type="submit" class="primary">{{if .Edit.ID}}Save changes{{else}}Add prompt{{end}}</button>{{if .Edit.ID}} <a href="/prompts">cancel</a>{{end}}</p>
+</form></section>
+{{if .Prompts}}<div class="wrap"><table><tr><th>Name</th><th>Variables</th><th>Updated</th><th></th></tr>
+{{range .Prompts}}<tr><td><strong>{{.Name}}</strong><div class="mut small">{{trunc 160 .Body}}</div></td><td class="small">{{range .Vars}}<code>{{.}}</code> {{end}}</td><td class="mut small">{{ago .UpdatedAt}}</td>
+<td class="nowrap"><a href="/chats/new?saved={{.ID}}">use</a> · <a href="/prompts?edit={{.ID}}">edit</a> <form method="post" action="/prompts/{{.ID}}/delete" class="inline"><button type="submit" class="danger small">delete</button></form></td></tr>{{end}}
+</table></div>{{else}}<div class="empty">No saved prompts yet.</div>{{end}}
+{{end}}

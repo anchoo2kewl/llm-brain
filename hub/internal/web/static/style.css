@@ -124,3 +124,5 @@ pre{font-size:13px;line-height:1.65;padding:16px}.msg{padding:14px 18px}.txt{lin
 @media(max-width:800px){.chat{grid-template-columns:1fr}.chat-sources{position:static;flex-direction:row;flex-wrap:wrap}}
 
 .brand{display:inline-flex;align-items:center;gap:8px}.brand img{display:block;border-radius:7px}
+/* chats (sessions.go): the nav button; the rest is in agents.css */
+nav a.newchat,a.btn.primary{background:var(--acc);color:var(--bg);border-radius:8px;padding:5px 11px;font-weight:600}nav a.newchat:hover,a.btn.primary:hover{text-decoration:none;opacity:.9}

@@ -1,0 +1,20 @@
+{{define "content"}}<link rel="stylesheet" href="/static/agents.css">
+<div class="top"><div><h1>Agents</h1><p class="mut">Sessions the hub started or continued, and the machines that can run them.</p></div><div class="meta"><a class="btn primary" href="/chats/new">+ New chat</a> · <a href="/chats">chats</a></div></div>
+{{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
+<h2>Hosts</h2>
+{{if .Hosts}}<div class="wrap"><table><tr><th>Host</th><th>Agent</th><th>CLIs</th><th>Roots</th><th>Folders</th></tr>
+{{range .Hosts}}<tr><td><a href="/chats/new?host={{.Host}}">{{.Host}}</a></td><td>{{if .Live}}<span class="dot"></span> live{{else}}<span class="dot off"></span> <span class="mut">last seen {{if .LastPoll}}{{ago .LastPoll}}{{else}}never{{end}}</span>{{end}} <span class="mut small">{{.Version}}</span></td>
+<td class="small">{{range $i, $p := .Providers}}{{if $i}}, {{end}}{{$p}}{{end}}</td><td class="mut small">{{range .Roots}}{{home .}} {{end}}</td><td>{{len .Folders}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">No host has a session agent yet. <code>hub serve</code> and <code>hub ship</code> run one by default.</div>{{end}}
+<h2>Sessions</h2>
+{{if .Sessions}}<div class="wrap"><table><tr><th>Chat</th><th>Host</th><th>Folder</th><th>With</th><th>Status</th><th>Last activity</th><th></th></tr>
+{{range .Sessions}}<tr><td><a href="/agents/{{.ID}}">{{if .Title}}{{trunc 80 .Title}}{{else}}#{{.ID}}{{end}}</a>{{if .ReviewOf}} <span class="pill">review of #{{.ReviewOf}}</span>{{end}}{{if .Adopted}} <span class="pill">continued</span>{{end}}</td>
+<td class="small">{{.Host}}</td><td class="mut small">{{if .Cwd}}{{home .Cwd}}{{else}}scratch{{end}}</td><td class="small">{{.Provider}}{{if .Model}} · {{.Model}}{{end}}</td>
+<td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td><td class="mut small">{{ago .UpdatedAt}}</td>
+<td>{{if .Busy}}<form method="post" action="/agents/{{.ID}}/stop"><input type="hidden" name="from" value="agents"><button type="submit" class="danger small">Stop</button></form>{{else}}<a class="small" href="/agents/{{.ID}}#composer">continue</a>{{end}}</td></tr>{{end}}
+</table></div>{{else}}<div class="empty">None yet.</div>{{end}}
+<h2>Command log</h2>
+{{if .Commands}}<div class="wrap"><table><tr><th>#</th><th>When</th><th>Host</th><th>Command</th><th>Session</th><th>Status</th></tr>
+{{range .Commands}}<tr><td class="mut small">{{.ID}}</td><td class="mut small">{{ago .CreatedAt}}</td><td class="small">{{.Host}}</td><td class="small">{{.Kind}}</td><td class="small"><a href="/agents/{{.AgentID}}">#{{.AgentID}}</a></td><td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td></tr>{{end}}
+</table></div>{{else}}<div class="empty">No commands yet.</div>{{end}}
+{{end}}
