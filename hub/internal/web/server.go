@@ -500,7 +500,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		Subagents  []store.Session
 		ParentID   int64
 		Stats      *insights.SessionStats
-	}{page{Title: sess.DisplayTitle(), Nav: "sessions"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id)})
+		Files      []sessFile
+		CanFetch   bool
+	}{page{Title: sess.DisplayTitle(), Nav: "sessions"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id),
+		s.sessionFiles(ctx, sess), s.Agents != nil})
 }
 
 // sessionMore returns transcript items after an id as an HTML fragment, for live sessions.
@@ -625,4 +628,27 @@ func (s *Server) hosts(w http.ResponseWriter, r *http.Request) {
 		page
 		Hosts []store.Host
 	}{page{Title: "Hosts", Nav: "hosts"}, hs})
+}
+
+// sessFile is a file the session wrote, with the hub's copy if it has one.
+type sessFile struct {
+	store.SessionFile
+	Name string
+	Kept *store.Asset
+}
+
+func (s *Server) sessionFiles(ctx context.Context, sess store.Session) []sessFile {
+	fs, err := s.Store.SessionFiles(ctx, sess.ID)
+	if err != nil {
+		return nil
+	}
+	var out []sessFile
+	for _, f := range fs {
+		sf := sessFile{SessionFile: f, Name: filepath.Base(f.Path)}
+		if a, err := s.Store.KeptAt(ctx, sess.Host, f.Path); err == nil {
+			sf.Kept = &a
+		}
+		out = append(out, sf)
+	}
+	return out
 }

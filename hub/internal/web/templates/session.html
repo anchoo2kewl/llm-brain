@@ -10,6 +10,11 @@
 {{if $.ParentID}}<dt>Parent</dt><dd><a href="/sessions/{{$.ParentID}}">parent session</a> <span class="mut">(this is a subagent transcript)</span></dd>{{end}}
 <dt>Session</dt><dd class="mut small">{{.UUID}} · {{.MessageCount}} blocks · {{home .Path}}</dd>
 </dl>
+{{if $.Files}}<details class="block" open><summary>Files from this session <span class="mut small">{{len $.Files}} written or edited · <a href="/files">all kept files</a></span></summary>
+<div class="wrap"><table class="sessfiles">{{range $.Files}}<tr><td>{{if .Kept}}<a href="/files/{{.Kept.ID}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Created}} <span class="pill">new</span>{{end}}<div class="mut small">{{home .Path}}</div></td>
+<td class="nowrap small">{{if .Kept}}<a href="/files/{{.Kept.ID}}">download</a> <span class="mut">(kept {{ago .Kept.CreatedAt}})</span>{{end}}
+{{if $.CanFetch}}{{if .Kept}} · {{end}}<a href="/hosts/{{$.S.Host}}/download?path={{.Path}}">{{if .Kept}}latest from {{$.S.Host}}{{else}}download from {{$.S.Host}}{{end}}</a>
+<form class="inline" method="post" action="/hosts/{{$.S.Host}}/keep"><input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="back" value="/sessions/{{$.S.ID}}"><button class="small" type="submit">Keep</button></form>{{end}}</td></tr>{{end}}</table></div></details>{{end}}
 {{end}}
 {{if .Subagents}}<details class="block"><summary>Subagents <span class="mut small">{{len .Subagents}}</span></summary>{{template "sessrows" .Subagents}}</details>{{end}}
 <div class="tools-toggle small"><label><input type="checkbox" id="hidetools"> hide tool calls</label> <label><input type="checkbox" id="hidemeta" checked> hide injected context</label></div>
