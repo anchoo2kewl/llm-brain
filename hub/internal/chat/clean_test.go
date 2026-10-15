@@ -1,6 +1,9 @@
 package chat
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestClean(t *testing.T) {
 	names := map[string]string{"U0000000002": "teammate-a"}
@@ -40,5 +43,15 @@ func TestMissingScopes(t *testing.T) {
 	m := MissingScopes([]string{"channels:history", "channels:read", "users:read", "search:read", "im:history", "im:read", "mpim:history", "mpim:read"})
 	if len(m) != 2 || m[0] != "groups:history" || m[1] != "groups:read" {
 		t.Fatalf("got %v", m)
+	}
+}
+
+func TestMessageChannelStringOrObject(t *testing.T) {
+	var ms []Message
+	if err := json.Unmarshal([]byte(`[{"ts":"1","channel":"G0000000001"},{"ts":"2","channel":{"id":"C0000000001","name":"general","is_channel":true}}]`), &ms); err != nil {
+		t.Fatal(err)
+	}
+	if ms[0].Channel.ID != "G0000000001" || ms[1].Channel.Name != "general" || !ms[1].Channel.IsChannel {
+		t.Fatalf("got %+v %+v", ms[0].Channel, ms[1].Channel)
 	}
 }
