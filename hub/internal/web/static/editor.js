@@ -367,7 +367,7 @@
     var i = 0, last = -1, s = 0;
     for (var c = 0; c < needle.length; c++) {
       var at = name.indexOf(needle[c], i);
-      if (at < 0) return -1;
+      if (at < 0) return null; // no match (a good match can score below zero)
       s += at - last; last = at; i = at + 1;
     }
     var b = name.lastIndexOf("/");
@@ -400,7 +400,7 @@
       hint.textContent = "Files · name:line · name@symbol · :line · @symbol · #text · >command";
       var m = /^(.*?)(?::(\d+)|@(.*))?$/.exec(v), needle = (m[1] || "").toLowerCase().replace(/\s+/g, ""), line = +m[2], sym = m[3];
       var go = function () {
-        var list = needle ? allFiles.map(function (p) { return [score(p.toLowerCase(), needle), p]; }).filter(function (x) { return x[0] >= 0; })
+        var list = needle ? allFiles.map(function (p) { return [score(p.toLowerCase(), needle), p]; }).filter(function (x) { return x[0] !== null; })
           .sort(function (a, b) { return a[0] - b[0]; }).slice(0, 60).map(function (x) { return x[1]; })
           : order.slice().reverse().concat(allFiles.filter(function (p) { return !files[p]; }).slice(0, 40));
         list.forEach(function (p) {
@@ -642,7 +642,6 @@
     g.addAction({ id: "sublime.wrap", label: "Toggle Word Wrap", keybindings: [A | KC.KeyZ], run: toggleOpt("wordWrap", "wrap") });
   }
 
-  window.__hubEditor = function () { return { allFiles: allFiles && allFiles.length, asking: !!asking, shown: shown.length, files: Object.keys(files), current: current }; }; // for debugging
 
   // ------------------------------------------------------------ Monaco
   window.MonacoEnvironment = { getWorkerUrl: function () { return "/static/monaco/vs/base/worker/workerMain.js"; } };
