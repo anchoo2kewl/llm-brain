@@ -75,6 +75,25 @@ func claimTerminals(ts []store.Terminal, ss []store.Session) map[int64]store.Ter
 	return mine
 }
 
+// terminalSessions maps terminal id → the transcript it writes: by its CLI session id, else the live session
+// it claims (claimTerminals).
+func (s *Server) terminalSessions(ctx context.Context, ts []store.Terminal) map[int64]int64 {
+	out := map[int64]int64{}
+	ss, _ := s.Store.LiveSessions(ctx)
+	for sid, t := range claimTerminals(ts, ss) {
+		out[t.ID] = sid
+	}
+	for _, t := range ts {
+		if _, ok := out[t.ID]; ok || t.SessionUUID == "" || !t.Open() {
+			continue
+		}
+		if x, err := s.Store.TerminalSession(ctx, t); err == nil {
+			out[t.ID] = x.ID
+		}
+	}
+	return out
+}
+
 // terminalOf is the open hub terminal running session x, if any.
 func (s *Server) terminalOf(ctx context.Context, x store.Session) (store.Terminal, bool) {
 	if t, err := s.Store.SessionTerminal(ctx, x); err == nil && t.Open() {

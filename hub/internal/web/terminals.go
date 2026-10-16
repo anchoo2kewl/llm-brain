@@ -283,8 +283,12 @@ func (s *Server) terminalPage(w http.ResponseWriter, r *http.Request) {
 		Attach   string
 		HostLive bool
 		Err      string
+		View     string // term: the live terminal; chat: its transcript as chat, over it (view.go)
+		VBase    string
+		Session  int64 // that transcript
 	}{page{Title: t.Title, Nav: "now"}, t, agent.TermProviderName(t.Provider), agent.AttachCommand(t.ID),
-		s.Agents.Ctl.HostLive(r.Context(), t.Host), r.URL.Query().Get("err")})
+		s.Agents.Ctl.HostLive(r.Context(), t.Host), r.URL.Query().Get("err"), viewOf(r), viewLink(r),
+		s.terminalSessions(r.Context(), []store.Terminal{t})[t.ID]})
 }
 
 func (s *Server) terminalStatus(w http.ResponseWriter, r *http.Request) {
@@ -496,6 +500,7 @@ type termJSON struct {
 	Status   string `json:"status"`
 	Error    string `json:"error,omitempty"`
 	Updated  string `json:"updated"`
+	Session  int64  `json:"session_id,omitempty"` // the transcript it writes, for the Chat view
 }
 
 // terminalsAPI: open terminals, plus ones that ended in the last day (so a pane can say why it stopped).
@@ -506,13 +511,14 @@ func (s *Server) terminalsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cut := store.T(time.Now().Add(-24 * time.Hour))
+	sessOf := s.terminalSessions(r.Context(), ts)
 	out := []termJSON{}
 	for _, t := range ts {
 		if !t.Open() && t.UpdatedAt < cut {
 			continue
 		}
 		home, _, _ := s.Store.AgentPlaces(r.Context(), t.Host)
-		out = append(out, termJSON{t.ID, t.Title, t.Host, agent.TermProviderName(t.Provider), t.Provider, tilde(home, t.Cwd), t.Status, t.Error, t.UpdatedAt})
+		out = append(out, termJSON{t.ID, t.Title, t.Host, agent.TermProviderName(t.Provider), t.Provider, tilde(home, t.Cwd), t.Status, t.Error, t.UpdatedAt, sessOf[t.ID]})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

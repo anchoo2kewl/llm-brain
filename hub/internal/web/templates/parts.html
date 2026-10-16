@@ -29,6 +29,23 @@
 
 {{define "items"}}{{range .}}{{template "item" .}}{{end}}{{end}}
 
+{{/* viewseg: Terminal | Chat for a conversation (a viewSeg: the page's URL ending in ? or &, and the view shown). */}}
+{{define "viewseg"}}<div class="seg viewseg" role="group" aria-label="Show as"><a href="{{.Base}}view=term" data-view="term"{{if eq .View "term"}} class="on" aria-current="true"{{end}}>Terminal</a><a href="{{.Base}}view=chat" data-view="chat"{{if eq .View "chat"}} class="on" aria-current="true"{{end}}>Chat</a></div>{{end}}
+
+{{/* Terminal view: the transcript as the CLI shows it. The glyphs (❯ ⏺ ⎿, › • └, > ✦) come from the
+     container's p-<provider> class in term.css; text is pre-wrapped, so no stray whitespace in here. */}}
+{{define "titems"}}{{range .}}{{template "titem" .}}{{end}}{{end}}
+{{define "titem"}}
+{{- if .Meta}}<div class="t-row t-meta" id="m{{.ID}}"><span class="g">·</span><details class="t-body"><summary class="t-dim">{{.Role}} context</summary><span class="t-dim">{{.Text}}</span></details></div>
+{{- else if eq .Kind "tool_use"}}<div class="t-row t-tool{{if .Result}}{{if .Result.IsError}} t-bad{{end}}{{else}} t-pending{{end}}" id="m{{.ID}}"><span class="g g-tool"></span><div class="t-body"><b>{{tcall .ToolName .ToolInput}}</b>{{with .Result}}{{template "tresult" .}}{{end}}</div></div>
+{{- else if eq .Kind "tool_result"}}<div class="t-row t-res" id="m{{.ID}}"><span class="g"></span><div class="t-body">{{template "tresult" .Message}}</div></div>
+{{- else if eq .Kind "thinking"}}<div class="t-row t-think" id="m{{.ID}}"><span class="g">✻</span><details class="t-body"><summary class="t-dim">Thinking…</summary><span class="t-dim">{{.Text}}</span></details></div>
+{{- else if eq .Role "user"}}<div class="t-row t-user" id="m{{.ID}}"><span class="g g-user"></span><div class="t-body">{{.Text}}</div></div>
+{{- else}}<div class="t-row t-asst" id="m{{.ID}}"><span class="g g-asst"></span><div class="t-body">{{tmd .Text}}</div></div>
+{{- end}}
+{{end}}
+{{define "tresult"}}{{$l := tlines .Text 3}}<div class="t-out{{if .IsError}} t-bad{{end}}"><span class="g-res"></span><div class="t-outx">{{if $l.Head}}{{tdiff $l.Head}}{{else}}<span class="t-dim">(no output)</span>{{end}}{{if $l.More}}<details class="t-more"><summary>… +{{$l.More}} lines</summary>{{tdiff $l.Rest}}</details>{{end}}</div></div>{{end}}
+
 {{define "item"}}<div class="msg {{.Role}} k-{{.Kind}}{{if .Meta}} meta{{end}}" id="m{{.ID}}">
 {{- if eq .Kind "tool_use"}}
 <details class="tool"><summary><span class="tname">{{.ToolName}}</span> <span class="mut small">{{trunc 140 .ToolInput}}</span>{{if .Result}}{{if .Result.IsError}} <span class="bad small">error</span>{{end}}{{else}} <span class="mut small">(no result yet)</span>{{end}}</summary>
