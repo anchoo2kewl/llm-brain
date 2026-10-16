@@ -493,6 +493,9 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
 		fail(err)
 		return
 	}
+	if o.Provider != "shell" {
+		go e.acceptTrust(context.WithoutCancel(ctx), t, c.AgentID)
+	}
 	e.logf("agent: terminal %d: %s in %s (%s)", c.AgentID, o.Provider, cwd, TmuxName(c.AgentID))
 	e.report(ctx, c.ID, Report{Status: "done", Cwd: cwd})
 }
