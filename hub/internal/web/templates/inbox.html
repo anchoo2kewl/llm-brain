@@ -22,6 +22,7 @@
 <div class="ibx-side"><div class="ibx-acts">
 <a class="btn small" href="{{.Link}}" data-open {{if .Ext}}rel="noreferrer" target="_blank"{{end}}>Open{{if .Ext}} ↗{{end}}</a>
 <form method="post" action="/inbox/seen" data-dismiss><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="at" value="{{.At}}"><input type="hidden" name="back" value="/inbox"><button type="submit" class="small ghost" aria-label="Dismiss {{.Title}}">Dismiss</button></form>
+{{if and .Restart canClose}}{{template "restart" (closeArgs .Restart "/inbox" "" "")}}{{end}}
 {{if and .Close canClose}}{{template "close" (closeArgs .Close "/inbox" (printf "Close %s" .Kind) "Ends its CLI process.")}}{{end}}
 </div></div>
 {{if .TermID}}<div class="ibx-reply" data-term="{{.TermID}}">

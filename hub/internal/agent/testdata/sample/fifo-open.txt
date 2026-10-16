@@ -1,0 +1,18 @@
+Analysis of sampling cat (pid 73609) every 1 millisecond
+Process:         cat [73609]
+Path:            /bin/cat
+Load Address:    0x1001a4000
+Call graph:
+    871 Thread_9166532   DispatchQueue_1: com.apple.main-thread  (serial)
+      871 start  (in dyld) + 6688  [0x191153e80]
+        871 ???  (in cat)  load address 0x1001a4000 + 0x73c  [0x1001a473c]
+          871 ???  (in cat)  load address 0x1001a4000 + 0x7ec  [0x1001a47ec]
+            871 open  (in libsystem_kernel.dylib) + 64  [0x1914f0960]
+              871 __open  (in libsystem_kernel.dylib) + 8  [0x1914e5680]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Sort by top of stack, same collapsed (when >= 5):
+        __open  (in libsystem_kernel.dylib)        871
+
+Binary Images:

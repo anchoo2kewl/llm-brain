@@ -23,17 +23,18 @@ type nowCount struct {
 
 // NowRow is one running thing.
 type NowRow struct {
-	Kind   string // terminal | task | run | session | update
-	State  string // working | waiting | idle
-	Title  string
-	Detail string
-	Host   string
-	Where  string
-	Link   string
-	Since  string
-	Ext    bool   // started outside the hub
-	Close  string // POST here to end it ('' when it can't be ended from the hub)
-	Label  string // the Close button's words
+	Kind    string // terminal | task | run | session | update
+	State   string // working | waiting | idle
+	Title   string
+	Detail  string
+	Host    string
+	Where   string
+	Link    string
+	Since   string
+	Ext     bool   // started outside the hub
+	Close   string // POST here to end it ('' when it can't be ended from the hub)
+	Label   string // the Close button's words
+	Restart string // POST here to restart a frozen terminal's CLI ('' when it isn't frozen)
 }
 
 func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
@@ -49,13 +50,16 @@ func (s *Server) nowRows(ctx context.Context) ([]NowRow, error) {
 		if t.SessionUUID != "" {
 			termSess[t.Host+"|"+t.SessionUUID] = true
 		}
-		st := "working"
+		st, detail, restart := "working", t.Provider, ""
 		if t.Status == "starting" {
 			st = "idle"
 		}
-		rows = append(rows, NowRow{Kind: "terminal", State: st, Title: orUntitled(t.Title), Detail: t.Provider, Host: t.Host,
+		if t.Block() != nil {
+			st, detail, restart = "blocked", t.Provider+" · waiting on a macOS permission prompt", "/terminals/"+itoa(t.ID)+"/restart"
+		}
+		rows = append(rows, NowRow{Kind: "terminal", State: st, Title: orUntitled(t.Title), Detail: detail, Host: t.Host,
 			Where: homeShort(t.Cwd), Link: "/terminals/" + itoa(t.ID), Since: firstNonEmpty(t.LiveAt, t.CreatedAt),
-			Close: "/terminals/" + itoa(t.ID) + "/kill", Label: "Close terminal"})
+			Close: "/terminals/" + itoa(t.ID) + "/kill", Label: "Close terminal", Restart: restart})
 	}
 	tasks, err := s.Store.AgentSessions(ctx, 100)
 	errs = append(errs, err)

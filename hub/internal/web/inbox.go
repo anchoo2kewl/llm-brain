@@ -37,6 +37,7 @@ type Item struct {
 	TermID   int64  // a terminal: quick replies go to /api/terminals/{id}/send
 	Provider string
 	Close    string // POST here to end its process (a terminal, a session)
+	Restart  string // POST here to restart a frozen terminal's CLI
 }
 
 // Inbox is the whole list plus counts by state, for the badge and the stream.
@@ -97,6 +98,13 @@ func (s *Server) buildInbox(ctx context.Context) (Inbox, error) {
 	errs = append(errs, err)
 	termBy := map[string]store.Terminal{}
 	for _, t := range terms {
+		if b := t.Block(); b != nil {
+			// Frozen on a macOS prompt: one blocked item per freeze (its key carries when it began).
+			add(Item{Key: "tb:" + itoa(t.ID) + ":" + b.Since, State: "blocked", Kind: "terminal", Title: stuckTitle(t),
+				Detail: stuckDetail(t, b), Where: t.Host + " · " + folderName(t.Cwd), Link: "/terminals/" + itoa(t.ID),
+				At: b.Since, Provider: t.Provider, Close: "/terminals/" + itoa(t.ID) + "/kill", Restart: "/terminals/" + itoa(t.ID) + "/restart"})
+			continue // not also "waiting for you": it can't hear you
+		}
 		if t.Open() && t.SessionUUID != "" {
 			termBy[t.Host+"|"+t.SessionUUID] = t
 		}

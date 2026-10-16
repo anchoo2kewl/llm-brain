@@ -1,0 +1,17 @@
+Analysis of sampling sleep (pid 73610) every 1 millisecond
+Process:         sleep [73610]
+Path:            /bin/sleep
+Load Address:    0x102e6c000
+Call graph:
+    874 Thread_9166534   DispatchQueue_1: com.apple.main-thread  (serial)
+      874 start  (in dyld) + 6688  [0x191153e80]
+        874 ???  (in sleep)  load address 0x102e6c000 + 0x740  [0x102e6c740]
+          874 nanosleep  (in libsystem_c.dylib) + 220  [0x1913bf054]
+            874 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x1914e8308]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Sort by top of stack, same collapsed (when >= 5):
+        __semwait_signal  (in libsystem_kernel.dylib)        874
+
+Binary Images:

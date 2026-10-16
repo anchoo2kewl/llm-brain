@@ -42,6 +42,8 @@ func (s *Server) terminalRoutes(g, p func(string, http.HandlerFunc), mux *http.S
 	g("GET /api/terminals/{id}/screen", s.terminalScreen)
 	p("GET /terminals/{id}/ws", s.terminalWS) // sameSite: a websocket from another site is refused
 	p("POST /terminals/{id}/kill", s.terminalKill)
+	p("POST /terminals/{id}/restart", s.terminalRestart) // a frozen CLI: end it, start it again (stuck.go)
+	p("POST /api/terminals/{id}/restart", s.terminalRestartAPI)
 	p("POST /terminals/{id}/review", s.terminalReview)
 	// The host agent's side: tailnet-only, and the token is the only key.
 	mux.HandleFunc("GET /api/agent/term/{token}", s.tailnetOnly(s.agentTermWS))
@@ -303,7 +305,7 @@ func (s *Server) terminalStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": t.Status, "error": t.Error, "cwd": t.Cwd,
-		"host_live": s.Agents.Ctl.HostLive(r.Context(), t.Host)})
+		"host_live": s.Agents.Ctl.HostLive(r.Context(), t.Host), "blocked": t.Block()})
 }
 
 func (s *Server) terminalKill(w http.ResponseWriter, r *http.Request) {
@@ -501,6 +503,9 @@ type termJSON struct {
 	Error    string `json:"error,omitempty"`
 	Updated  string `json:"updated"`
 	Session  int64  `json:"session_id,omitempty"` // the transcript it writes, for the Chat view
+	// Blocked: its CLI is frozen on a macOS prompt (stuck.go); Fix is what to do, in a sentence.
+	Blocked *store.TermBlock `json:"blocked,omitempty"`
+	Fix     string           `json:"fix,omitempty"`
 }
 
 // terminalsAPI: open terminals, plus ones that ended in the last day (so a pane can say why it stopped).
@@ -518,7 +523,12 @@ func (s *Server) terminalsAPI(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		home, _, _ := s.Store.AgentPlaces(r.Context(), t.Host)
-		out = append(out, termJSON{t.ID, t.Title, t.Host, agent.TermProviderName(t.Provider), t.Provider, tilde(home, t.Cwd), t.Status, t.Error, t.UpdatedAt, sessOf[t.ID]})
+		j := termJSON{ID: t.ID, Title: t.Title, Host: t.Host, CLI: agent.TermProviderName(t.Provider), Provider: t.Provider,
+			Cwd: tilde(home, t.Cwd), Status: t.Status, Error: t.Error, Updated: t.UpdatedAt, Session: sessOf[t.ID]}
+		if b := t.Block(); b != nil {
+			j.Blocked, j.Fix = b, stuckDetail(t, b)
+		}
+		out = append(out, j)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

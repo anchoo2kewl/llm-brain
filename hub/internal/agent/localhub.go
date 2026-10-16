@@ -187,8 +187,14 @@ func (h *LocalHub) termReport(ctx context.Context, c store.Command, r Report, bo
 		tstatus, msg = "failed", r.Error
 	case c.Kind == KindTermKill && r.Status == "done":
 		tstatus = "ended"
-	case c.Kind == KindTermAttach && r.Error == ErrTermEnded:
+	case (c.Kind == KindTermAttach || c.Kind == KindTermRestart) && r.Error == ErrTermEnded:
 		tstatus = "ended"
 	}
-	return h.S.ApplyTermReport(ctx, c.ID, r.Status, body, c.AgentID, tstatus, cwd, msg)
+	if err := h.S.ApplyTermReport(ctx, c.ID, r.Status, body, c.AgentID, tstatus, cwd, msg); err != nil {
+		return err
+	}
+	if c.Kind == KindTermRestart && r.Status == "done" { // a new CLI: frozen no longer, until the watchdog says so again
+		return h.S.ClearTermBlocked(ctx, c.AgentID)
+	}
+	return nil
 }

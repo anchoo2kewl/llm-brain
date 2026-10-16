@@ -37,9 +37,30 @@
     isFocused: function () { return document.hasFocus(); },
     onSay: function (t) { msg.textContent = t; },
     onStatus: function (s) {
+      if (pill && s.blocked) { pill.textContent = "blocked"; pill.className = "pill warn"; return; }
       if (pill && s.status) { pill.textContent = s.status; pill.className = "pill " + (s.status === "live" ? "ok" : s.status === "failed" ? "bad" : s.status === "starting" ? "warn" : ""); }
     }
   });
+  // Frozen on a macOS prompt (the host's watchdog, about once a minute): show or drop the notice and its
+  // fixes in place, from the server's own rendering, without reloading the terminal.
+  var stuckBox = document.getElementById("termstuck");
+  if (stuckBox) {
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch("/terminals/" + id + "/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+        var now = !!s.blocked, was = !!stuckBox.querySelector(".stuck");
+        if (pill) {
+          if (now) { pill.textContent = "blocked"; pill.className = "pill warn"; }
+          else if (was && s.status) { pill.textContent = s.status; pill.className = "pill " + (s.status === "live" ? "ok" : ""); }
+        }
+        if (now === was) return;
+        return fetch(location.pathname, { cache: "no-store" }).then(function (r) { return r.text(); }).then(function (html) {
+          var doc = new DOMParser().parseFromString(html, "text/html"), fresh = doc.getElementById("termstuck");
+          stuckBox.innerHTML = fresh ? fresh.innerHTML : "";
+        });
+      }).catch(function () {});
+    }, 30000);
+  }
   pane.term.focus();
   var send = pane.send;
 

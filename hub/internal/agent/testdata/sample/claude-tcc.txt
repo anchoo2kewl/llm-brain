@@ -1,0 +1,31 @@
+Analysis of sampling 2.1.301 (pid 48777) every 1 millisecond
+Process:         2.1.301 [48777]
+Path:            /Users/anshuman/.local/share/claude/versions/2.1.301
+Load Address:    0x100cc8000
+Call graph:
+    759 Thread_7200182   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 759 start  (in dyld) + 6992  [0x18487be00]
+    +   759 ???  (in 2.1.301)  load address 0x100cc8000 + 0x1145ca8  [0x101e0dca8]
+    +     759 ???  (in 2.1.301)  load address 0x100cc8000 + 0x106ac2c  [0x101d32c2c]
+    +       759 ???  (in <unknown binary>)  [0x11528664c]
+    +         759 ???  (in 2.1.301)  load address 0x100cc8000 + 0xe82418  [0x101b4a418]
+    +           759 ???  (in 2.1.301)  load address 0x100cc8000 + 0xe814f0  [0x101b494f0]
+    +             759 openat$NOCANCEL  (in libsystem_kernel.dylib) + 76  [0x184c0ad08]
+    +               759 __openat_nocancel  (in libsystem_kernel.dylib) + 8  [0x184bfb954]
+    759 Thread_7200184: mi-scavenger
+    + 759 thread_start  (in libsystem_pthread.dylib) + 8  [0x184c3eb80]
+    +   759 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x184c43c0c]
+    +     759 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x184bfe4f8]
+    759 Thread_7200205: HTTP Client
+    + 759 thread_start  (in libsystem_pthread.dylib) + 8  [0x184c3eb80]
+    +   759 ???  (in 2.1.301)  load address 0x100cc8000 + 0x36f300c  [0x1043bb00c]
+    +     759 kevent64  (in libsystem_kernel.dylib) + 8  [0x184c01ba8]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        759
+        __openat_nocancel  (in libsystem_kernel.dylib)        759
+        kevent64  (in libsystem_kernel.dylib)        759
+
+Binary Images:

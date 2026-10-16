@@ -95,3 +95,13 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-chat-say{display:flex;gap:6px;padding:6px;border-top:1px solid var(--line);margin:0}.ws-chat-say input{flex:1;min-width:0}
 @media (hover:none),(pointer:coarse),(max-width:1100px){.ws-viewseg button{min-height:var(--tap);min-width:var(--tap);font-size:13px}.ws-chat{top:var(--tap)}.ws-chat-say button,.ws-chat-say input{min-height:var(--tap)}}
 @media (max-width:760px){.ws-slot-head .ws-badges,.ws-slot-head .ws-zoom{display:none}}
+
+/* A terminal frozen on a macOS prompt (stuck.go): blocked in the list and on the pane, with what to do */
+.dot-s.blocked{background:var(--st-blocked);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-blocked) 30%,transparent)}
+.ws-item.s-blocked .ws-it-prev{color:var(--st-blocked)}
+.ws-slot.blocked{border-color:var(--st-blocked)}
+.ws-stuck{flex:none;max-height:45%;overflow:auto;padding:8px 10px;border-bottom:1px solid var(--st-blocked);background:color-mix(in srgb,var(--st-blocked) 10%,var(--card));overflow-wrap:anywhere}
+.ws-stuck[hidden]{display:none}.ws-stuck p{margin:0 0 6px}
+.ws-stuck-acts{display:flex;flex-wrap:wrap;gap:6px}
+.ws-stuck-acts .armed{background:var(--st-blocked);border-color:var(--st-blocked);color:#fff}
+@media (hover:none),(pointer:coarse),(max-width:1100px){.ws-stuck-acts button.small,.ws-stuck-acts a.btn.small{min-height:var(--tap);min-width:var(--tap);display:inline-flex;align-items:center;justify-content:center}}

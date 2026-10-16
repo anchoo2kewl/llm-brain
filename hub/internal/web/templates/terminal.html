@@ -1,8 +1,9 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css"><link rel="stylesheet" href="/static/files.css">
 <div class="top termtop"><div><p class="eyebrow">Terminal · {{.With}} · {{.T.Host}}</p><h1 class="title"><span data-rename="/terminals/{{.T.ID}}/rename">{{.T.Title}}</span></h1></div>
-<div class="meta"><span class="termnav" id="termnav" data-id="{{.T.ID}}"><a class="btn small" id="termprev" href="#" hidden aria-label="Previous terminal">‹</a><a class="btn small" id="termnext" href="#" hidden aria-label="Next terminal">›</a></span> <span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
+<div class="meta"><span class="termnav" id="termnav" data-id="{{.T.ID}}"><a class="btn small" id="termprev" href="#" hidden aria-label="Previous terminal">‹</a><a class="btn small" id="termnext" href="#" hidden aria-label="Next terminal">›</a></span> {{if .T.Block}}<span class="pill warn" id="termstatus">blocked</span>{{else}}<span class="pill {{statusClass .T.Status}}" id="termstatus">{{.T.Status}}</span>{{end}}{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .T.Error}}<pre class="err small">{{.T.Error}}</pre>{{end}}
+<div id="termstuck">{{template "stuck" (stuckOf .T (printf "/terminals/%d" .T.ID))}}</div>
 <div class="row actions termbar">
 {{template "viewseg" (viewSeg .VBase .View)}} <span class="mut small">{{home .T.Cwd}}</span> · <a class="small" href="/browse?host={{.T.Host}}&amp;path={{.T.Cwd}}">download</a><span class="grow"></span>
 <button type="button" class="small primary" id="edtoggle" data-src="/edit?embed=1&amp;host={{.T.Host}}&amp;root={{.T.Cwd}}">&lt;/&gt; Editor</button>

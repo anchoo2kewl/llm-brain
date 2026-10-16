@@ -45,6 +45,7 @@ const (
 	KindTermKill     = "term_kill"
 	KindTermSend     = "term_send"    // type text and/or press keys (tmux send-keys)
 	KindTermCapture  = "term_capture" // the screen (and some scrollback) as text
+	KindTermRestart  = "term_restart" // end a frozen CLI and start it again in the same tmux (stuck.go)
 )
 
 // TermSend is a term_send payload: Text is typed literally, then each of Keys is pressed (tmux key names:
@@ -149,6 +150,7 @@ type TermOpen struct {
 	Worktree  *Worktree `json:"worktree,omitempty"`
 	Ask       bool      `json:"ask,omitempty"`        // the CLI's normal approval prompts instead of every permission
 	SessionID string    `json:"session_id,omitempty"` // claude --session-id, so the hub knows its transcript
+	Resume    string    `json:"resume,omitempty"`     // continue this conversation (claude --resume, codex resume); restarts only
 }
 
 // TermAttach is a term_attach payload.
@@ -324,6 +326,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 	if o.Model != "" && !modelRe.MatchString(o.Model) {
 		return "", nil, fmt.Errorf("bad model name %q", o.Model)
 	}
+	if o.Resume != "" && !uuidRe.MatchString(o.Resume) {
+		return "", nil, fmt.Errorf("bad session id %q", o.Resume)
+	}
 	var argv, env []string
 	switch o.Provider {
 	case "claude":
@@ -331,7 +336,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 		if o.Ask { // explicit, so a bypass default in the CLI's own settings doesn't win
 			argv = []string{"claude", "--permission-mode", "manual"}
 		}
-		if o.SessionID != "" {
+		if o.Resume != "" {
+			argv = append(argv, "--resume", o.Resume)
+		} else if o.SessionID != "" {
 			if !uuidRe.MatchString(o.SessionID) {
 				return "", nil, fmt.Errorf("bad session id %q", o.SessionID)
 			}
@@ -356,6 +363,9 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 				"-c", fmt.Sprintf(`model_providers.cpa={name="CPA",base_url="%s/v1",env_key="CPA_API_KEY",wire_api="responses",requires_openai_auth=false}`,
 					strings.TrimRight(gw.URL, "/")))
 			env = []string{"CPA_API_KEY=" + gw.Key}
+		}
+		if o.Resume != "" { // codex resume [flags] <id>: the subcommand takes the same flags
+			argv = append([]string{"codex", "resume"}, append(argv[1:], o.Resume)...)
 		}
 	case "gemini":
 		argv = []string{"gemini", "--approval-mode", "yolo"}
