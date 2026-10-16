@@ -116,6 +116,9 @@ func (h *LocalHub) Report(ctx context.Context, id int64, r Report) error {
 	}
 	if applied && r.Final() {
 		h.logf("agent: command %d on %s %s%s", id, c.Host, r.Status, errSuffix(r.Error))
+		if c.Kind == KindSessionClose {
+			return h.sessionClosed(ctx, c, r)
+		}
 	}
 	return nil
 }

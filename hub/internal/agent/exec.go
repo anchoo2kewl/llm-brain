@@ -51,6 +51,7 @@ type Executor struct {
 	TmuxSocket    string                                 // tmux -L name for terminals; '' = llm-brain
 	UpdateRun     UpdateRunner                           // runs tool updates (update.go); nil = the real commands
 	FindTools     func(context.Context) []store.ToolInfo // finds them; nil = DetectTools
+	Procs         Procs                                  // the process table, for closing sessions (close.go); nil = RealProcs
 
 	mu      sync.Mutex
 	active  map[int64]*turn              // by turn command id
@@ -219,7 +220,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 		case KindSessionTitle: // inline, in queue order: two renames land in the order they were made
 			e.sessionTitle(ctx, c)
 		case KindTermOpen, KindTermAttach, KindTermKill, KindTermSend, KindTermCapture, KindFileList, KindFileGet, KindFilePut, KindFSAttach,
-			KindToolUpdate:
+			KindToolUpdate, KindSessionClose:
 			e.mu.Lock()
 			e.busy[c.ID] = true
 			e.mu.Unlock()
@@ -235,6 +236,7 @@ func (e *Executor) PollOnce(ctx context.Context) error {
 					KindTermOpen: e.termOpen, KindTermAttach: e.termAttach, KindTermKill: e.termKill,
 					KindTermSend: e.termSend, KindTermCapture: e.termCapture, KindFSAttach: e.fsAttach,
 					KindFileList: e.fileCmd, KindFileGet: e.fileCmd, KindFilePut: e.fileCmd, KindToolUpdate: e.toolUpdate,
+					KindSessionClose: e.sessionClose,
 				}[c.Kind](ctx, c)
 			}(c)
 		default:

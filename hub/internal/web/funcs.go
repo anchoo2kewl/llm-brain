@@ -374,6 +374,7 @@ var funcs = template.FuncMap{
 		}
 		return false
 	}, "statusWord": stateWord,
+	"closable": closable, "closeArgs": mkClose, "closing": closing, "canClose": func() bool { return false },
 	"final": store.FinalStatus, "short": short, "home": homeShort, "bytes": bytesH,
 	"lines": func(s string) int { return strings.Count(s, "\n") + 1 },
 	"agentLabels": func(i Issue) []string {

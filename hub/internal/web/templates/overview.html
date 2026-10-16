@@ -96,7 +96,7 @@
 <td class="mut">{{.Host}}</td>
 <td class="mut small">{{.Provider}} · {{home .Cwd}}{{if .Branch}} · {{.Branch}}{{end}}</td>
 <td class="mut nowrap">{{ago .FirstAt}}</td>
-<td class="mut small">active {{ago .FileMtime}}</td>
+<td class="mut small">active {{ago .FileMtime}}{{if canClose}} {{template "sessclose" .}}{{end}}</td>
 </tr>{{end}}
 </table></div>{{else}}<div class="empty">Nothing running.</div>{{end}}
 
