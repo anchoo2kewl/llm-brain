@@ -49,6 +49,7 @@ type Server struct {
 	Events   *Events         // the live stream every page listens to (events.go)
 	Push     *Push           // nil: no push notifications (push.go)
 	Memory   *memory.Service // nil: no shared agent memory (memory.go)
+	LearnURL string          // Audio Courses (go-learn) server behind the Learn tab; "" hides it (learn.go)
 
 	pages map[string]*template.Template
 }
@@ -64,6 +65,7 @@ func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger
 		fm[k] = v
 	}
 	fm["canClose"] = func() bool { return srv.Agents != nil } // session control is on: Close works
+	fm["learnOn"] = func() bool { return srv.LearnURL != "" }
 	for _, n := range names {
 		base := filepath.Base(n)
 		if base == "layout.html" || base == "parts.html" {
@@ -83,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.home)
+	s.mountLearn(mux)
 	mux.HandleFunc("GET /fleet", s.overview)
 	mux.HandleFunc("GET /now", s.nowPage)
 	mux.HandleFunc("GET /api/events", s.tailnetOnly(s.eventsSSE))

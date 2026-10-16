@@ -136,6 +136,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	slackEnv := fs.String("slack-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/slack.env"), "file holding SLACK_TOKEN, read only when the hub has no Slack token yet")
 	chatInterval := fs.Duration("chat-interval", 2*time.Minute, "how often to read Slack; 0 disables chat")
 	chatBackfill := fs.Duration("chat-backfill", 24*time.Hour, "how far back a newly watched conversation is read")
+	learnURL := fs.String("learn", "http://127.0.0.1:8790", "Audio Courses (go-learn) server shown as the Learn tab; '' hides it")
 	mem := addMemoryFlags(fs)
 	_ = fs.Parse(args)
 	for _, kv := range strings.Split(*people, ",") {
@@ -159,6 +160,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
+	srv.LearnURL = *learnURL
 	if *indexPath == "" {
 		*indexPath = filepath.Join(c.state, "hub.bleve")
 	}

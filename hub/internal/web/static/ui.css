@@ -215,6 +215,7 @@ th{background:var(--sunk);font-size:12px;letter-spacing:.02em}
   .gsearch{flex:1 1 auto;max-width:none;margin-left:auto}
   .gsearch input{min-height:36px}
   /* the tab bar */
+  .tabbar:has(.tab-learn){grid-template-columns:repeat(6,1fr)}
   .tabbar{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:25;
     background:color-mix(in srgb,var(--card) 92%,transparent);-webkit-backdrop-filter:saturate(1.6) blur(16px);backdrop-filter:saturate(1.6) blur(16px);
     border-top:1px solid var(--line);padding-bottom:var(--safe-b)}
