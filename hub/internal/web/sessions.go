@@ -514,9 +514,11 @@ type agentView struct {
 	Prompts    []store.SavedPrompt
 	Scratch    bool
 	BusyPrompt string
+	View       string // term | chat (view.go)
+	VBase      string
 }
 
-func (s *Server) agentView(ctx context.Context, id int64) (agentView, error) {
+func (s *Server) agentView(ctx context.Context, id int64, view string) (agentView, error) {
 	a, err := s.Store.AgentSession(ctx, id)
 	if err != nil {
 		return agentView{}, err
@@ -535,7 +537,8 @@ func (s *Server) agentView(ctx context.Context, id int64) (agentView, error) {
 			v.CanSend = !a.Busy() && strings.TrimSpace(a.LastResult) != ""
 		}
 	}
-	v.Convo, err = s.conversation(ctx, a, v.SessionID, v.RunID)
+	v.View = view
+	v.Convo, err = s.conversation(ctx, a, v.SessionID, v.RunID, view)
 	return v, err
 }
 
@@ -545,7 +548,8 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	v, err := s.agentView(r.Context(), id)
+	v, err := s.agentView(r.Context(), id, viewOf(r))
+	v.VBase = viewLink(r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -563,15 +567,16 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request) {
 const conversationTurns = 200
 
 type turnView struct {
-	Prompt string
-	Reply  template.HTML
+	Prompt    string
+	Reply     template.HTML
+	ReplyText string // the answer as written, for the Terminal view
 	Status string
 	Error  string
 }
 
 // conversation renders the chat: the ingested transcript when there is one, else the turns the hub ran
 // (prompt, final answer), and while a turn runs, its live output.
-func (s *Server) conversation(ctx context.Context, a store.AgentSession, sessionID, runID int64) (template.HTML, error) {
+func (s *Server) conversation(ctx context.Context, a store.AgentSession, sessionID, runID int64, view string) (template.HTML, error) {
 	var buf bytes.Buffer
 	data := struct {
 		A        store.AgentSession
@@ -583,7 +588,8 @@ func (s *Server) conversation(ctx context.Context, a store.AgentSession, session
 		LiveLog  string
 		RunID    int64
 		WithName string
-	}{A: a, Session: sessionID, Busy: a.Busy(), RunID: runID, WithName: agent.ProviderName(a.Provider)}
+		View     string
+	}{A: a, Session: sessionID, Busy: a.Busy(), RunID: runID, WithName: agent.ProviderName(a.Provider), View: view}
 	if sessionID > 0 {
 		ms, err := s.Store.Messages(ctx, sessionID, 0, 0, conversationTurns)
 		if err != nil {
@@ -591,7 +597,11 @@ func (s *Server) conversation(ctx context.Context, a store.AgentSession, session
 		}
 		data.Earlier = len(ms) == conversationTurns
 		var ib bytes.Buffer
-		if err := s.pages["agent"].ExecuteTemplate(&ib, "items", fold(ms)); err != nil {
+		tpl := "items"
+		if view == "term" {
+			tpl = "titems"
+		}
+		if err := s.pages["agent"].ExecuteTemplate(&ib, tpl, fold(ms)); err != nil {
 			return "", err
 		}
 		data.Items = template.HTML(ib.String()) //nolint:gosec // rendered by html/template
@@ -615,7 +625,7 @@ func (s *Server) conversation(ctx context.Context, a store.AgentSession, session
 				tv.Prompt = "Review the change in this folder" + map[bool]string{true: " against " + t.Review.Base, false: ""}[t.Review.Base != ""] + "."
 			}
 			if rep.Result != "" {
-				tv.Reply = llm.Markdown(rep.Result)
+				tv.Reply, tv.ReplyText = llm.Markdown(rep.Result), rep.Result
 			}
 			// With a transcript, only the turn still in flight is shown from here.
 			if sessionID > 0 && (c.Status == "done" || c.Status == "failed" || c.Status == "stopped" || c.Status == "cancelled") {
@@ -656,7 +666,7 @@ func (s *Server) agentConversation(w http.ResponseWriter, r *http.Request) {
 		sid, _ = s.Store.SessionByUUID(ctx, a.Host, a.ProviderSession)
 	}
 	run, _ := s.Store.LatestRunByKey(ctx, a.Host, "agent-"+strconv.FormatInt(a.ID, 10))
-	html, err := s.conversation(ctx, a, sid, run)
+	html, err := s.conversation(ctx, a, sid, run, viewOf(r))
 	if err != nil {
 		s.fail(w, err)
 		return

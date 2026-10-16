@@ -18,8 +18,15 @@
   function load() {
     try {
       var s = JSON.parse(localStorage.getItem(KEY) || "{}");
-      return { layout: COUNTS[s.layout] ? s.layout : "2", slots: Array.isArray(s.slots) ? s.slots : [], focus: s.focus | 0, zoom: !!s.zoom };
-    } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false }; }
+      return { layout: COUNTS[s.layout] ? s.layout : "2", slots: Array.isArray(s.slots) ? s.slots : [], focus: s.focus | 0, zoom: !!s.zoom,
+        views: s.views && typeof s.views === "object" ? s.views : {} };
+    } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false, views: {} }; }
+  }
+  // viewOf: Terminal or Chat for a pane's terminal/session: its own choice, else the viewer's (app.js).
+  function viewOf(id) {
+    var v = id != null && st.views[id];
+    if (v === "term" || v === "chat") return v;
+    return window.hubView ? window.hubView.get() : "term";
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* private mode */ } }
   function logical() { return narrow.matches ? 1 : COUNTS[st.layout]; } // panes in the layout
@@ -58,18 +65,22 @@
   // sessionPane: a live session from elsewhere, as its transcript page (embed mode, refreshes itself).
   // The page loads the first time the pane is shown.
   function sessionPane(info) {
-    var wrap = el("div", "termpane-x sesspane"), frame = null;
+    var wrap = el("div", "termpane-x sesspane"), frame = null, shownView = "";
     park.appendChild(wrap);
+    function src() { shownView = viewOf(info.id); return "/sessions/" + info.sid + "?embed=1&view=" + shownView; }
     return {
       el: wrap,
       show: function (on) {
         if (on && !frame) {
           frame = document.createElement("iframe");
-          frame.src = "/sessions/" + info.sid + "?embed=1";
+          frame.src = src();
           frame.title = info.title;
           wrap.appendChild(frame);
+        } else if (on && frame && shownView !== viewOf(info.id)) {
+          frame.src = src(); // the view changed while it was parked
         }
       },
+      setView: function () { if (frame) frame.src = src(); },
       focus: function () { if (frame) frame.focus(); },
       markSeen: function () {},
       state: function () { return stateOf(info.id); },
@@ -256,15 +267,51 @@
     var grow = el("span", "grow");
     var open = el("a", "ws-btn", "↗"); open.title = "Open on its own page"; open.target = "_blank"; open.rel = "noopener";
     var code = el("button", "ws-btn", "</>"); code.type = "button"; code.title = "Edit this folder's files (toggle)";
-    var zoom = el("button", "ws-btn", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
+    var zoom = el("button", "ws-btn ws-zoom", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
     var clear = el("button", "ws-btn", "✕"); clear.type = "button"; clear.title = "Take it out of this pane (it keeps running)";
     var s0 = {};
     var close = closeBtn(function () { return s0.s && s0.s.id; }, "ws-btn ws-close", function (m) { msg.textContent = m; });
-    head.append(num, dot, title, badges, meta, grow, code, open, zoom, close, clear);
+    // Terminal | Chat for this pane only (it overrides the viewer's choice).
+    var seg = el("span", "seg viewseg ws-viewseg");
+    seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Show as");
+    var vt = el("button", "", "Term"), vc = el("button", "", "Chat");
+    vt.type = vc.type = "button"; vt.title = "Terminal: as the CLI shows it"; vc.title = "Chat: cards, rendered markdown";
+    vt.dataset.view = "term"; vc.dataset.view = "chat";
+    seg.append(vt, vc);
+    [vt, vc].forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var id = s0.s && s0.s.id;
+        if (!id) return;
+        st.views[id] = b.dataset.view; save();
+        if (panes[id] && panes[id].setView) panes[id].setView();
+        paintSlot(s0.s.i);
+      });
+    });
+    // A hub terminal's Chat view: its transcript over the live terminal (which keeps its size), and a line
+    // that still types into the terminal.
+    var chat = el("div", "ws-chat"), chatFrame = el("iframe"), chatNote = el("p", "ws-chat-note mut small");
+    chatFrame.title = "Transcript";
+    var say = el("form", "ws-chat-say"), sayIn = el("input"), sayBtn = el("button", "primary small", "Send");
+    sayIn.placeholder = "Type into the terminal…"; sayIn.setAttribute("aria-label", "Send to the terminal"); sayIn.autocomplete = "off"; sayIn.enterKeyHint = "send";
+    sayBtn.type = "submit";
+    say.append(sayIn, sayBtn);
+    chat.append(chatFrame, chatNote, say);
+    chat.hidden = true;
+    say.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var id = s0.s && s0.s.id;
+      if (!id || !sayIn.value) return;
+      fetch("/api/terminals/" + id + "/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sayIn.value, keys: ["Enter"] }) })
+        .then(function (r) { if (r.ok) sayIn.value = ""; else msg.textContent = "Couldn't send to the terminal"; })
+        .catch(function () { msg.textContent = "Couldn't send to the terminal"; });
+    });
+    head.append(num, dot, title, badges, meta, grow, seg, code, open, zoom, close, clear);
     var empty = el("div", "ws-slot-empty");
-    root.append(head, body, msg, empty);
+    root.append(head, body, chat, msg, empty);
     grid.appendChild(root);
-    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i };
+    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i,
+      seg: seg, chat: chat, chatFrame: chatFrame, chatNote: chatNote, chatSrc: "" };
     s0.s = s;
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     title.title = "Click to rename";
@@ -333,6 +380,18 @@
     if (i < 0 || !slotEls[i]) return;
     var s = slotEls[i], id = s.id, t = id && infos[id];
     s.root.classList.toggle("ext", !!(t && t.kind === "session"));
+    var v = viewOf(id);
+    s.seg.hidden = !t;
+    [].forEach.call(s.seg.children, function (b) { var on = b.dataset.view === v; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); });
+    // A hub terminal in Chat view: its transcript over it.
+    var chatOn = !!(t && t.kind !== "session" && v === "chat");
+    s.chat.hidden = !chatOn;
+    if (chatOn) {
+      var src = t.session_id ? "/sessions/" + t.session_id + "?embed=1&view=chat" : "";
+      if (src !== s.chatSrc) { s.chatSrc = src; s.chatFrame.hidden = !src; if (src) s.chatFrame.src = src; else s.chatFrame.removeAttribute("src"); }
+      s.chat.style.top = s.head.offsetHeight + "px";
+      s.chatNote.textContent = src ? "" : (t.provider === "shell" ? "A shell has no transcript." : "No transcript yet: it shows after the first message.") + " Lines you send still go to the terminal.";
+    }
     if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.badges.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
     badgesFor(s.badges, t);
     var stt = stateOf(id);

@@ -1,6 +1,6 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css">{{with .V}}
 <div class="top"><div><p class="eyebrow">{{if .A.ReviewOf}}Review · {{end}}{{.With}} · {{.A.Host}}</p><h1 class="title"><span data-rename="/agents/{{.A.ID}}/rename">{{.A.Title}}</span></h1></div>
-<div class="meta"><span class="pill {{statusClass .A.Status}}" id="agentstatus">{{.A.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a></div></div>
+<div class="meta"><span class="pill {{statusClass .A.Status}}" id="agentstatus">{{.A.Status}}</span>{{if not .HostLive}} <span class="pill warn">agent offline</span>{{end}} · <a href="/chats">all chats</a> {{template "viewseg" (viewSeg .VBase .View)}}</div></div>
 {{if .Err}}<p class="bad">{{.Err}}</p>{{end}}
 {{if .A.Error}}{{if ne .A.Status "running"}}<pre class="err small">{{.A.Error}}</pre>{{end}}{{end}}
 <details class="block"><summary>Details{{if .A.Cwd}} · <span class="mut small">{{home .A.Cwd}}</span>{{end}}</summary>
@@ -16,7 +16,7 @@
 </dl></details>
 {{if .CanSend}}{{with .ReviewOf}}<form method="post" action="/agents/{{$.V.A.ID}}/sendback" class="callout"><span>The review is done. Hand its findings to the session that wrote the code.</span> <button type="submit" class="primary">Send review to {{.Provider}} (#{{.ID}})</button></form>{{end}}{{end}}
 
-<div id="transcript" class="transcript hidemeta convo" data-live="0">{{.Convo}}</div>
+<div id="transcript" class="transcript{{if eq .View "term"}} tview p-{{.A.Provider}}{{end}} hidemeta convo" data-live="0">{{.Convo}}</div>
 
 <div class="composer" id="composer">
 <form method="post" action="/agents/{{.A.ID}}/send" class="send">
@@ -32,15 +32,19 @@
 <script src="/static/agents.js" defer></script>
 {{end}}{{end}}
 
-{{define "conversation"}}<div id="convo" data-src="/agents/{{.A.ID}}/conversation" data-status="{{.A.Status}}">
+{{define "conversation"}}<div id="convo" data-src="/agents/{{.A.ID}}/conversation?view={{.View}}" data-status="{{.A.Status}}">
 {{if .Earlier}}<p class="pager"><a href="/sessions/{{.Session}}">earlier messages in the full transcript</a></p>{{end}}
 {{.Items}}
-{{range .Turns}}
+{{range .Turns}}{{if eq $.View "term"}}<div class="t-row t-user"><span class="g g-user"></span><div class="t-body">{{.Prompt}}</div></div>
+{{if .ReplyText}}<div class="t-row t-asst"><span class="g g-asst"></span><div class="t-body">{{tmd .ReplyText}}</div></div>{{end}}
+{{if .Error}}<div class="t-row t-tool t-bad"><span class="g g-tool"></span><div class="t-body">{{.Status}}: {{.Error}}</div></div>{{end}}
+{{else}}
 <div class="msg user"><div class="who">you</div><div class="txt">{{.Prompt}}</div></div>
 {{if .Reply}}<div class="msg assistant"><div class="who">{{$.WithName}}</div><div class="md">{{.Reply}}</div></div>{{end}}
 {{if .Error}}<div class="msg assistant"><div class="who bad">{{.Status}}</div><pre class="err">{{.Error}}</pre></div>{{end}}
-{{end}}
-{{if .Busy}}<div class="msg assistant working"><div class="who"><span class="typing"><i></i><i></i><i></i></span> {{.WithName}} is {{if eq .A.Status "queued"}}waiting for {{.A.Host}} to pick this up{{else}}working{{end}}</div>
+{{end}}{{end}}
+{{if and .Busy (eq .View "term")}}<div class="t-row t-think"><span class="g">✻</span><div class="t-body t-dim">{{.WithName}} is {{if eq .A.Status "queued"}}waiting for {{.A.Host}} to pick this up{{else}}working…{{end}}{{if .LiveLog}}
+{{.LiveLog}}{{end}}</div></div>{{else if .Busy}}<div class="msg assistant working"><div class="who"><span class="typing"><i></i><i></i><i></i></span> {{.WithName}} is {{if eq .A.Status "queued"}}waiting for {{.A.Host}} to pick this up{{else}}working{{end}}</div>
 {{if .LiveLog}}<pre class="log small">{{.LiveLog}}</pre>{{end}}{{if .RunID}}<a class="small" href="/runs/{{.RunID}}">live log</a>{{end}}</div>{{end}}
 {{if and (not .Items) (not .Turns) (not .Busy)}}<div class="empty">No messages yet.</div>{{end}}
 </div>{{end}}
