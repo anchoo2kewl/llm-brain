@@ -1,0 +1,13 @@
+Analysis of sampling bfs (pid 50100) every 1 millisecond
+Call graph:
+    800 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 800 start  (in dyld) + 6992  [0x18487be00]
+    +   500 ???  (in bfs)  load address 0x100cc8000 + 0x1145ca8  [0x101e0dca8]
+    +   ! 300 openat  (in libsystem_kernel.dylib) + 76  [0x184c121d8]
+    +   ! : 300 __openat  (in libsystem_kernel.dylib) + 8  [0x184bf75b0]
+    +   ! 200 getattrlistbulk  (in libsystem_kernel.dylib) + 8
+    +   300 ???  (in bfs)  load address 0x100cc8000 + 0x106ac2c  [0x101d32c2c]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Binary Images:

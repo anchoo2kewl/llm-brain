@@ -114,6 +114,51 @@ func (c *Control) KillTerminal(ctx context.Context, id int64) error {
 	return err
 }
 
+// RestartTerminal queues a term_restart: the host ends the terminal's CLI and starts it again in the same
+// tmux, with the flags it was opened with. resume is the conversation to continue (the CLI's session id);
+// empty starts afresh in the same folder. It returns the command's id.
+func (c *Control) RestartTerminal(ctx context.Context, id int64, resume string) (int64, error) {
+	t, err := c.S.Terminal(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if t.Status != "live" {
+		return 0, bad("this terminal isn't running")
+	}
+	if t.Provider == "shell" {
+		return 0, bad("a shell has no CLI to restart")
+	}
+	if resume != "" && !uuidRe.MatchString(resume) {
+		return 0, bad("bad session id")
+	}
+	if !c.HostLive(ctx, t.Host) {
+		return 0, bad("the agent on %s is offline", t.Host)
+	}
+	o := TermOpen{Provider: t.Provider, Model: t.Model}
+	if cmd, err := c.S.TermOpenCommand(ctx, id); err == nil {
+		_ = json.Unmarshal(cmd.Payload, &o) // its flags (approvals on or off, the model)
+	}
+	o.Provider, o.Prompt, o.Worktree, o.Cwd, o.Resume = t.Provider, "", nil, "", ""
+	switch {
+	case t.Provider == "gemini": // no way to name a conversation to resume: a fresh start in the same folder
+	case resume != "":
+		o.Resume = resume
+	case t.Provider == "claude" && t.SessionUUID != "":
+		// Nothing written under its id yet: start it again under the same id, so the hub still knows it.
+		o.SessionID = t.SessionUUID
+	}
+	if o.Resume != "" {
+		o.SessionID = ""
+	}
+	b, _ := json.Marshal(o)
+	cid, err := c.S.QueueCommand(ctx, store.Command{Host: t.Host, Kind: KindTermRestart, AgentID: id, Payload: b})
+	if err != nil {
+		return 0, err
+	}
+	c.logf("agent: terminal %d: restarting %s on %s (resume %q)", id, t.Provider, t.Host, o.Resume)
+	return cid, nil
+}
+
 // Attach queues a term_attach for the bridge the hub is holding open under token.
 func (c *Control) Attach(ctx context.Context, t store.Terminal, token string, cols, rows int) (int64, error) {
 	b, _ := json.Marshal(TermAttach{Token: token, Cols: cols, Rows: rows})

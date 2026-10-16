@@ -328,9 +328,17 @@ a.searchlink{display:none}
 .closebox[open]>summary{border-color:var(--bad)}
 .closebox .closeform{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 0;white-space:normal}
 .now-list li{display:flex;align-items:center;flex-wrap:wrap}.now-list li>a.nrow{flex:1;min-width:0}.now-list li>.closebox{padding:6px 12px 6px 0;text-align:right}
+/* Restart CLI… (a frozen terminal): the same two steps as Close, not in red */
+.restartbox>summary{color:var(--st-blocked)}.restartbox[open]>summary{border-color:var(--st-blocked)}
+.now-list li>.restartbox{padding-right:6px}
+/* A terminal frozen on a macOS prompt (stuck.go): what happened and the ways out */
+.stuck{border:1px solid var(--st-blocked);border-left-width:4px;border-radius:10px;background:var(--card);padding:10px 14px;margin:8px 0;overflow-wrap:anywhere}
+.stuck p{margin:4px 0}.stuck-h{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.stuck-fix{margin:6px 0 8px;padding-left:20px}.stuck-fix li{margin:3px 0}.stuck code{overflow-wrap:anywhere;word-break:break-all}
 /* thumbs: 44 px for Close… and the real button on phones, iPads (any width up to 1100 px) and any touch screen */
 @media (max-width:1100px),(pointer:coarse){
   .closebox>summary,.closebox .closeform button,button.small.danger{min-height:var(--tap);min-width:var(--tap);padding:0 14px;font-size:15px;display:inline-flex;align-items:center;justify-content:center}
+  .stuck-fix a{display:inline-flex;align-items:center;min-height:var(--tap)}
   .endbox>summary{min-height:var(--tap);display:inline-flex;align-items:center;padding:0 14px}
 }
 @media (max-width:760px){

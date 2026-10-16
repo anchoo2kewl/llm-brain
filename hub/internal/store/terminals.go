@@ -25,15 +25,40 @@ type Terminal struct {
 	LiveAt      string
 	EndedAt     string
 	SessionUUID string // claude --session-id, set when the hub chose it
+	Blocked     string // TermBlock as JSON while its CLI is frozen on something only the Mac's screen can answer
 }
 
 func (t Terminal) Open() bool { return t.Status == "starting" || t.Status == "live" }
 
-const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, live_at, ended_at, session_uuid`
+// Block is why a live terminal's CLI is frozen, or nil.
+func (t Terminal) Block() *TermBlock {
+	if t.Blocked == "" || t.Status != "live" {
+		return nil
+	}
+	var b TermBlock
+	if json.Unmarshal([]byte(t.Blocked), &b) != nil || b.Reason == "" {
+		return nil
+	}
+	return &b
+}
+
+// TermBlock is a terminal the host agent's watchdog found frozen: its screen and CPU time stood still and a
+// process in it sat in a file-system call for the whole sample (agent/stuck.go).
+type TermBlock struct {
+	Reason string   `json:"reason"`         // "macOS privacy prompt"
+	PID    int      `json:"pid,omitempty"`  // the blocked process
+	Proc   string   `json:"proc,omitempty"` // its command, shortened
+	Func   string   `json:"func,omitempty"` // the call it sits in (openat, getattrlist…)
+	Path   string   `json:"path,omitempty"` // the folder it was walking, when lsof shows one
+	Since  string   `json:"since"`          // when the screen last changed
+	FDA    []string `json:"fda,omitempty"`  // what to give Full Disk Access: the hub agent and tmux binaries
+}
+
+const termCols = `id, host, provider, cwd, model, title, status, error, created_at, updated_at, live_at, ended_at, session_uuid, blocked`
 
 func scanTerm(sc interface{ Scan(...any) error }) (Terminal, error) {
 	var t Terminal
-	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.LiveAt, &t.EndedAt, &t.SessionUUID)
+	err := sc.Scan(&t.ID, &t.Host, &t.Provider, &t.Cwd, &t.Model, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &t.UpdatedAt, &t.LiveAt, &t.EndedAt, &t.SessionUUID, &t.Blocked)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -140,6 +165,24 @@ func (s *Store) ApplyTermReport(ctx context.Context, cmdID int64, status, result
 	return tx.Commit()
 }
 
+// ClearTermBlocked forgets a terminal's blocked state (its CLI was restarted; the next inventory says anew).
+func (s *Store) ClearTermBlocked(ctx context.Context, id int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE terminals SET blocked = '' WHERE id = ?`, id)
+	return err
+}
+
+// TermOpenCommand is the term_open that started a terminal (its payload has the CLI's flags).
+func (s *Store) TermOpenCommand(ctx context.Context, id int64) (Command, error) {
+	var cid int64
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM commands WHERE agent_id = ? AND kind = 'term_open' ORDER BY id DESC LIMIT 1`, id).Scan(&cid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Command{}, ErrNotFound
+	} else if err != nil {
+		return Command{}, err
+	}
+	return s.Command(ctx, cid)
+}
+
 // CancelQueuedTerm cancels a terminal's commands no host has claimed yet; opened says its term_open was one.
 func (s *Store) CancelQueuedTerm(ctx context.Context, termID int64) (opened bool, err error) {
 	now := Now()
@@ -162,8 +205,9 @@ func (s *Store) TouchTerminal(ctx context.Context, id int64) error {
 
 // TermSeen is a terminal a host's tmux has right now, with the folder it started in.
 type TermSeen struct {
-	ID  int64  `json:"id"`
-	Cwd string `json:"cwd,omitempty"`
+	ID      int64      `json:"id"`
+	Cwd     string     `json:"cwd,omitempty"`
+	Blocked *TermBlock `json:"blocked,omitempty"` // the watchdog's finding; nil = not blocked (or an agent from before it)
 }
 
 // SyncTerminals squares the host's terminals with a tmux listing taken at or after since:
@@ -190,6 +234,15 @@ func (s *Store) SyncTerminals(ctx context.Context, host string, seen []TermSeen,
 		if n, _ := res.RowsAffected(); n == 1 {
 			revived++
 		}
+		blocked := ""
+		if t.Blocked != nil {
+			b, _ := json.Marshal(t.Blocked)
+			blocked = string(b)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE terminals SET blocked = ? WHERE id = ? AND host = ? AND blocked != ?`,
+			blocked, t.ID, host, blocked); err != nil {
+			return 0, 0, err
+		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM terminals WHERE host = ? AND status = 'live' AND live_at < ?`, host, since)
 	if err != nil {
@@ -208,7 +261,7 @@ func (s *Store) SyncTerminals(ctx context.Context, host string, seen []TermSeen,
 	}
 	rows.Close()
 	for _, id := range gone {
-		res, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'ended', updated_at = ?, ended_at = ?
+		res, err := tx.ExecContext(ctx, `UPDATE terminals SET status = 'ended', updated_at = ?, ended_at = ?, blocked = ''
 			WHERE id = ? AND status = 'live' AND live_at < ?`, now, now, id, since)
 		if err != nil {
 			return 0, 0, err

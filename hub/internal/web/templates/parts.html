@@ -27,6 +27,19 @@
 {{/* close: Close… then the real button, so nothing ends on one stray tap (a closeArgs). */}}
 {{define "close"}}<details class="closebox"><summary class="small danger">Close…</summary><form method="post" action="{{.Action}}" class="closeform">{{if .Back}}<input type="hidden" name="back" value="{{.Back}}">{{end}}{{if .Note}}<span class="small mut">{{.Note}}</span> {{end}}<button class="small danger" type="submit">{{.Label}}</button></form></details>{{end}}
 
+{{/* restart: Restart CLI… then the real button, like close (a closeArgs: the action and where to go back to). */}}
+{{define "restart"}}<details class="closebox restartbox"><summary class="small">Restart CLI…</summary><form method="post" action="{{.Action}}" class="closeform">{{if .Back}}<input type="hidden" name="back" value="{{.Back}}">{{end}}<span class="small mut">{{or .Note "Ends the frozen CLI and starts it again here, continuing its conversation."}}</span> <button class="small primary" type="submit">{{or .Label "Restart CLI"}}</button></form></details>{{end}}
+
+{{/* stuck: a terminal whose CLI is frozen on a macOS prompt, and the ways out (a stuckView). */}}
+{{define "stuck"}}{{with .Block}}<div class="stuck" role="alert"><p class="stuck-h"><span class="chip s-blocked">blocked</span> <strong>Waiting on a macOS permission prompt on {{$.Host}}</strong></p>
+<p class="small">{{if .Proc}}<code>{{.Proc}}</code>{{else}}Its CLI{{end}} has been stuck in <code>{{or .Func "a file call"}}</code>{{with .Path}} in <code>{{.}}</code>{{end}} since {{ago .Since}}: macOS is asking on {{$.Host}}'s own screen whether it may read a protected folder, and nobody is there to answer. Keys you type don't reach it.</p>
+<ol class="stuck-fix small">
+<li>Click <strong>Allow</strong> on {{$.Host}}'s screen — <a href="{{vnc $.Host}}">open Screen Sharing</a> (vnc://{{$.Host}}).</li>
+<li>So it stops asking: System Settings → Privacy &amp; Security → <strong>Full Disk Access</strong> → add {{range $i, $p := .FDA}}{{if $i}} and {{end}}<code class="copy">{{$p}}</code>{{else}}the hub and tmux{{end}}, then restart the hub.</li>
+<li>Or end it and start it again here:</li>
+</ol>
+{{template "restart" (closeArgs (printf "/terminals/%d/restart" $.ID) $.Back "" "")}}</div>{{end}}{{end}}
+
 {{define "items"}}{{range .}}{{template "item" .}}{{end}}{{end}}
 
 {{/* viewseg: Terminal | Chat for a conversation (a viewSeg: the page's URL ending in ? or &, and the view shown). */}}

@@ -130,12 +130,14 @@
 
   // ------------------------------------------------------------ sidebar
 
-  var dotTitle = { working: "working", waiting: "waiting for you", idle: "idle", connecting: "connecting", ended: "ended" };
+  var dotTitle = { working: "working", waiting: "waiting for you", idle: "idle", connecting: "connecting", ended: "ended",
+    blocked: "blocked: waiting on a macOS permission prompt" };
   function stateOf(id) {
     var p = panes[id], i = infos[id];
     if (!i) return "ended";
     if (i.kind === "session") return Date.now() - Date.parse(i.updated) < 30000 ? "working" : "idle";
     if (i.status === "ended" || i.status === "failed") return "ended";
+    if (i.blocked) return "blocked";
     return p ? p.state() : "idle";
   }
   function renderList() {
@@ -186,7 +188,7 @@
     li.parts.meta.textContent = t.cli + " · " + t.cwd;
     var slot = slotOf(id);
     li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
-    li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : p ? p.lastLine() : "";
+    li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host) : p ? p.lastLine() : "";
   }
   // badgesFor: where it runs. Hub terminals: the Mac. Sessions started elsewhere: OUTSIDE HUB, the Mac, read-only.
   function shortHost(h) { return /macbook/i.test(h) ? "MacBook" : /studio/i.test(h) ? "Studio" : h; }
@@ -308,10 +310,30 @@
     });
     head.append(num, dot, title, badges, meta, grow, seg, code, open, zoom, close, clear);
     var empty = el("div", "ws-slot-empty");
-    root.append(head, body, chat, msg, empty);
+    // Frozen on a macOS prompt: what happened, what to do, and Restart CLI (two taps, like ⏻).
+    var stuck = el("div", "ws-stuck"), stuckText = el("p", "small"), stuckActs = el("div", "ws-stuck-acts");
+    var restart = el("button", "small primary", "Restart CLI…"), screen = el("a", "btn small", "Screen Sharing ↗"), armedR = null;
+    restart.type = "button"; restart.title = "End the frozen CLI and start it again in this terminal, continuing its conversation";
+    stuckActs.append(screen, restart);
+    stuck.setAttribute("role", "alert");
+    stuck.append(stuckText, stuckActs);
+    stuck.hidden = true;
+    function disarmR() { clearTimeout(armedR); armedR = null; restart.textContent = "Restart CLI…"; restart.classList.remove("armed"); }
+    restart.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var id = s0.s && s0.s.id;
+      if (!id) return;
+      if (!armedR) { restart.textContent = "Restart?"; restart.classList.add("armed"); armedR = setTimeout(disarmR, 4000); return; }
+      disarmR();
+      fetch("/api/terminals/" + id + "/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) { msg.textContent = x.ok ? "Restarting…" : "Restart failed: " + (x.j.error || "error"); if (x.ok) setTimeout(refresh, 3000); })
+        .catch(function () { msg.textContent = "Restart failed: the hub didn't answer"; });
+    });
+    root.append(head, stuck, body, chat, msg, empty);
     grid.appendChild(root);
     var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i,
-      seg: seg, chat: chat, chatFrame: chatFrame, chatNote: chatNote, chatSrc: "" };
+      seg: seg, chat: chat, chatFrame: chatFrame, chatNote: chatNote, chatSrc: "", stuck: stuck, stuckText: stuckText, screen: screen };
     s0.s = s;
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     title.title = "Click to rename";
@@ -391,6 +413,13 @@
       if (src !== s.chatSrc) { s.chatSrc = src; s.chatFrame.hidden = !src; if (src) s.chatFrame.src = src; else s.chatFrame.removeAttribute("src"); }
       s.chat.style.top = s.head.offsetHeight + "px";
       s.chatNote.textContent = src ? "" : (t.provider === "shell" ? "A shell has no transcript." : "No transcript yet: it shows after the first message.") + " Lines you send still go to the terminal.";
+    }
+    var blocked = !!(t && t.kind !== "session" && t.blocked && t.status === "live");
+    s.stuck.hidden = !blocked;
+    s.root.classList.toggle("blocked", blocked);
+    if (blocked) {
+      s.stuckText.textContent = t.fix || "Its CLI is waiting on a macOS permission prompt on " + t.host + ".";
+      s.screen.href = "vnc://" + encodeURIComponent(t.host);
     }
     if (!t) { s.title.textContent = "empty"; s.meta.textContent = ""; s.badges.textContent = ""; s.dot.className = "dot-s"; s.open.removeAttribute("href"); s.msg.textContent = ""; return; }
     badgesFor(s.badges, t);

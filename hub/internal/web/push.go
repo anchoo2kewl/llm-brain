@@ -187,10 +187,11 @@ func (p *Push) Announce(ctx context.Context, items []Item) {
 func noticeFor(it Item) Notice {
 	verb := map[string]string{"waiting": "waiting for you", "review": "needs a review", "blocked": "blocked", "failed": "failed"}[it.State]
 	title := it.Title
-	switch it.Kind {
-	case "chat":
+	switch {
+	case strings.HasPrefix(it.Key, "tb:"): // a frozen terminal: the title says it all
+	case it.Kind == "chat":
 		title = it.Title + " · " + it.Where
-	case "terminal", "task", "session":
+	case it.Kind == "terminal" || it.Kind == "task" || it.Kind == "session":
 		title = it.Title + " — " + verb
 	default:
 		if verb != "" {
