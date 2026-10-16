@@ -340,3 +340,37 @@ a.searchlink{display:none}
   .closebox .closeform button{width:100%}
   .ibx-acts .closebox{flex-basis:100%}
 }
+
+/* ---------------------------------------------------------------- Terminal view of a transcript (view.go) */
+.viewseg a{min-height:36px;display:inline-flex;align-items:center}
+@media (max-width:1100px),(pointer:coarse){.viewseg a{min-height:var(--tap);min-width:var(--tap);justify-content:center}}
+.tools-toggle{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.transcript.tview{display:block;background:#0d1117;color:#d6dde6;font-family:var(--mono);font-size:13px;line-height:1.55;padding:12px 14px;border-radius:var(--r-md);
+  border:1px solid #232a33;max-width:100%;overflow-x:hidden;color-scheme:dark}
+.tview .t-row{display:flex;gap:1ch;margin:0 0 .65em;min-width:0}
+.tview .g{flex:none;width:1.4ch;color:#d6dde6;user-select:none}
+.tview .t-body{min-width:0;flex:1;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+.tview .t-user .t-body{color:#9aa4b2}
+.tview .t-user{background:#161b22;margin-left:-14px;margin-right:-14px;padding:4px 14px}
+.tview b{color:#f0f3f6;font-weight:700}
+.tview .t-code{color:#79c0ff}
+.tview .t-dim,.tview summary{color:#7d8590}
+.tview .t-add{color:#3fb950}.tview .t-del{color:#f85149}.tview .t-hunk{color:#a371f7}
+.tview .g-tool{color:#3fb950}.tview .t-pending .g-tool{color:#7d8590}.tview .t-bad .g-tool{color:#f85149}
+.tview .t-out{display:flex;gap:1ch;margin-top:2px;color:#9aa4b2}
+.tview .t-out.t-bad{color:#f85149}
+.tview .g-res{flex:none;width:2ch;margin-left:.5ch;user-select:none;color:#7d8590}
+.tview .t-outx{min-width:0;flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
+.tview details>summary{cursor:pointer;list-style:none}.tview details>summary::-webkit-details-marker{display:none}
+.tview details.t-more>summary{display:inline-block;padding:2px 0}
+@media (max-width:1100px),(pointer:coarse){.tview details>summary{min-height:var(--tap);display:flex;align-items:center}}
+.tview .t-think .g{color:#a371f7}
+/* the CLIs' own glyphs: Claude ❯ ⏺ ⎿, Codex › • └, Gemini > ✦ ⎿ */
+.tview .g-user::before{content:"❯"}.tview .g-asst::before,.tview .g-tool::before{content:"⏺"}.tview .g-res::before{content:"⎿"}
+.tview.p-codex .g-user::before{content:"›"}.tview.p-codex .g-asst::before,.tview.p-codex .g-tool::before{content:"•"}.tview.p-codex .g-res::before{content:"└"}
+.tview.p-gemini .g-user::before{content:">"}.tview.p-gemini .g-asst::before{content:"✦"}.tview.p-gemini .g-tool::before{content:"✓"}
+.transcript.tview.hidetools .t-tool,.transcript.tview.hidetools .t-res{display:none}
+.transcript.tview.hidemeta .t-meta{display:none}
+@media (max-width:760px){.transcript.tview{font-size:12.5px;padding:10px;border-radius:var(--r-sm)}.tview .t-user{margin-left:-10px;margin-right:-10px;padding:4px 10px}}
+body.embed:has(.transcript.tview){background:#0d1117}
+body.embed .transcript.tview{border:0;border-radius:0}

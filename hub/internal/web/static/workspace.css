@@ -86,3 +86,12 @@ main.wrapw:has(.ws){max-width:none;padding:0}
   .ws-slot-title{max-width:none;flex:1 1 0;min-width:0}
   .ws-slot-head .grow{display:none}
 }
+
+/* Terminal | Chat in a pane header, and a hub terminal's Chat view over its pane */
+.ws-viewseg{padding:2px;gap:2px;flex:none}.ws-viewseg button{padding:2px 8px;font-size:12px;min-height:0}.ws-viewseg[hidden]{display:none}
+.ws-chat{position:absolute;left:0;right:0;bottom:0;top:var(--ws-head,29px);z-index:3;display:flex;flex-direction:column;background:var(--bg)}
+.ws-chat[hidden]{display:none}.ws-chat iframe{flex:1;width:100%;border:0;min-height:0}.ws-chat iframe[hidden]{display:none}
+.ws-chat-note:empty{display:none}.ws-chat-note{padding:12px;margin:0;flex:1}
+.ws-chat-say{display:flex;gap:6px;padding:6px;border-top:1px solid var(--line);margin:0}.ws-chat-say input{flex:1;min-width:0}
+@media (hover:none),(pointer:coarse),(max-width:1100px){.ws-viewseg button{min-height:var(--tap);min-width:var(--tap);font-size:13px}.ws-chat{top:var(--tap)}.ws-chat-say button,.ws-chat-say input{min-height:var(--tap)}}
+@media (max-width:760px){.ws-slot-head .ws-badges,.ws-slot-head .ws-zoom{display:none}}

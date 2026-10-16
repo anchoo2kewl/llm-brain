@@ -19,10 +19,10 @@
 <form class="inline" method="post" action="/hosts/{{$.S.Host}}/keep"><input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="back" value="/sessions/{{$.S.ID}}"><button class="small" type="submit">Keep</button></form>{{end}}</td></tr>{{end}}</table></div></details>{{end}}
 {{end}}
 {{if .Subagents}}<details class="block"><summary>Subagents <span class="mut small">{{len .Subagents}}</span></summary>{{template "sessrows" .Subagents}}</details>{{end}}
-<div class="tools-toggle small"><label><input type="checkbox" id="hidetools"> hide tool calls</label> <label><input type="checkbox" id="hidemeta" checked> hide injected context</label></div>
+<div class="tools-toggle small">{{if not .Embed}}{{template "viewseg" (viewSeg .VBase .View)}} {{end}}<label><input type="checkbox" id="hidetools"> hide tool calls</label> <label><input type="checkbox" id="hidemeta" checked> hide injected context</label></div>
 {{if .HasEarlier}}<p class="pager"><a href="/sessions/{{.S.ID}}?before={{.FirstID}}">← earlier messages</a></p>{{end}}
-<div id="transcript" class="transcript hidemeta" data-session="{{.S.ID}}" data-after="{{.LastID}}" data-live="{{if or (and .S.Live (not .HasLater)) .Embed}}1{{else}}0{{end}}">
-{{template "grouped" .Items}}
+<div id="transcript" class="transcript{{if eq .View "term"}} tview p-{{.S.Provider}}{{end}} hidemeta" data-view="{{.View}}" data-session="{{.S.ID}}" data-after="{{.LastID}}" data-live="{{if or (and .S.Live (not .HasLater)) .Embed}}1{{else}}0{{end}}">
+{{if eq .View "term"}}{{template "titems" .Items}}{{else}}{{template "grouped" .Items}}{{end}}
 </div>
 {{if .HasLater}}<p class="pager"><a href="/sessions/{{.S.ID}}?after={{.LastID}}">later messages →</a> · <a href="/sessions/{{.S.ID}}">latest</a></p>{{end}}
 {{if not .Items}}<div class="empty">No messages.</div>{{end}}

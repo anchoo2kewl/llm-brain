@@ -189,7 +189,7 @@
       let quiet = 0;
       const tick = async () => {
         try {
-          const r = await fetch(`/sessions/${tr.dataset.session}/more?after=${after}`, { cache: "no-store" });
+          const r = await fetch(`/sessions/${tr.dataset.session}/more?after=${after}&view=${tr.dataset.view || "chat"}`, { cache: "no-store" });
           const html = await r.text();
           const last = r.headers.get("X-Last-Id");
           if (html.trim()) {
@@ -342,4 +342,27 @@
   if ("serviceWorker" in navigator && window.isSecureContext && !document.body.dataset.embed) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
+
+  // Terminal | Chat: the viewer's choice, kept in localStorage and in the hub_view cookie (so the hub renders
+  // it the first time). Terminal is the default. A link with ?view= shows that view once without changing it.
+  window.hubView = {
+    get() {
+      try { const v = localStorage.getItem("hub.view"); if (v === "term" || v === "chat") return v; } catch (e) {}
+      const m = document.cookie.match(/(?:^|; )hub_view=(term|chat)/);
+      return m ? m[1] : "term";
+    },
+    set(v) {
+      try { localStorage.setItem("hub.view", v); } catch (e) {}
+      try { document.cookie = "hub_view=" + v + "; path=/; max-age=31536000; samesite=lax"; } catch (e) {}
+    },
+  };
+  {
+    // The cookie lost (cleared, another port) but localStorage kept: put it back.
+    const want = window.hubView.get();
+    if (!/(?:^|; )hub_view=/.test(document.cookie) && want !== "term") window.hubView.set(want);
+  }
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest(".viewseg [data-view]");
+    if (a && a.tagName === "A") window.hubView.set(a.dataset.view);
+  });
 })();
