@@ -3,7 +3,7 @@
 <div class="meta"><a href="/prompts">prompt library</a> · <a href="/agents">hosts</a></div></div>
 <nav class="chips" aria-label="Kind">{{$k := .Kind}}{{range .Kinds}}<a href="/chats?kind={{.Value}}{{if $.Q}}&q={{$.Q}}{{end}}" {{if eq .Value $k}}class="on"{{end}}>{{.Label}}{{if .N}} <span class="mut">{{.N}}</span>{{end}}</a>{{end}}</nav>
 <form class="filters" method="get" action="/chats"><input type="hidden" name="kind" value="{{.Kind}}"><input type="search" name="q" value="{{.Q}}" placeholder="Search chats…" aria-label="Search chats"><button type="submit">Search</button></form>
-{{if .Rows}}<div class="wrap"><table><tr><th>Chat</th><th>Kind</th><th>With</th><th>Host</th><th>Status</th><th>Last activity</th><th><span class="sr-only">Close</span></th></tr>
+{{if .Rows}}<div class="wrap"><table><tr><th>Chat</th><th>Kind</th><th>With</th><th>Host</th><th>Status</th><th>Last activity</th><th aria-label="Close"></th></tr>
 {{range .Rows}}<tr><td><a href="{{.Link}}">{{trunc 100 .Title}}</a>{{if .Review}} <span class="pill">review</span>{{end}}</td>
 <td class="small">{{kindLabel .Kind}}</td><td class="small">{{.With}}</td><td class="mut small">{{.Host}}</td><td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td><td class="mut small">{{ago .Updated}}</td><td class="nowrap">{{if .Close}}{{template "close" (closeArgs .Close "/chats" .CloseLabel "")}}{{end}}</td></tr>{{end}}
 </table></div>{{else}}<div class="empty">{{if .Q}}No chats match.{{else}}Nothing here yet. <a href="/new">Start something.</a>{{end}}</div>{{end}}

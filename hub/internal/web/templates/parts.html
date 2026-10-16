@@ -11,7 +11,7 @@
 </tr>{{end}}</table></div>{{else}}<div class="empty">None.</div>{{end}}{{end}}
 
 {{define "sessrows"}}{{if .}}<div class="wrap"><table>
-<tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th>{{if canClose}}<th><span class="sr-only">Close</span></th>{{end}}</tr>
+<tr><th>Session</th><th>Host</th><th>Where</th><th>Msgs</th><th>Active</th>{{if canClose}}<th aria-label="Close"></th>{{end}}</tr>
 {{range .}}<tr>
 <td>{{if .Live}}<span class="dot" title="live"></span> {{end}}<a href="/sessions/{{.ID}}">{{trunc 110 .DisplayTitle}}</a> <span class="mut small">{{.Provider}}{{if .Model}} · {{.Model}}{{end}}</span></td>
 <td class="mut">{{.Host}}</td>
