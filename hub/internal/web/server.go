@@ -530,8 +530,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		CanFetch   bool
 		CloseErr   string // why the last Close failed
 		TermID     int64  // the open hub terminal running it: Close ends that terminal
+		View       string // term | chat (view.go)
+		VBase      string
 	}{page{Title: sess.DisplayTitle(), Nav: "sessions", Embed: q.Get("embed") == "1"}, sess, fold(ms), firstID, lastID, hasEarlier, hasLater, subs, parentID, s.sessionStats(r, id),
-		s.sessionFiles(ctx, sess), s.Agents != nil, s.closeError(ctx, sess), termID})
+		s.sessionFiles(ctx, sess), s.Agents != nil, s.closeError(ctx, sess), termID, viewOf(r), viewLink(r)})
 }
 
 // sessionMore returns transcript items after an id as an HTML fragment, for live sessions.
@@ -558,6 +560,10 @@ func (s *Server) sessionMore(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Last-Id", strconv.FormatInt(last, 10))
 	w.Header().Set("X-Live", strconv.FormatBool(sess.Live))
+	if viewOf(r) == "term" {
+		s.render(w, "session", "titems", fold(ms))
+		return
+	}
 	s.render(w, "session", "items", fold(ms))
 }
 
