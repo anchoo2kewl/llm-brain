@@ -70,6 +70,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	s.terminalRoutes(g, p, mux)
 	s.fileRoutes(g, p, mux)
 	s.renameRoutes(p)
+	s.closeRoutes(g, p)
 	s.updateRoutes(g, p)
 }
 
@@ -192,6 +193,7 @@ func (s *Server) apiInventory(w http.ResponseWriter, r *http.Request) {
 type chatRow struct {
 	Kind, Link, Title, With, Host, Status, Updated string
 	Review                                         bool
+	Close, CloseLabel                              string // POST here to end it (a running task, an open terminal)
 }
 
 func agentRow(a store.AgentSession) chatRow {
@@ -199,8 +201,12 @@ func agentRow(a store.AgentSession) chatRow {
 	if t == "" {
 		t = "(untitled)"
 	}
-	return chatRow{Kind: "agent", Link: idPath(a.ID, "/agents/%d"), Title: t, With: agent.ProviderName(a.Provider), Host: a.Host,
+	row := chatRow{Kind: "agent", Link: idPath(a.ID, "/agents/%d"), Title: t, With: agent.ProviderName(a.Provider), Host: a.Host,
 		Status: a.Status, Updated: a.UpdatedAt, Review: a.ReviewOf > 0}
+	if a.Busy() {
+		row.Close, row.CloseLabel = idPath(a.ID, "/agents/%d/stop"), "Stop task"
+	}
+	return row
 }
 
 func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
@@ -222,8 +228,12 @@ func (s *Server) chatsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, t := range ts {
-		rows = append(rows, chatRow{Kind: "terminal", Link: idPath(t.ID, "/terminals/%d"), Title: t.Title,
-			With: agent.TermProviderName(t.Provider), Host: t.Host, Status: t.Status, Updated: t.UpdatedAt})
+		row := chatRow{Kind: "terminal", Link: idPath(t.ID, "/terminals/%d"), Title: t.Title,
+			With: agent.TermProviderName(t.Provider), Host: t.Host, Status: t.Status, Updated: t.UpdatedAt}
+		if t.Open() {
+			row.Close, row.CloseLabel = idPath(t.ID, "/terminals/%d/kill"), "Close terminal"
+		}
+		rows = append(rows, row)
 	}
 	if s.Agents.Chats != nil {
 		cs, err := s.plainChats(ctx, q)
@@ -676,6 +686,8 @@ func (s *Server) agentStop(w http.ResponseWriter, r *http.Request) {
 	to := idPath(id, "/agents/%d")
 	if r.PostFormValue("from") == "agents" {
 		to = "/agents"
+	} else {
+		to = backFrom(r, to)
 	}
 	s.back(w, r, to, s.Agents.Ctl.Stop(r.Context(), id))
 }

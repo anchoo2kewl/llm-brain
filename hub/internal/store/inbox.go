@@ -62,11 +62,11 @@ func (s *Store) RecentLastTurns(ctx context.Context, since time.Duration, limit 
 		var x LastTurn
 		err := rows.Scan(&x.ID, &x.Host, &x.Path, &x.Provider, &x.UUID, &x.ParentUUID, &x.Project, &x.Cwd, &x.Branch, &x.Model,
 			&x.Originator, &x.Title, &x.AutoTitle, &x.AgentName, &x.FirstAt, &x.LastAt, &x.FileMtime, &x.MessageCount, &x.Name,
-			&x.Role, &x.Kind, &x.Text, &x.TS)
+			&x.CloseCmd, &x.ClosedAt, &x.CloseStatus, &x.Role, &x.Kind, &x.Text, &x.TS)
 		if err != nil {
 			return nil, err
 		}
-		x.Live = x.FileMtime >= ago(LiveWindow)
+		x.Live = x.FileMtime >= ago(LiveWindow) && !x.Closed()
 		out = append(out, x)
 	}
 	return out, rows.Err()

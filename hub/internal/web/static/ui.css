@@ -289,7 +289,8 @@ body.embed main.wrapw{padding-bottom:12px}
 /* the terminal's touch keys */
 .keys{position:sticky;bottom:0;z-index:4;background:color-mix(in srgb,var(--bg) 94%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
   padding:8px 0;border-top:1px solid var(--line);flex-direction:column;align-items:stretch}
-.keyrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.keyrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;min-width:0;max-width:100%}
+.keys>*{min-width:0;max-width:100%}
 .keyrow::-webkit-scrollbar{display:none}
 .keyrow button{flex:none;min-width:46px;min-height:40px;padding:4px 10px;font-family:var(--mono);font-size:13px;font-weight:600}
 .keys .quick{display:flex;gap:6px;flex-wrap:wrap}
@@ -318,4 +319,24 @@ a.searchlink{display:none}
   a.searchlink{display:inline-grid;place-items:center;width:40px;height:40px;border-radius:50%;color:var(--mut);margin-left:auto}
   a.searchlink:hover{background:var(--sunk);color:var(--fg)}
   a.searchlink svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+}
+
+/* Close: Close… opens the real button in place (no confirm() under this CSP). */
+.closebox{display:inline-block;max-width:100%}
+.closebox>summary{list-style:none;cursor:pointer;color:var(--bad);border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:var(--card);display:inline-block;white-space:nowrap}
+.closebox>summary::-webkit-details-marker{display:none}
+.closebox[open]>summary{border-color:var(--bad)}
+.closebox .closeform{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 0;white-space:normal}
+.now-list li{display:flex;align-items:center;flex-wrap:wrap}.now-list li>a.nrow{flex:1;min-width:0}.now-list li>.closebox{padding:6px 12px 6px 0;text-align:right}
+/* thumbs: 44 px for Close… and the real button on phones, iPads (any width up to 1100 px) and any touch screen */
+@media (max-width:1100px),(pointer:coarse){
+  .closebox>summary,.closebox .closeform button,button.small.danger{min-height:var(--tap);min-width:var(--tap);padding:0 14px;font-size:15px;display:inline-flex;align-items:center;justify-content:center}
+  .endbox>summary{min-height:var(--tap);display:inline-flex;align-items:center;padding:0 14px}
+}
+@media (max-width:760px){
+  /* a row's Close goes on its own line under it, full width, so the title keeps its room */
+  .now-list li>.closebox{flex-basis:100%;padding:0 14px 12px;text-align:left}
+  .closebox .closeform{flex-direction:column;align-items:stretch}
+  .closebox .closeform button{width:100%}
+  .ibx-acts .closebox{flex-basis:100%}
 }

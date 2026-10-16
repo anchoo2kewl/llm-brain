@@ -158,6 +158,7 @@
     var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
     pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
     top.insertBefore(pen, num);
+    top.insertBefore(closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; }), num);
     items[id] = li;
     li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges };
     return li;
@@ -257,11 +258,14 @@
     var code = el("button", "ws-btn", "</>"); code.type = "button"; code.title = "Edit this folder's files (toggle)";
     var zoom = el("button", "ws-btn", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
     var clear = el("button", "ws-btn", "✕"); clear.type = "button"; clear.title = "Take it out of this pane (it keeps running)";
-    head.append(num, dot, title, badges, meta, grow, code, open, zoom, clear);
+    var s0 = {};
+    var close = closeBtn(function () { return s0.s && s0.s.id; }, "ws-btn ws-close", function (m) { msg.textContent = m; });
+    head.append(num, dot, title, badges, meta, grow, code, open, zoom, close, clear);
     var empty = el("div", "ws-slot-empty");
     root.append(head, body, msg, empty);
     grid.appendChild(root);
     var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i };
+    s0.s = s;
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
     title.title = "Click to rename";
     title.addEventListener("click", function (e) { e.stopPropagation(); if (title.getAttribute("contenteditable") !== "true" && s.id && infos[s.id]) rename(s.id, title); });
@@ -284,6 +288,31 @@
     };
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
+  }
+  // closeBtn: ⏻ ends the terminal or session (its CLI process). The first tap arms it ("Close?"), a second
+  // within 4 seconds closes; no confirm() dialog.
+  function closeBtn(idOf, cls, say) {
+    var b = el("button", cls, "⏻"), armed = null;
+    b.type = "button"; b.title = "Close: end its CLI process";
+    b.setAttribute("aria-label", "Close");
+    function disarm() { clearTimeout(armed); armed = null; b.textContent = "⏻"; b.classList.remove("armed"); }
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var id = idOf(), t = id && infos[id];
+      if (!t) return;
+      if (!armed) { b.textContent = "Close?"; b.classList.add("armed"); armed = setTimeout(disarm, 4000); return; }
+      disarm();
+      var url = t.kind === "session" ? "/api/sessions/" + t.sid + "/close" : "/api/terminals/" + id + "/close";
+      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (!x.ok) { say("Close failed: " + (x.j.error || "error")); return; }
+          say(x.j.closing === "session" ? "Closing on " + t.host + "…" : "Closing…");
+          refresh();
+        })
+        .catch(function () { say("Close failed: the hub didn't answer"); });
+    });
+    return b;
   }
   function fillEmpty(s, i) {
     s.empty.textContent = "";

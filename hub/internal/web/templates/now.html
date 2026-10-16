@@ -9,6 +9,6 @@
 <span class="nt">{{.Title}}</span>
 <span class="nd">{{.Kind}}{{if .Ext}} · outside the hub{{end}}{{if .Detail}} · {{.Detail}}{{end}}{{if .Where}} · {{.Where}}{{end}}</span>
 <span class="ns"><span class="chip s-{{.State}}">{{stateWord .State}}</span><br>{{ago .Since}}</span>
-</a></li>{{end}}</ul>
+</a>{{if and .Close canClose}}{{template "close" (closeArgs .Close "/now" .Label "")}}{{end}}</li>{{end}}</ul>
 </section>{{else}}<div class="empty-state"><div class="big" aria-hidden="true">☾</div><h2>All quiet</h2><p><a href="/terminals/new">Open a terminal</a> or <a href="/chats/new?kind=agent">start a task</a>.</p></div>{{end}}
 </div>{{end}}
