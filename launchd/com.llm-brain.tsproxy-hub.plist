@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.llm-brain.tsproxy-hub</string>
+  <key>ProgramArguments</key><array><string>/Users/anshuman/projects/llm-brain/bin/tsproxy</string><string>-name</string><string>hub</string><string>-target</string><string>http://127.0.0.1:8787</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key><dict><key>HOME</key><string>/Users/anshuman</string></dict>
+  <key>StandardOutPath</key><string>/Users/anshuman/.local/state/llm-brain/logs/tsproxy-hub.log</string>
+  <key>StandardErrorPath</key><string>/Users/anshuman/.local/state/llm-brain/logs/tsproxy-hub.log</string>
+</dict></plist>
