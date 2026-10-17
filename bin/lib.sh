@@ -38,6 +38,11 @@ house() {
   return 0
 }
 
+# This machine's id is HOST (`hostname -s`): claims, logs and state use it, so it never changes. HOST_NAME is what
+# people read (claim comments, notifications, prompts); set `host_name` in ~/.config/llm-brain/local.yaml to change it.
+HOST_NAME="${BRAIN_HOST_NAME:-$(cfg '.host_name // ""' 2>/dev/null || true)}"
+HOST_NAME="${HOST_NAME:-$HOST}"
+
 # Expand ~ in a config path.
 cfg_path() { local p; p="$(cfg "$1")"; echo "${p/#\~/$HOME}"; }
 
@@ -117,7 +122,7 @@ notify() {
   local msg="$1"
   log "notify: $msg"
   if [[ "$(cfg '.notify.macos')" == "true" ]] && command -v osascript >/dev/null; then
-    osascript -e "display notification \"${msg//\"/\'}\" with title \"llm-brain ($HOST)\"" >/dev/null 2>&1 || true
+    osascript -e "display notification \"${msg//\"/\'}\" with title \"llm-brain ($HOST_NAME)\"" >/dev/null 2>&1 || true
   fi
 }
 

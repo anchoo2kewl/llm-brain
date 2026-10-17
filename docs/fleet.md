@@ -114,7 +114,7 @@ A paused machine skips dispatch, babysit and review-prs. Running workers are not
 | `fleet review-prs` | Review every PR that requests or mentions you, once per head commit. |
 | `fleet review-pr <url>` | The same for one PR. |
 | `fleet review <pr-url>` | Cross-LLM internal review of a PR; prints findings. |
-| `fleet slop <pr-url> [--post]` | The [AI Slop Score](slop-score.md) of any PR, open or merged; `--post` also sets its `ai-slop-score` commit status. |
+| `fleet slop <pr-url> [--post]` | The [AI Slop Score](slop-score.md) of any PR, open or merged; `--post` also shows it on the PR (one comment, edited in place) and sets its `ai-slop-score` status. |
 | `fleet status` | Paused or not, roles, running workers, claimed issues, fleet PRs. |
 | `fleet prs` | The fleet PRs as JSON (what babysit works from). |
 | `fleet snapshot` | Write `status.json` for the hub. |

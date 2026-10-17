@@ -47,6 +47,8 @@ owner:
 people: {}                      # GitHub handle -> display name, e.g. {octocat: Mona}
 work_root: ~/work               # where your repos live; workers make worktrees here
 hub_url: http://127.0.0.1:8787  # where shippers send data
+host_name: ""                   # how this machine is named in comments and notifications; empty = `hostname -s`.
+                                # Set it per machine in ~/.config/llm-brain/local.yaml. Claims still use `hostname -s`.
 
 # Intake: every open issue assigned to the owner whose author is in `authors`. No label needed.
 intake:
@@ -94,6 +96,7 @@ slop:
   enabled: true
   profiles: [default]           # the first whose `when` matches the repo is used; an overlay sets e.g. [acme, default]
   post_status: true             # set the ai-slop-score commit status (only when pr_review.post is true)
+  backfill_per_tick: 3          # PRs reviewed before the score existed get it as a comment, this many per tick
 
 limits:
   max_workers: 3               # concurrent implement/babysit LLM workers on this machine
