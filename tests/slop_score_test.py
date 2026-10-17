@@ -143,6 +143,14 @@ class SlopScoreTest(unittest.TestCase):
         for want in ["S01", "D05", "T01"]:
             self.assertIn(want, found, f"{want} not found in {sorted(found)}")
 
+    def test_strings_are_not_comments_or_directives(self):
+        r = Repo()
+        r.write("tools/gen.py", 'PATTERN = r"@ts-ignore|eslint-disable"\nDOC = """\n# TODO: handle retries\n# old = f(x);\n# y = g(x);\n# return y;\n"""\n')
+        r.commit("feat(tools): patterns")
+        found = ids(r.score(title="feat(tools): patterns"))
+        for bad in ["K02", "D01", "D05"]:
+            self.assertNotIn(bad, found)
+
     def test_secret_is_a_veto(self):
         r = Repo()
         r.write("config/dev.env", "TOKEN=ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8\n")
@@ -168,7 +176,8 @@ class SlopScoreTest(unittest.TestCase):
         token = "ghp_" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0FeDcBa99"
         body_lines = ["MIIEowIBAAKCAQEAsecretkeybodyline%02dAAAAAAAAAAAAAAAAAAAAAAAAAAAA" % i for i in range(3)]
         r.write("src/a.ts", f'export function f() {{\n  console.log("{token}");\n}}\n')
-        r.write("deploy/key.pem", "-----BEGIN RSA PRIVATE KEY-----\n" + "\n".join(body_lines) + "\n-----END RSA PRIVATE KEY-----\n")
+        pem = "-----BEGIN RSA " + "PRIVATE KEY-----"            # split so this file doesn't look like a key itself
+        r.write("deploy/key.pem", pem + "\n" + "\n".join(body_lines) + "\n" + pem.replace("BEGIN", "END") + "\n")
         r.commit("fix(a): log")
         res = r.score(title="fix(a): log", body=GOOD_BODY + "\nkey: " + token)
         dump = json.dumps(res)
