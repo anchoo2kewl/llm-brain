@@ -7,7 +7,7 @@
 #   fleet review-prs        review every PR that requests me (once per head commit, until it approves)
 #   fleet review-pr <url>   the same for one PR
 #   fleet review <pr-url>   cross-LLM internal review of a PR; prints findings
-#   fleet slop <pr-url> [--post]  AI Slop Score of a PR; --post also sets its ai-slop-score commit status
+#   fleet slop <pr-url> [--post]  AI Slop Score of a PR; --post also shows it on the PR (comment + commit status)
 #   fleet status            claims, running workers, open fleet PRs
 #   fleet labels            create the fleet labels in the intake repos (once)
 #   fleet pause|resume      this machine only
@@ -37,7 +37,7 @@ review_capacity_left() {
 claim_issue() { # claim_issue <repo> <num> -> 0 if we own it
   local repo="$1" num="$2" owner
   gh issue comment "$num" -R "$repo" --body "<!-- llm-brain:claim host=$HOST -->
-🤖 Picked up by the llm-brain fleet on \`$HOST\` (implementer: $(implementer), reviewer: $(reviewer))." >/dev/null
+🤖 Picked up by the llm-brain fleet on \`$HOST_NAME\` (implementer: $(implementer), reviewer: $(reviewer))." >/dev/null
   sleep 5
   owner="$(gh api "repos/$repo/issues/$num/comments" --paginate \
     --jq '[.[] | select(.body | contains("<!-- llm-brain:claim host="))] | first | .body' \
@@ -101,7 +101,7 @@ cmd_dispatch() {
     claim_issue "$repo" "$num" || continue
     local pf="$BRAIN_STATE/runs/issue-$num.prompt"
     prompt_env implement
-    NOTES="$(notes_for "$repo#$num")" REPO="$repo" ISSUE="$num" HOST="$HOST" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
+    NOTES="$(notes_for "$repo#$num")" REPO="$repo" ISSUE="$num" HOST="$HOST_NAME" REVIEWER="$(reviewer)" IMPLEMENTER="$(implementer)" \
       BRAIN_DIR="$BRAIN_DIR" MARKER="$(cfg '.pr_marker')$num" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" \
       render "$BRAIN_DIR/prompts/implement.md" >"$pf"
@@ -137,6 +137,7 @@ cmd_babysit() {
   fleet_prs | jq -c '.[]' | while read -r row; do
     url="$(jq -r .url <<<"$row")"
     key="pr-$(jq -r '.repository.name + "-" + (.number|tostring)' <<<"$row")"
+    slop_publish "$url" || true                               # the fleet's own PRs show their score too
     worker_running "$key" && continue
     issue="$(jq -r '.issue // empty' <<<"$row")"; refs="$(jq -r '.repository.nameWithOwner + "#" + (.number|tostring)' <<<"$row")"
     [[ -n "$issue" ]] && refs="$refs $(cfg '.intake.repos[0]')#$issue"
@@ -154,7 +155,7 @@ cmd_babysit() {
     echo "$new_fp" >"$fp_file"
     local pf="$BRAIN_STATE/runs/$key.prompt"
     prompt_env babysit
-    NOTES="$(notes_for $refs)" PR_URL="$url" HOST="$HOST" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
+    NOTES="$(notes_for $refs)" PR_URL="$url" HOST="$HOST_NAME" REVIEWER="$(reviewer)" BRAIN_DIR="$BRAIN_DIR" \
       MARKER="$(cfg '.pr_marker')${issue:-?}" \
       REVIEWERS="$(cfg '.reviewers | join(",")')" AUTO_MERGE="$(cfg '.merge.auto')" \
       render "$BRAIN_DIR/prompts/babysit.md" >"$pf"
@@ -211,7 +212,7 @@ slop_for() { # slop_for <pr-url> <key> <head-sha> <base-branch> <dir with src/>
   SLOP="(AI Slop Score is off for this fleet.)"; SLOP_VERDICT="off"
   [[ "$(cfg '.slop.enabled')" == "true" ]] || return 0
   hist="$BRAIN_STATE/slop/$key"; mkdir -p "$hist"
-  prev="$(ls -t "$hist"/*.json 2>/dev/null | grep -v "/$sha.json" | head -1 || true)"
+  prev="$(ls -t "$hist"/*.json 2>/dev/null | grep -v "/$sha.json" | head -1 || true)"   # markers (.shown/.pending) aren't .json
   [[ -n "$prev" ]] && args+=(--previous "$prev")
   [[ "$(cfg '.slop.post_status')" == "true" && "$(cfg '.pr_review.post')" == "true" ]] && args+=(--post-status)
   (cd "$dir/src" && "$BRAIN_DIR/bin/slop-score" --base "origin/$base" --pr "$url" --out-dir "$dir/slop" ${args[@]+"${args[@]}"} \
@@ -226,8 +227,50 @@ slop_for() { # slop_for <pr-url> <key> <head-sha> <base-branch> <dir with src/>
   fi
 }
 
+# Score a PR's current head without an LLM and show it on the PR: one comment, edited in place on each new head,
+# plus the ai-slop-score commit status. For PRs that get no review on this head (the fleet's own; ones reviewed
+# before the score existed). Does nothing when that head is already scored.
+slop_publish() { # slop_publish <pr-url> [force]
+  local url="$1" force="${2:-}" nwo num key sha base dir cid me post
+  [[ "$(cfg '.slop.enabled')" == "true" ]] || return 0
+  [[ "$url" =~ ^https://github.com/([^/]+/[^/]+)/pull/([0-9]+) ]] || return 0
+  nwo="${BASH_REMATCH[1]}"; num="${BASH_REMATCH[2]}"; key="review-${nwo#*/}-$num"
+  sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)" || return 0
+  post="$(cfg '.pr_review.post')"
+  # done = shown on the PR (or scored, on a dry run); a score that failed to post is retried next tick
+  [[ -z "$force" && -f "$BRAIN_STATE/slop/$key/$sha.$([[ "$post" == "true" ]] && echo shown || echo json)" ]] && return 0
+  base="$(gh pr view "$url" --json baseRefName --jq .baseRefName)"
+  dir="$(mktemp -d "$BRAIN_STATE/slop-run.XXXXXX")"
+  if git clone -q --filter=blob:none --no-checkout "git@github.com:$nwo.git" "$dir/src" \
+     && git -C "$dir/src" fetch -q origin "pull/$num/head" "$base:refs/remotes/origin/$base" && git -C "$dir/src" checkout -q --detach "$sha"; then
+    slop_for "$url" "$key" "$sha" "$base" "$dir"
+    if [[ "$SLOP_VERDICT" != "error" && "$SLOP_VERDICT" != "off" && "$post" == "true" ]]; then
+      touch "$BRAIN_STATE/slop/$key/$sha.pending"
+      printf '%s\n\n<!-- llm-brain:ai-slop-score -->\n' "$SLOP" >"$dir/comment.md"
+      # our own marker comment only (never someone's quote of it); a failed lookup must not become a duplicate
+      if me="$(gh api user --jq .login)" && cid="$(gh api "repos/$nwo/issues/$num/comments" --paginate --jq \
+           ".[] | select(.user.login == \"$me\" and (.body | contains(\"<!-- llm-brain:ai-slop-score -->\"))) | .id")"; then
+        cid="$(tail -1 <<<"$cid")"
+        if { [[ -n "$cid" ]] && gh api -X PATCH "repos/$nwo/issues/comments/$cid" -F body=@"$dir/comment.md" >/dev/null; } \
+           || { [[ -z "$cid" ]] && gh api "repos/$nwo/issues/$num/comments" -F body=@"$dir/comment.md" >/dev/null; }; then
+          touch "$BRAIN_STATE/slop/$key/$sha.shown"; rm -f "$BRAIN_STATE/slop/$key/$sha.pending"
+          log "$key: AI Slop Score shown on $url"
+        else
+          log "$key: could not post the slop comment on $url; retrying next tick"
+        fi
+      else
+        log "$key: could not read the comments on $url; retrying next tick"
+      fi
+    fi
+  else
+    log "slop: clone failed for $url"
+  fi
+  rm -rf "$dir"
+}
+
 cmd_slop() { # fleet slop <pr-url> [--post]
   local url="${1:?usage: fleet slop <pr-url> [--post]}" post="${2:-}" dir nwo num base
+  [[ "$post" == "--post" ]] && { slop_publish "$url" force; return; }   # score it, comment, set the status
   [[ "$url" =~ ^https://github.com/([^/]+/[^/]+)/pull/([0-9]+) ]] || die "not a PR url: $url"
   nwo="${BASH_REMATCH[1]}"; num="${BASH_REMATCH[2]}"
   dir="$(mktemp -d "$BRAIN_STATE/slop-run.XXXXXX")"
@@ -256,7 +299,7 @@ post_mode() {
 cmd_review_prs() {
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
-  local url key sha last dir pf nwo base num prior lf fails
+  local url key sha last dir pf nwo base num prior lf fails backfilled=0
   for url in ${ONLY_PR:-$(review_queue)}; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
@@ -271,6 +314,10 @@ cmd_review_prs() {
         echo $((fails + 1)) >"$BRAIN_STATE/prs/$key.fails"  # …unless that review died without posting
         log "$key: last review produced no result — retry $((fails + 1))/3"
       else
+        # reviewed before the slop score existed: score it and show it as a comment, a few PRs per tick
+        if [[ ! -f "$BRAIN_STATE/slop/$key/$sha.json" || -f "$BRAIN_STATE/slop/$key/$sha.pending" ]] && (( backfilled < $(cfg '.slop.backfill_per_tick // 3') )); then
+          backfilled=$((backfilled + 1)); slop_publish "$url" || true
+        fi
         continue
       fi
     else
@@ -288,7 +335,7 @@ cmd_review_prs() {
     prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
     pf="$dir/prompt.md"
     prompt_env pr-review
-    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
+    PR_URL="$url" HOST="$HOST_NAME" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
     BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
@@ -340,7 +387,7 @@ cmd_snapshot() {
 }
 
 cmd_status() {
-  echo "host: $HOST   paused: $(paused && echo yes || echo no)   implementer: $(implementer)   reviewer: $(reviewer)"
+  echo "host: $HOST_NAME ($HOST)   paused: $(paused && echo yes || echo no)   implementer: $(implementer)   reviewer: $(reviewer)"
   echo "workers: $(running_workers)/$(cfg '.limits.max_workers')"
   for f in "$BRAIN_STATE"/runs/*.pid; do [[ -e "$f" ]] && echo "  - $(basename "$f" .pid) (pid $(cat "$f"))"; done
   echo; echo "claimed issues:"
