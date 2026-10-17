@@ -1,0 +1,955 @@
+{
+  "schemaVersion": 1,
+  "id": "default-v1",
+  "title": "llm-brain default",
+  "description": "General taste and PR-hygiene rules for any repo. Company profiles extend this one.",
+  "docs_url": "https://github.com/anchoo2kewl/llm-brain/blob/main/docs/slop-score.md",
+  "extends": [],
+  "skip": {
+    "titles": [
+      "^(Release|Release-candidate) \\d"
+    ],
+    "base_branches": []
+  },
+  "categories": {
+    "clarity": {
+      "title": "PR clarity",
+      "cap": 25,
+      "substantive": true
+    },
+    "scope": {
+      "title": "Scope",
+      "cap": 15,
+      "substantive": true
+    },
+    "code": {
+      "title": "Code",
+      "cap": 35,
+      "substantive": true
+    },
+    "comments": {
+      "title": "Comments and docs",
+      "cap": 20,
+      "substantive": true
+    },
+    "tests": {
+      "title": "Tests",
+      "cap": 20,
+      "substantive": true
+    },
+    "structure": {
+      "title": "Structure",
+      "cap": 25,
+      "substantive": true
+    },
+    "hygiene": {
+      "title": "PR hygiene",
+      "cap": 10,
+      "substantive": false
+    }
+  },
+  "thresholds": {
+    "warn": 15,
+    "block": 35,
+    "min_families": 2,
+    "min_family_points": 5
+  },
+  "exemptions": {
+    "generated": [
+      "**/*.generated.*",
+      "**/*.gen.*",
+      "**/*.pb.go",
+      "**/*_pb2.py",
+      "**/generated/**",
+      "**/dist/**",
+      "**/*.min.js",
+      "**/*.snap",
+      "**/sqlx-data.json",
+      "**/.sqlx/**"
+    ],
+    "vendor": [
+      "vendor/**",
+      "**/node_modules/**",
+      "third_party/**"
+    ],
+    "lockfiles": [
+      "**/Cargo.lock",
+      "**/package-lock.json",
+      "**/pnpm-lock.yaml",
+      "**/yarn.lock",
+      "**/poetry.lock",
+      "**/uv.lock",
+      "**/go.sum",
+      "**/.terraform.lock.hcl",
+      "**/Gemfile.lock"
+    ],
+    "tests": [
+      "**/*_test.go",
+      "**/*.{test,spec}.{ts,tsx,js,jsx,mjs}",
+      "**/*.e2e.ts",
+      "**/test_*.py",
+      "**/*_test.py",
+      "**/tests/**",
+      "**/test/**",
+      "**/__tests__/**",
+      "**/e2e/**",
+      "**/features/**/*.rb",
+      "**/spec/**"
+    ],
+    "fixtures": [
+      "**/fixtures/**",
+      "**/__snapshots__/**",
+      "**/testdata/**",
+      "**/mocks/**"
+    ],
+    "docs": [
+      "**/*.md",
+      "**/*.mdx",
+      "**/*.txt",
+      "docs/**",
+      "doc/**"
+    ]
+  },
+  "waivers": {
+    "enabled": true,
+    "min_reason_chars": 12
+  },
+  "judging": {
+    "enabled": true,
+    "repeats": 3,
+    "max_units": 6,
+    "max_request_bytes": 24000,
+    "timeout_s": 90
+  },
+  "signals": {
+    "P01": {
+      "title": "Title format",
+      "what": "The PR title is a conventional commit: `type(scope): summary`, with an allowed type (and scope, if the profile lists scopes).",
+      "category": "hygiene",
+      "detector": "title_format",
+      "norm": "binary",
+      "weight": 3,
+      "params": {
+        "types": [
+          "feat",
+          "fix",
+          "refactor",
+          "perf",
+          "test",
+          "docs",
+          "style",
+          "build",
+          "ci",
+          "chore",
+          "revert"
+        ],
+        "scope_required": false,
+        "scopes": []
+      },
+      "remedy": "Use a conventional title: `type(scope): what changes`."
+    },
+    "P02": {
+      "title": "Issue reference",
+      "what": "The tracking issue `#N` appears in the branch, every commit subject and the PR title, and it is the same issue everywhere.",
+      "category": "hygiene",
+      "detector": "issue_token",
+      "norm": "binary",
+      "weight": 4,
+      "enabled": false,
+      "params": {
+        "locations": [
+          "title",
+          "branch",
+          "commits"
+        ],
+        "same_issue": true
+      },
+      "remedy": "Put the tracking issue `#N` in the branch, every commit subject and the PR title."
+    },
+    "P03": {
+      "title": "How to verify",
+      "what": "The description has a How to verify / Testing section with real steps (skipped for tiny PRs).",
+      "category": "clarity",
+      "detector": "verify_section",
+      "norm": "binary",
+      "weight": 6,
+      "params": {
+        "heading_regex": "(?im)^\\s*(#{1,6}\\s*|\\*\\*)(how to (verify|test)|verification|testing|test plan)\\b",
+        "min_chars": 20,
+        "min_eligible_lines": 15
+      },
+      "remedy": "Add a `How to verify` section: numbered steps a teammate can follow, and what they should see."
+    },
+    "P10": {
+      "title": "Long title",
+      "what": "The title is at most 72 characters.",
+      "category": "clarity",
+      "detector": "title_length",
+      "norm": "ratio",
+      "weight": 4,
+      "params": {
+        "max_chars": 72
+      },
+      "remedy": "Cut the title to one change in at most 72 characters; details go in the body."
+    },
+    "P12": {
+      "title": "Long description",
+      "what": "The description fits a word budget that grows a little with the size of the change (200 words plus 0.2 per added line, at most 450).",
+      "category": "clarity",
+      "detector": "body_length",
+      "norm": "ratio",
+      "weight": 8,
+      "params": {
+        "base_words": 200,
+        "words_per_line": 0.2,
+        "max_budget": 450
+      },
+      "remedy": "Cut the description to the budget: why (1-2 sentences), what changes for users, risks, how to verify. Leave out what the diff already shows."
+    },
+    "P13": {
+      "title": "Description restates the code",
+      "what": "The description is not mostly inline code: at most 6 code spans per 100 words.",
+      "category": "clarity",
+      "detector": "code_heavy_prose",
+      "norm": "ratio",
+      "weight": 5,
+      "params": {
+        "max_per_100_words": 6,
+        "min_words": 80
+      },
+      "remedy": "Describe behaviour and intent in words. Drop identifier lists, class strings and file moves the diff already shows."
+    },
+    "P14": {
+      "title": "Private references",
+      "what": "The description does not lean on references a teammate can't resolve, like `§5.4`, `AC2`, `slice 3` or `Vitalii's 194` (a review-comment number).",
+      "category": "clarity",
+      "detector": "regex_count",
+      "norm": "count",
+      "weight": 4,
+      "params": {
+        "source": "pr.body",
+        "patterns": [
+          "§\\s*\\d+(\\.\\d+)*",
+          "\\bAC\\d+\\b",
+          "\\b[Ss]lice \\d+\\b",
+          "\\bper the (spec|plan|PRD)\\b",
+          "\\b[A-Z][a-z]+'s \\d{1,4}(/\\d{1,4})*\\b"
+        ],
+        "k": 1
+      },
+      "remedy": "Spell out what `§5.4`-style or `AC2`-style references mean, or link the document. A teammate must not need your notes."
+    },
+    "P15": {
+      "title": "Session narration",
+      "what": "The description does not narrate the author's session or tools (\"in this session\", \"the browser extension was not connected\", \"I have implemented\").",
+      "category": "clarity",
+      "detector": "regex_count",
+      "norm": "count",
+      "weight": 6,
+      "params": {
+        "source": "pr.body",
+        "k": 1,
+        "patterns": [
+          "(?i)\\bin this session\\b",
+          "(?i)\\bthis (host|machine|sandbox) (has|had|lacks)\\b",
+          "(?i)\\b(chrome|browser) extension (was|is) (not|un)",
+          "(?i)\\bwas not possible\\b",
+          "(?i)\\bno live creds\\b",
+          "(?i)\\bI (was|am) (not |un)able\\b",
+          "(?i)\\bas an AI\\b",
+          "(?i)\\bI('ve| have) (implemented|added|updated|created)\\b",
+          "(?i)\\blet me\\b",
+          "(?i)\\bI couldn'?t\\b"
+        ]
+      },
+      "remedy": "Remove notes about the author's tools or session. If something was not tested, say what and why in one line under How to verify."
+    },
+    "P16": {
+      "title": "Promotional wording",
+      "what": "The description does not use two or more promotional words (comprehensive, robust, seamless, leverage...).",
+      "category": "clarity",
+      "detector": "hype_words",
+      "norm": "binary",
+      "weight": 3,
+      "params": {
+        "min_distinct": 2,
+        "words": [
+          "comprehensive",
+          "robust",
+          "seamless",
+          "seamlessly",
+          "cutting-edge",
+          "powerful",
+          "elegant",
+          "leverage",
+          "leverages",
+          "holistic",
+          "streamline",
+          "streamlined",
+          "delve",
+          "best-in-class",
+          "world-class",
+          "state-of-the-art",
+          "game-changing",
+          "effortless",
+          "effortlessly"
+        ]
+      },
+      "remedy": "Replace adjectives with facts: what changed, measured how."
+    },
+    "P17": {
+      "title": "Placeholder text",
+      "what": "No unfilled template placeholders.",
+      "category": "clarity",
+      "detector": "regex_count",
+      "norm": "binary",
+      "weight": 4,
+      "params": {
+        "source": "pr.body",
+        "patterns": [
+          "<describe[^>]*>",
+          "\\[insert[^\\]]*\\]",
+          "(?i)TODO:? describe",
+          "(?i)lorem ipsum"
+        ]
+      },
+      "remedy": "Fill in or delete the template placeholders."
+    },
+    "P18": {
+      "title": "Missing description",
+      "what": "A non-trivial PR has a description of at least 15 words.",
+      "category": "clarity",
+      "detector": "thin_body",
+      "norm": "binary",
+      "weight": 8,
+      "params": {
+        "min_words": 15,
+        "min_eligible_lines": 20
+      },
+      "remedy": "Write two sentences: what changes and why. Then how to verify."
+    },
+    "P19": {
+      "title": "Which issue?",
+      "what": "The PR closes one issue, and it is the one its title names.",
+      "category": "hygiene",
+      "detector": "issue_ambiguity",
+      "norm": "binary",
+      "weight": 4,
+      "remedy": "Close exactly one issue, and make it the one the title names. Mention related issues as \"Related: #N\"."
+    },
+    "C01": {
+      "title": "Temporary commits",
+      "what": "No `fixup!`, `squash!` or `wip` commits left in the branch.",
+      "category": "hygiene",
+      "detector": "fixup_commits",
+      "norm": "binary",
+      "weight": 3,
+      "remedy": "Squash `fixup!`/`wip` commits or give them real subjects."
+    },
+    "C02": {
+      "title": "Committed secret",
+      "what": "No credentials (private keys, cloud/API tokens) in the diff, the PR text or commit messages. Blocks on its own.",
+      "category": "hygiene",
+      "detector": "secrets",
+      "norm": "veto",
+      "weight": 0,
+      "remedy": "Revoke the credential now, remove it from the branch history, and load it from the secret store."
+    },
+    "C04": {
+      "title": "Vague commit subjects",
+      "what": "Commit subjects say what changed; no bare `fix`, `update`, `wip`.",
+      "category": "hygiene",
+      "detector": "vague_commits",
+      "norm": "binary",
+      "weight": 2,
+      "remedy": "Say what each commit changes; `fix`, `update`, `wip` alone tell a reader nothing."
+    },
+    "Z01": {
+      "title": "Too big to review",
+      "what": "At most 800 changed lines (added lines, plus half the deleted ones), not counting generated files, lockfiles and fixtures.",
+      "category": "scope",
+      "detector": "pr_size",
+      "norm": "ratio",
+      "weight": 8,
+      "params": {
+        "max_lines": 800,
+        "full_at": 2000
+      },
+      "remedy": "Split it: land the refactor, then the behaviour change, then the follow-ups. Each PR should be reviewable in one sitting."
+    },
+    "Z02": {
+      "title": "Several changes in one title",
+      "what": "The title names at most two changes.",
+      "category": "scope",
+      "detector": "title_multi",
+      "norm": "binary",
+      "weight": 5,
+      "params": {
+        "max_items": 2
+      },
+      "remedy": "One PR, one change. Split independent items into their own PRs."
+    },
+    "K01": {
+      "title": "Debug output",
+      "what": "No debug output left in: `console.log`, `debugger`, `dbg!`, `breakpoint()`.",
+      "category": "code",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 8,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10,
+        "patterns": {
+          "js": [
+            "\\bconsole\\.(log|debug|trace|dir)\\s*\\(",
+            "^\\s*debugger\\s*;?\\s*$"
+          ],
+          "rust": [
+            "\\bdbg!\\s*\\("
+          ],
+          "python": [
+            "\\bbreakpoint\\s*\\(\\s*\\)",
+            "\\bpdb\\.set_trace\\s*\\("
+          ],
+          "go": [
+            "\\bspew\\.Dump\\s*\\("
+          ]
+        }
+      },
+      "remedy": "Remove debug output, or log through the project logger at a deliberate level."
+    },
+    "K02": {
+      "title": "Suppression without a reason",
+      "what": "Every lint/type suppression (`@ts-ignore`, `eslint-disable`, `nolint`, `noqa`, `#[allow]`...) carries a reason.",
+      "category": "code",
+      "detector": "suppressions",
+      "norm": "density",
+      "weight": 8,
+      "exempt": [
+        "G",
+        "F"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10
+      },
+      "remedy": "Fix the warning, or keep the narrowest suppression with the reason next to it."
+    },
+    "K03": {
+      "title": "TypeScript any",
+      "what": "No new `any` in TypeScript.",
+      "category": "code",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 6,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10,
+        "code_only": true,
+        "patterns": {
+          "ts": [
+            "\\bas\\s+any\\b",
+            ":\\s*any\\b(?!\\w)",
+            "<any>"
+          ]
+        }
+      },
+      "remedy": "Use the real type, a generic, or `unknown` and narrow it."
+    },
+    "K04": {
+      "title": "Rust unwrap",
+      "what": "No new `.unwrap()` in Rust library/server code (tests, examples and binaries excluded).",
+      "category": "code",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 6,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10,
+        "code_only": true,
+        "skip_rust_test_mods": true,
+        "paths": [
+          "**/src/**/*.rs"
+        ],
+        "exclude": [
+          "**/build.rs",
+          "**/bin/**",
+          "**/examples/**",
+          "**/benches/**"
+        ],
+        "patterns": {
+          "rust": [
+            "\\.unwrap\\(\\)"
+          ]
+        }
+      },
+      "remedy": "Return the error with `?` or handle it; a panic in a request path takes the worker down."
+    },
+    "K05": {
+      "title": "Swallowed Go error",
+      "what": "No swallowed Go errors: empty `if err != nil {}` or `_ =` on calls that return errors.",
+      "category": "code",
+      "detector": "go_swallowed_err",
+      "norm": "density",
+      "weight": 8,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10,
+        "calls": [
+          "json.Unmarshal",
+          "json.Marshal",
+          "yaml.Unmarshal",
+          "os.WriteFile",
+          "os.Remove",
+          "os.MkdirAll",
+          "io.Copy",
+          ".Exec(",
+          ".ExecContext(",
+          ".QueryRow(",
+          ".Scan(",
+          ".Commit(",
+          ".Encode(",
+          ".Decode("
+        ]
+      },
+      "remedy": "Handle or return the error. If ignoring it is right, say why in a comment."
+    },
+    "K06": {
+      "title": "Shell failure ignored",
+      "what": "Shell scripts don't hide failures with `|| true`.",
+      "category": "code",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 3,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 3,
+        "r": 15,
+        "code_only": true,
+        "patterns": {
+          "shell": [
+            "\\|\\|\\s*(true|:)\\s*(;|$)"
+          ]
+        }
+      },
+      "remedy": "Handle the failure you expect (`[[ -e f ]] && rm f`) instead of hiding every failure."
+    },
+    "K07": {
+      "title": "Python bare except",
+      "what": "No bare `except:` / `except Exception: pass` in Python.",
+      "category": "code",
+      "detector": "py_bare_except",
+      "norm": "density",
+      "weight": 8,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 2,
+        "r": 10
+      },
+      "remedy": "Catch the exception you expect and handle it, or let it propagate."
+    },
+    "K08": {
+      "title": "SQL built from strings",
+      "what": "SQL is never built by string formatting or concatenation.",
+      "category": "code",
+      "detector": "sql_interp",
+      "norm": "density",
+      "weight": 10,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 1,
+        "r": 5
+      },
+      "remedy": "Bind values as parameters. Pick column/table names from a fixed map."
+    },
+    "K09": {
+      "title": "Unfinished code",
+      "what": "No unfinished code: `todo!()`, `unimplemented!()`, `panic(\"TODO\")`, `throw new Error(\"not implemented\")`.",
+      "category": "code",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 10,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 1,
+        "r": 1,
+        "code_only": false,
+        "patterns": {
+          "rust": [
+            "\\btodo!\\s*\\(",
+            "\\bunimplemented!\\s*\\("
+          ],
+          "go": [
+            "panic\\(\"(?i:todo|not implemented)"
+          ],
+          "python": [
+            "raise NotImplementedError\\b(?!.*abstract)"
+          ],
+          "js": [
+            "throw new Error\\(['\"`](?i:todo|not implemented)"
+          ],
+          "ts": [
+            "throw new Error\\(['\"`](?i:todo|not implemented)"
+          ]
+        }
+      },
+      "remedy": "Finish it or take the unfinished path out of this PR."
+    },
+    "D01": {
+      "title": "TODO without a ticket",
+      "what": "Every TODO/FIXME/HACK links an issue.",
+      "category": "comments",
+      "detector": "todo_no_issue",
+      "norm": "density",
+      "weight": 4,
+      "exempt": [
+        "G",
+        "F"
+      ],
+      "params": {
+        "k": 2,
+        "r": 5
+      },
+      "remedy": "Link the follow-up issue in the TODO (`TODO(#123): ...`) or do it now."
+    },
+    "D05": {
+      "title": "Commented-out code",
+      "what": "No blocks of commented-out code.",
+      "category": "comments",
+      "detector": "commented_code",
+      "norm": "density",
+      "weight": 6,
+      "exempt": [
+        "G",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 1,
+        "r": 5,
+        "min_lines": 3
+      },
+      "remedy": "Delete it; git keeps the history."
+    },
+    "D02": {
+      "title": "Comments that narrate the code",
+      "what": "Comments say why, not what. A comment that only repeats the next line of code counts against the PR. (Judged by Jev.)",
+      "category": "comments",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 12,
+      "tier": 2,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "unit": "comment",
+        "question": "Does this added comment only restate what the code right after it plainly does?",
+        "yes": "Deleting the comment loses nothing: no reason, constraint, contract, warning or domain fact; it paraphrases the next lines (e.g. '// loop over users' above a for loop, '// return the result' above return).",
+        "no": "It explains why, a non-obvious constraint, a contract, a gotcha or domain knowledge, or it is a required doc comment on a public API.",
+        "finding": "this comment repeats the code below it"
+      },
+      "remedy": "Delete comments that repeat the code. Keep the ones that say why."
+    },
+    "D03": {
+      "title": "Docs contradict the code",
+      "what": "The description and comments don't claim something the code contradicts. (Judged by Jev.)",
+      "category": "comments",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 10,
+      "tier": 2,
+      "exempt": [
+        "G",
+        "F"
+      ],
+      "params": {
+        "unit": "pr",
+        "question": "Does the PR description or a changed comment claim something the shown code contradicts?",
+        "yes": "A specific statement (e.g. 'newest shown', 'retries 3 times') conflicts with a visible line of code in the diff.",
+        "no": "Statements match the code, or a contradiction cannot be established from what is shown.",
+        "finding": "the description or a comment says something the code contradicts"
+      },
+      "remedy": "Make the description and comments say what the code does, or fix the code."
+    },
+    "T01": {
+      "title": "No test changes",
+      "what": "A change of 100+ production lines (or a new 30+ line file) changes or adds tests.",
+      "category": "tests",
+      "detector": "no_tests",
+      "norm": "binary",
+      "weight": 8,
+      "params": {
+        "min_eligible_lines": 100,
+        "min_new_file_lines": 30
+      },
+      "remedy": "Add tests for the risky path, or say in the PR which existing tests cover it."
+    },
+    "T02": {
+      "title": "Tests that assert nothing",
+      "what": "Tests assert something real; no `expect(true).toBe(true)`.",
+      "category": "tests",
+      "detector": "lang_regex",
+      "norm": "density",
+      "weight": 8,
+      "only": [
+        "T"
+      ],
+      "params": {
+        "k": 1,
+        "r": 2,
+        "code_only": true,
+        "patterns": {
+          "js": [
+            "expect\\(\\s*true\\s*\\)\\.toBe\\(\\s*true\\s*\\)",
+            "expect\\(\\s*1\\s*\\)\\.toBe\\(\\s*1\\s*\\)"
+          ],
+          "ts": [
+            "expect\\(\\s*true\\s*\\)\\.toBe\\(\\s*true\\s*\\)"
+          ],
+          "python": [
+            "^\\s*assert\\s+True\\s*$"
+          ],
+          "rust": [
+            "assert!\\(\\s*true\\s*\\)"
+          ],
+          "go": [
+            "if\\s+false\\s*\\{\\s*t\\.(Error|Fatal)"
+          ]
+        }
+      },
+      "remedy": "Assert on a real result that would fail if the behaviour broke."
+    },
+    "T03": {
+      "title": "Skipped tests",
+      "what": "Skipped tests carry a reason and an issue.",
+      "category": "tests",
+      "detector": "skipped_tests",
+      "norm": "density",
+      "weight": 8,
+      "params": {
+        "k": 1,
+        "r": 2
+      },
+      "remedy": "Fix the test, or skip it with a reason and the issue that will re-enable it."
+    },
+    "T04": {
+      "title": "Untested behaviour change",
+      "what": "The risky behaviour change has a test or a verification step that would catch a regression. (Judged by Jev.)",
+      "category": "tests",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 14,
+      "tier": 2,
+      "params": {
+        "unit": "pr",
+        "question": "Does this PR change behaviour in a way that has a concrete regression scenario which neither the changed tests nor the verification steps exercise?",
+        "yes": "You can name an input or event, the expected result and the changed code path, and no shown test or verification step checks it.",
+        "no": "The shown tests or steps cover the risky path, the change does not alter behaviour, or there is not enough evidence.",
+        "finding": "a behaviour change has a regression case no test or verify step covers"
+      },
+      "remedy": "Add a test for the scenario named in the review, with the failing input and the expected result."
+    },
+    "S01": {
+      "title": "Copy-pasted blocks",
+      "what": "No copy-pasted blocks of 10+ lines inside the change.",
+      "category": "structure",
+      "detector": "duplicate_blocks",
+      "norm": "density",
+      "weight": 10,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 1,
+        "r": 2,
+        "min_lines": 10,
+        "min_tokens": 50
+      },
+      "remedy": "Reuse one implementation, or say why the copies must change independently."
+    },
+    "S02": {
+      "title": "Unused new helper",
+      "what": "No new private helpers that nothing calls.",
+      "category": "structure",
+      "detector": "unused_private",
+      "norm": "density",
+      "weight": 10,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "k": 1,
+        "r": 3
+      },
+      "remedy": "Delete helpers nothing calls."
+    },
+    "S03": {
+      "title": "Abstraction nobody needs",
+      "what": "No layers, wrappers or options that no caller needs. (Judged by Jev.)",
+      "category": "structure",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 12,
+      "tier": 2,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "unit": "hunk",
+        "question": "Does this added code introduce a layer, wrapper, option or generic abstraction that no shown caller needs, making the code harder to follow than a direct version?",
+        "yes": "A simpler direct version would keep the same behaviour; the abstraction has one caller and no stated second use (e.g. a factory for one type, a config flag nothing sets, a wrapper that only forwards).",
+        "no": "The abstraction has several real uses, is required by a framework or interface, or there is not enough context to tell.",
+        "finding": "a layer or option no caller needs"
+      },
+      "remedy": "Inline the layer. Add the abstraction when the second real use arrives."
+    },
+    "S04": {
+      "title": "Error turned into success",
+      "what": "Failures are not quietly turned into success. (Judged by Jev.)",
+      "category": "structure",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 12,
+      "tier": 2,
+      "exempt": [
+        "G",
+        "T",
+        "F",
+        "D"
+      ],
+      "params": {
+        "unit": "hunk",
+        "question": "Does this added code turn a real failure into apparent success (swallow, log-and-continue, or return a default) without a stated reason?",
+        "yes": "A failing operation can be named whose error is dropped or replaced by a success value, and nothing says this is intended.",
+        "no": "The error propagates, recovery is deliberate and explained, or the hunk has no error path.",
+        "finding": "a failure is turned into apparent success"
+      },
+      "remedy": "Propagate the failure, or handle it on purpose and say why in a comment."
+    },
+    "S05": {
+      "title": "Should be split",
+      "what": "One PR, one change: independently shippable parts are separate PRs. (Judged by Jev.)",
+      "category": "scope",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 10,
+      "tier": 2,
+      "params": {
+        "unit": "pr",
+        "question": "Does this PR bundle two or more changes that could ship, be reviewed and be reverted independently?",
+        "yes": "At least two parts serve different outcomes and either could land alone (e.g. a new column plus an unrelated keyboard change plus an investigation write-up).",
+        "no": "The parts are one coherent change, or one is a required prerequisite of the other.",
+        "finding": "independent changes are bundled into one PR"
+      },
+      "remedy": "Split the independent parts into their own PRs."
+    },
+    "J01": {
+      "title": "Unclear what and why",
+      "what": "From the title and the first two sentences, a teammate can say what changes and why. (Judged by Jev.)",
+      "category": "clarity",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 10,
+      "tier": 2,
+      "params": {
+        "unit": "pr",
+        "question": "Would a teammate who has not seen this work be unable to say what changes and why, from only the title and the first two sentences of the description?",
+        "yes": "The opening is jargon, a list of items, internal references, or file/class names, and does not say what changes for users or the system and why.",
+        "no": "The title and opening plainly state the change and its reason.",
+        "finding": "the title and first two sentences don't say what changes and why"
+      },
+      "remedy": "Open with one plain sentence: what changes for users or the system, and why."
+    },
+    "J02": {
+      "title": "Description reads like a work log",
+      "what": "The description is for the reviewer, not a work log: no restating the diff, session notes, other issues' investigations or other PRs. (Judged by Jev.)",
+      "category": "clarity",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 8,
+      "tier": 2,
+      "params": {
+        "unit": "pr",
+        "question": "Does the description spend much of its length on things a reviewer does not need: restating the diff, the author's tooling or session, investigations for other issues, or work from other PRs?",
+        "yes": "Large parts list identifiers or class strings, narrate the process, diagnose a different issue, or describe other PRs.",
+        "no": "Nearly everything helps a reviewer understand intent, risk, or how to verify.",
+        "finding": "much of the description is a work log (restated diff, session notes, other issues)"
+      },
+      "remedy": "Keep only what a reviewer needs: why, what changes for users, risk, how to verify. Move investigations to their issue."
+    },
+    "J03": {
+      "title": "Behaviour change buried",
+      "what": "Every behaviour change users or API clients will notice is stated plainly near the top. (Judged by Jev.)",
+      "category": "clarity",
+      "detector": "jev",
+      "norm": "judged",
+      "weight": 8,
+      "tier": 2,
+      "params": {
+        "unit": "pr",
+        "question": "Does this PR change user-visible or API behaviour that the description does not state plainly near the top?",
+        "yes": "A behaviour change (e.g. single click now selects instead of opens; a field renamed) is missing or buried in a parenthesis deep in the body.",
+        "no": "Every behaviour change is stated plainly near the top, or there is none.",
+        "finding": "a behaviour change users will notice is missing or buried"
+      },
+      "remedy": "List every behaviour change users or API clients will notice, near the top."
+    }
+  }
+}

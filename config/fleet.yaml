@@ -87,8 +87,16 @@ pr_review:
   rule_modules: [security, ocr, multitenant, migrations, contracts]
   extra_rule_modules: []        # your overlay's private modules
 
+# AI Slop Score (docs/slop-score.md): a 0-100 taste and PR-hygiene score posted on every review.
+# A blocked score stops the review approving and sets a failing `ai-slop-score` commit status, which
+# branch protection can require. The fleet's own PRs must get under the block line before they merge.
+slop:
+  enabled: true
+  profiles: [default]           # the first whose `when` matches the repo is used; an overlay sets e.g. [acme, default]
+  post_status: true             # set the ai-slop-score commit status (only when pr_review.post is true)
+
 limits:
-  max_workers: 3                # concurrent implement/babysit LLM workers on this machine
+  max_workers: 3               # concurrent implement/babysit LLM workers on this machine
   max_review_workers: 3         # PR reviews run separately, in parallel
   implement_timeout: 4h
   babysit_timeout: 2h
