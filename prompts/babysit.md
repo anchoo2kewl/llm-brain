@@ -14,6 +14,9 @@ Shepherd PR {{PR_URL}} to merge. Something changed on it since the last pass (co
    it if needed). Reply on each thread with what you changed, or why you disagree — disagreeing is fine when you're right; be specific.
 3. CI failures: read the logs (`gh run view --log-failed`) and fix real failures. Re-run only proven flakes.
 4. After pushing fixes, run the cross-LLM review again: `{{BRAIN_DIR}}/bin/fleet review {{PR_URL}}` (reviewer: {{REVIEWER}}). Fix real findings.
+   Then the AI Slop Score, in the PR's worktree: `{{BRAIN_DIR}}/bin/slop-score --base origin/<base-branch> --pr {{PR_URL}} --post-status`.
+   Fix what it lists (code, tests, title, description) until it is not `blocked`; treat its items like review comments.
+   Never add `slop:allow` waivers yourself. A waiver a person added stays.
 5. Make sure {{REVIEWERS}} is requested as reviewer.
 
 # Merge (auto-merge: {{AUTO_MERGE}})
@@ -22,6 +25,7 @@ Merge ONLY when ALL hold:
 - no unresolved threads or unanswered comments;
 - every required check is green, including slow or merge-queue checks;
 - your latest internal review found no real defects;
+- the AI Slop Score of the current head is not `blocked` (its `ai-slop-score` commit status is green);
 - the target is the default branch. Never merge or open staging/production promotion PRs.
 Use the repo's merge convention. If auto-merge is false, stop at "ready to merge" and notify instead.
 

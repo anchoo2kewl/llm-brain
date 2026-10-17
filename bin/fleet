@@ -7,6 +7,7 @@
 #   fleet review-prs        review every PR that requests me (once per head commit, until it approves)
 #   fleet review-pr <url>   the same for one PR
 #   fleet review <pr-url>   cross-LLM internal review of a PR; prints findings
+#   fleet slop <pr-url> [--post]  AI Slop Score of a PR; --post also sets its ai-slop-score commit status
 #   fleet status            claims, running workers, open fleet PRs
 #   fleet labels            create the fleet labels in the intake repos (once)
 #   fleet pause|resume      this machine only
@@ -203,6 +204,42 @@ existing_feedback() { # existing_feedback <owner/repo> <number>
     --jq '.[] | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
 }
 
+# AI Slop Score of one PR head, scored in its clone. Sets SLOP (the review section) and SLOP_VERDICT for the prompt,
+# keeps each score in $BRAIN_STATE/slop/<key>/ so a re-review can say what changed, and sets the commit status.
+slop_for() { # slop_for <pr-url> <key> <head-sha> <base-branch> <dir with src/>
+  local url="$1" key="$2" sha="$3" base="$4" dir="$5" hist prev args=()
+  SLOP="(AI Slop Score is off for this fleet.)"; SLOP_VERDICT="off"
+  [[ "$(cfg '.slop.enabled')" == "true" ]] || return 0
+  hist="$BRAIN_STATE/slop/$key"; mkdir -p "$hist"
+  prev="$(ls -t "$hist"/*.json 2>/dev/null | grep -v "/$sha.json" | head -1 || true)"
+  [[ -n "$prev" ]] && args+=(--previous "$prev")
+  [[ "$(cfg '.slop.post_status')" == "true" && "$(cfg '.pr_review.post')" == "true" ]] && args+=(--post-status)
+  (cd "$dir/src" && "$BRAIN_DIR/bin/slop-score" --base "origin/$base" --pr "$url" --out-dir "$dir/slop" ${args[@]+"${args[@]}"} \
+    >/dev/null 2>>"$dir/slop.err") || true
+  if [[ -f "$dir/slop/slop.json" ]]; then
+    cp "$dir/slop/slop.json" "$hist/$sha.json"
+    SLOP="$(cat "$dir/slop/slop.md")"; SLOP_VERDICT="$(jq -r .verdict "$dir/slop/slop.json")"
+    log "$key: AI Slop Score $(jq -r .score "$dir/slop/slop.json")/100 ($SLOP_VERDICT)"
+  else
+    SLOP="(AI Slop Score could not run: $(tail -1 "$dir/slop.err" 2>/dev/null))"; SLOP_VERDICT="error"
+    log "$key: slop-score failed: $(tail -1 "$dir/slop.err" 2>/dev/null)"
+  fi
+}
+
+cmd_slop() { # fleet slop <pr-url> [--post]
+  local url="${1:?usage: fleet slop <pr-url> [--post]}" post="${2:-}" dir nwo num base
+  [[ "$url" =~ ^https://github.com/([^/]+/[^/]+)/pull/([0-9]+) ]] || die "not a PR url: $url"
+  nwo="${BASH_REMATCH[1]}"; num="${BASH_REMATCH[2]}"
+  dir="$(mktemp -d "$BRAIN_STATE/slop-run.XXXXXX")"
+  base="$(gh pr view "$url" --json baseRefName --jq .baseRefName)"
+  # pull/N/head exists for merged PRs (branch deleted) and forks alike
+  git clone -q --filter=blob:none --no-checkout "git@github.com:$nwo.git" "$dir/src" \
+    && git -C "$dir/src" fetch -q origin "pull/$num/head:refs/slop/head" "$base:refs/remotes/origin/$base" \
+    && git -C "$dir/src" checkout -q --detach refs/slop/head || { rm -rf "$dir"; die "clone failed for $url"; }
+  (cd "$dir/src" && "$BRAIN_DIR/bin/slop-score" --base "origin/$base" --pr "$url" ${post:+--post-status}) || true
+  rm -rf "$dir"
+}
+
 post_mode() {
   if [[ "$(cfg '.pr_review.post')" == "true" ]]; then
     echo "POST the review to GitHub as described below."
@@ -242,10 +279,11 @@ cmd_review_prs() {
     git clone -q --filter=blob:none --branch "$(jq -r .headRefName "$dir/pr.json")" "git@github.com:$nwo.git" "$dir/src" \
       && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
     existing_feedback "$nwo" "$num" >"$dir/existing.md"
+    slop_for "$url" "$key" "$sha" "$base" "$dir"
     prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
     pf="$dir/prompt.md"
     prompt_env pr-review
-    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" \
+    PR_URL="$url" HOST="$HOST" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
     BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
@@ -344,6 +382,7 @@ case "${1:-}" in
   dispatch) cmd_dispatch ;;
   babysit) cmd_babysit ;;
   review) shift; cmd_review "$@" ;;
+  slop) shift; cmd_slop "$@" ;;
   status) cmd_status ;;
   prs) fleet_prs | jq . ;;
   labels) cmd_labels ;;
