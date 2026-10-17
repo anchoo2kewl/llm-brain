@@ -238,10 +238,19 @@ def classify(fc):
             l.kind = "text" if l.raw.strip() else "blank"
         return
     for h in fc.hunks:
-        in_block = False
+        in_block = in_triple = False
         for op, line, text in h["lines"]:
             s = text.strip()
             target = line if op == "+" else None
+            if lang == "python":                          # inside a triple-quoted string: string content, not comments
+                quotes = text.count('"""') + text.count("'''")
+                if in_triple:
+                    in_triple = quotes % 2 == 0
+                    if target is not None and s:
+                        target.kind, target.code = "code", '""'
+                    continue
+                if quotes % 2 == 1:
+                    in_triple = True
             if target is None:
                 if lang in BLOCK_COMMENT:
                     if in_block and "*/" in s:
@@ -787,8 +796,11 @@ def d_suppressions(ch, sig, p):
     for f in ch.files_for(sig):
         prev = None
         for l in f.added:
-            m = SUPPRESS.search(l.raw)
-            if m and not has_reason(l.raw[m.end():]):
+            m = SUPPRESS.search(strip_strings(l.raw, f.lang))     # a directive, not a string that mentions one
+            if m:
+                at = l.raw.find(m.group(0))
+                m = m if not has_reason(l.raw[at + len(m.group(0)):] if at >= 0 else "") else None
+            if m:
                 prev_ok = prev is not None and prev.no == l.no - 1 and prev.kind == "comment" and not SUPPRESS.search(prev.raw) \
                     and len(prev.comment) >= 12
                 if not prev_ok:
