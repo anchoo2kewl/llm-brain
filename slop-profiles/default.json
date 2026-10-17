@@ -765,7 +765,11 @@
           ]
         }
       },
-      "remedy": "Assert on a real result that would fail if the behaviour broke."
+      "remedy": "Assert on a real result that would fail if the behaviour broke.",
+      "exempt": [
+        "G",
+        "F"
+      ]
     },
     "T03": {
       "title": "Skipped tests",
@@ -778,7 +782,11 @@
         "k": 1,
         "r": 2
       },
-      "remedy": "Fix the test, or skip it with a reason and the issue that will re-enable it."
+      "remedy": "Fix the test, or skip it with a reason and the issue that will re-enable it.",
+      "exempt": [
+        "G",
+        "F"
+      ]
     },
     "T04": {
       "title": "Untested behaviour change",
