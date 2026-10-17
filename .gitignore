@@ -3,3 +3,4 @@
 secrets.env
 bin/hub
 __pycache__/
+bin/tsproxy
