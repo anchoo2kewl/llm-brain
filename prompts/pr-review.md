@@ -25,6 +25,21 @@ PR head `{{HEAD_SHA}}` is checked out in the current directory; base is `{{BASE}
 Security first (the OWASP Top 10 rules from the `security` module), then performance, then correctness.
 Spend your time where a mistake would leak data, let a user act outside their tenant/role, or slow production down.
 
+# AI Slop Score (on every review)
+`bin/slop-score` already scored this head, outside you. Verdict: **{{SLOP_VERDICT}}**. Its section:
+
+<slop-section>
+{{SLOP}}
+</slop-section>
+
+- Paste that section, unchanged, at the end of the review body (without the `<slop-section>` tags). **Every** review gets it,
+  including the one-line "Approving. Nothing found." kind.
+- Don't repeat its items as your own findings or inline comments, and don't re-score: the number is computed, not judged by you.
+  If an item is plainly a false positive, add one line under the section saying which and why.
+- Verdict `block`: the event is `COMMENT`, never `APPROVE`. Say `Not approving yet: AI Slop Score over the block line` (plus any Red items).
+- Verdict `warn`: it doesn't stop an approval on its own; the section already tells the author what to tighten.
+- Verdict `error` or `off`: say nothing about it beyond pasting the section.
+
 # Classify
 - **Red (blocks approval):** severity critical/high — bugs, security/tenant/RBAC leaks, data loss, unsafe-at-prod-size migrations,
   a stated issue outcome not delivered, UI copy contradicting the API, real CI failure.
@@ -37,11 +52,12 @@ Each item: what breaks + a concrete example + the fix. For example:
 Tag security items with their OWASP id, e.g. "(A01)".
 Don't re-describe the PR: the author and other reviewers already did. No summary of what it does unless nobody has written one.
 
-**Nothing new to add** (everything you found is already raised, or you found nothing): post one line, no sections, no inline comments:
-`Approving. Nothing to add to <who>'s review.` or `Approving. Nothing found.` Files reviewed: X/Y. (If a blocking point someone
+**Nothing new to add** (everything you found is already raised, or you found nothing): post one line, then the slop section, no inline comments:
+`Approving. Nothing to add to <who>'s review.` or `Approving. Nothing found.` Files reviewed: X/Y. (When the slop verdict is `block`:
+`Not approving yet: AI Slop Score over the block line.` and use COMMENT.) (If a blocking point someone
 else raised is still open and real, don't repeat it: `Not approving yet: <who>'s point on \`path:line\` is still open.` and use COMMENT.)
 
-Otherwise, review body, max ~100 words:
+Otherwise, review body, max ~100 words (not counting the slop section):
 ```
 <optional, 1 sentence: what you verified that others didn't. For a re-review: "Re-review of <sha8>: <which earlier items are fixed>.">
 
@@ -52,14 +68,16 @@ Otherwise, review body, max ~100 words:
 - `path:line` — one line.
 
 <Approving. | Not approving yet: N blocking.>  Files reviewed: X/Y.
+
+<the AI Slop Score section, verbatim>
 ```
 Inline comment per item (Red always inline; Optional inline when on a diff line), max 3 sentences:
 `**🔴 Blocking** · <bug|security|data|contract|test> — <what breaks, the scenario, the fix>` or
 `**Optional** · <category> — ...`. Use a ```suggestion block when the fix is a small exact edit.
 
-Event: `APPROVE` if there are zero Red items — yours, or others' still open and real — and CI has no real failure; otherwise `COMMENT`. Never `REQUEST_CHANGES`.
+Event: `APPROVE` if there are zero Red items — yours, or others' still open and real — CI has no real failure, and the slop verdict is not `block`; otherwise `COMMENT`. Never `REQUEST_CHANGES`.
 Post with `gh api repos/{{NWO}}/pulls/{{NUMBER}}/reviews --input <json>`: `{commit_id: "{{HEAD_SHA}}", event, body, comments:[{path, line, side:"RIGHT", body}]}`
 (lines must be in the diff; if the API rejects a line, move that item into the body).
 Don't push, edit files, merge, or comment anywhere else.
 
-Last line of output exactly: `REVIEWED {{PR_URL}} <APPROVE|COMMENT> red=<n> optional=<n> files=<x>/<y>`
+Last line of output exactly: `REVIEWED {{PR_URL}} <APPROVE|COMMENT> red=<n> optional=<n> files=<x>/<y> slop={{SLOP_VERDICT}}`

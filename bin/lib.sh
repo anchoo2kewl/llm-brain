@@ -124,6 +124,8 @@ notify() {
 # Render a prompt template: {{KEY}} placeholders replaced from env vars of the same name.
 render() {
   local tpl="$1" out key
+  # bash 5.2+ turns `&` in a ${x//p/r} replacement into the matched text; values (PR text, feedback) contain `&`.
+  shopt -u patsub_replacement 2>/dev/null || true
   out="$(cat "$tpl")"
   for key in $(grep -oE '\{\{[A-Z_]+\}\}' "$tpl" | sort -u | tr -d '{}'); do
     out="${out//\{\{$key\}\}/${!key:-}}"
