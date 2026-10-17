@@ -247,7 +247,7 @@ def classify(fc):
                 if in_triple:
                     in_triple = quotes % 2 == 0
                     if target is not None and s:
-                        target.kind, target.code = "code", '""'
+                        target.kind = "string"
                     continue
                 if quotes % 2 == 1:
                     in_triple = True
@@ -796,7 +796,7 @@ def d_suppressions(ch, sig, p):
     for f in ch.files_for(sig):
         prev = None
         for l in f.added:
-            m = SUPPRESS.search(strip_strings(l.raw, f.lang))     # a directive, not a string that mentions one
+            m = SUPPRESS.search(strip_strings(l.raw, f.lang)) if l.kind in ("code", "comment") else None  # not a string mentioning one
             if m:
                 at = l.raw.find(m.group(0))
                 m = m if not has_reason(l.raw[at + len(m.group(0)):] if at >= 0 else "") else None
