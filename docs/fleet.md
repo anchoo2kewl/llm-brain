@@ -81,6 +81,7 @@ The babysitter merges only when all of these hold (from `prompts/babysit.md`):
 - No unresolved threads or unanswered comments.
 - Every required check is green, including slow and merge-queue checks.
 - The latest internal review found no real defects.
+- The [AI Slop Score](slop-score.md) of the current head is not blocked.
 - The target is the default branch.
 
 It never opens or merges staging or production promotion PRs. With `merge.auto: false` it stops at "ready to merge" and notifies you. After a merge it verifies the change where it deploys, comments a summary, removes the labels and closes the issue when all its PRs are merged.
@@ -113,6 +114,7 @@ A paused machine skips dispatch, babysit and review-prs. Running workers are not
 | `fleet review-prs` | Review every PR that requests or mentions you, once per head commit. |
 | `fleet review-pr <url>` | The same for one PR. |
 | `fleet review <pr-url>` | Cross-LLM internal review of a PR; prints findings. |
+| `fleet slop <pr-url> [--post]` | The [AI Slop Score](slop-score.md) of any PR, open or merged; `--post` also sets its `ai-slop-score` commit status. |
 | `fleet status` | Paused or not, roles, running workers, claimed issues, fleet PRs. |
 | `fleet prs` | The fleet PRs as JSON (what babysit works from). |
 | `fleet snapshot` | Write `status.json` for the hub. |
