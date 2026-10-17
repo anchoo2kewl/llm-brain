@@ -163,6 +163,48 @@ class SlopScoreTest(unittest.TestCase):
         for want in ["P03", "P10", "P12", "P14", "P15", "P16", "P19", "Z02", "C04"]:
             self.assertIn(want, found, f"{want} not found in {sorted(found)}")
 
+    def test_secrets_never_leave_the_process(self):
+        r = Repo()
+        token = "ghp_" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0FeDcBa99"
+        body_lines = ["MIIEowIBAAKCAQEAsecretkeybodyline%02dAAAAAAAAAAAAAAAAAAAAAAAAAAAA" % i for i in range(3)]
+        r.write("src/a.ts", f'export function f() {{\n  console.log("{token}");\n}}\n')
+        r.write("deploy/key.pem", "-----BEGIN RSA PRIVATE KEY-----\n" + "\n".join(body_lines) + "\n-----END RSA PRIVATE KEY-----\n")
+        r.commit("fix(a): log")
+        res = r.score(title="fix(a): log", body=GOOD_BODY + "\nkey: " + token)
+        dump = json.dumps(res)
+        self.assertNotIn(token, dump)
+        for b in body_lines:
+            self.assertNotIn(b, dump)
+        self.assertIn("C02", res["vetoes"])
+        self.assertEqual(sum(1 for e in res["signals"][0]["evidence"] if e["path"] == "deploy/key.pem"), 5)
+
+    def test_quoted_and_non_utf8_paths(self):
+        r = Repo()
+        r.write('src/we"ird name.ts', "export function f() {\n  console.log(1);\n}\n")
+        (r.dir / "src/latin1.py").write_bytes("# caf\xe9\nx = 1\n".encode("latin-1"))
+        r.commit("fix(a): odd files")
+        res = r.score(title="fix(a): odd files")
+        paths = {e["path"] for s in res["signals"] if s["id"] == "K01" for e in s["evidence"]}
+        self.assertEqual(paths, {'src/we"ird name.ts'})
+
+    def test_deleted_files_count_toward_size(self):
+        r = Repo()
+        r.write("src/big.py", "".join(f"x{i} = {i}\n" for i in range(2000)))
+        r.commit("feat: big")
+        r.git("branch", "-f", "base")
+        (r.dir / "src/big.py").unlink()
+        r.commit("refactor: drop big")
+        res = r.score(title="refactor(src): drop the old module")
+        self.assertIn("Z01", ids(res))
+
+    def test_head_inside_base_is_an_error(self):
+        r = Repo()
+        bf = r.dir.parent / "b.md"; bf.write_text(GOOD_BODY)
+        out = subprocess.run([str(SLOP), "--base", "HEAD", "--title", "x", "--body-file", str(bf), "--no-jev"], cwd=r.dir, env=ENV,
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("nothing to score", out.stderr)
+
     def test_lockfile_volume_is_not_scored(self):
         r = Repo()
         r.write("package-lock.json", "{\n" + "".join(f'  "pkg{i}": "1.0.{i}",\n' for i in range(3000)) + '  "end": 1\n}\n')

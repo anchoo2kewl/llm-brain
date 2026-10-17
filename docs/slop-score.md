@@ -43,7 +43,7 @@ A re-review adds what changed: `Was 46 at 1a2b3c4d. Fixed: P03, P12.`
    - `block` from `thresholds.block` (35), but only when at least `min_families` (2) *substantive* categories each bring `min_family_points` (5). PR hygiene isn't substantive, so title format and issue numbers can't block alone. Over 35 without that corroboration stays a warning, and says so.
    - A **veto** signal (a committed secret; for Elastio, AI attribution in blue-stack-ami) blocks whatever the score.
 
-Generated files, vendored code, lockfiles and fixtures are never scored, and don't count toward size. Tests are only scored by test signals.
+Generated files, vendored code, lockfiles and fixtures are skipped by the code, comment and test signals, and don't count toward size; the secret check still scans them, so a key in a fixture is caught. Test files are skipped by most code signals, but suppressions without a reason, TODOs and commented-out code count there too. Deleted files count toward size at half weight.
 
 Without Jev (no key, or `--no-jev`), the judged signals are listed as not assessed and the score uses the rest. Nothing is guessed.
 
@@ -119,7 +119,7 @@ A profile `extends` others. Maps merge by key, everything else replaces, so a co
 
 `regex_count` sources: `pr.body`, `pr.title`, `branch`, `commits.subject`, `commits.message`, `added_text`, `added_code` (strings stripped, comments removed), `added_comments`. `"match": "absent"` fires when nothing matches. `"include_excluded": true` scans generated and test files too.
 
-Jev signals take `params.unit`: `pr` (the title, description, file list, commit subjects and a few hunks), `comment` (each added comment block, with the code after it), or `hunk` (each hunk with real code). At most `judging.max_units` units are asked per kind, picked by a stable hash, and each request stays under 24 KB. Credentials are redacted before anything is sent.
+Jev signals take `params.unit`: `pr` (the title, description, file list, commit subjects and a few hunks), `comment` (each added comment block, with the code after it), or `hunk` (each hunk with real code). At most `judging.max_units` units are asked per kind, picked by a stable hash, and each request stays under 24 KB. Credentials (including whole PEM private-key blocks) are found first and then blanked everywhere: in what is sent to Jev, in other signals' evidence, and in the posted section.
 
 Built-in detectors: `title_format`, `issue_token`, `verify_section`, `title_length`, `body_length`, `code_heavy_prose`, `hype_words`, `thin_body`, `issue_ambiguity`, `fixup_commits`, `vague_commits`, `secrets`, `pr_size`, `title_multi`, `lang_regex`, `suppressions`, `go_swallowed_err`, `py_bare_except`, `sql_interp`, `todo_no_issue`, `commented_code`, `front_matter`, `no_tests`, `skipped_tests`, `duplicate_blocks`, `unused_private`. Their parameters are in `slop-profiles/default.json`.
 
@@ -139,7 +139,7 @@ For PR-level rules, put it in the description: `<!-- slop:allow P12 release note
 ## In the fleet
 
 - **Reviews** (`fleet review-prs`): each PR head is scored before the reviewer starts. The section goes into the review verbatim, every time. A `block` means the event is `COMMENT`, never `APPROVE`. Scores are kept in `~/.local/state/llm-brain/slop/<pr>/<sha>.json` for the re-review delta.
-- **Commit status**: with `slop.post_status` (and `pr_review.post`), the head commit gets an `ai-slop-score` status: `failure` when blocked, `success` otherwise. Make it a required check in branch protection to block merges for real.
+- **Commit status**: with `slop.post_status` (and `pr_review.post`), the commit that was scored gets an `ai-slop-score` status: `failure` when blocked, `success` otherwise. If the author pushed while it was scoring, only the scored commit gets it; the new head is scored on the next tick. Make it a required check in branch protection to block merges for real.
 - **The fleet's own PRs**: the implement and babysit prompts run `slop-score --post-status` after each push and fix what it lists until it is not blocked. Babysit won't merge a blocked PR. The implement prompt carries a description template that passes by design: 1-2 sentences of what and why, at most 5 change bullets, behaviour changes, how to verify, what wasn't tested.
 - `fleet slop <pr-url> [--post]` scores any PR, open or merged, and prints the section.
 

@@ -37,7 +37,7 @@ def die(msg):
 
 
 def sh(cmd, cwd=None, check=False, input=None):
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=input)
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", input=input)
     if check and r.returncode != 0:
         die(f"{' '.join(cmd[:3])}…: {r.stderr.strip()[:300]}")
     return r
@@ -276,12 +276,14 @@ def classify(fc):
             target.code = code
 
 
-def parse_diff(text):
+def parse_diff(text, names=()):
+    """`names`: the new path of each file in diff order, from `git diff --name-status -z` (exact even when git quotes it)."""
     files, fc, cur, new_no = [], None, None, 0
     for raw in text.split("\n"):
         if raw.startswith("diff --git "):
             m = re.match(r"diff --git a/(.*) b/(.*)$", raw)
-            fc = FileChange(m.group(2) if m else raw.split(" b/")[-1])
+            i = len(files)
+            fc = FileChange(names[i] if i < len(names) else (m.group(2) if m else raw.split(" b/")[-1]))
             files.append(fc)
             cur = None
             continue
@@ -317,6 +319,12 @@ def parse_diff(text):
     return files
 
 
+def origin_repo():
+    url = sh(["git", "remote", "get-url", "origin"]).stdout.strip()
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+    return m.group(1) if m else ""
+
+
 def head_text(path):
     """The file at HEAD: from the working tree when it is clean (cheap in a partial clone), else from git."""
     p = Path(path)
@@ -341,10 +349,24 @@ class Change:
         if mb.returncode != 0:
             die(f"cannot find the merge base of {a.base} and HEAD")
         self.merge_base = mb.stdout.strip()
+        if self.merge_base == self.head:
+            die(f"HEAD is already part of {a.base}, so there is nothing to score. For a merged PR, pass the merge commit's first parent as --base.")
         diff = sh(["git", "-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff", "-U3", "--find-renames",
                    self.merge_base, "HEAD"], check=True).stdout
-        self.files = [f for f in parse_diff(diff) if f.status not in ("D", "B")]
+        ns = sh(["git", "diff", "--name-status", "-z", "--find-renames", self.merge_base, "HEAD"], check=True).stdout.split("\0")
+        names, i = [], 0
+        while i < len(ns) and ns[i]:
+            st = ns[i]
+            i += 3 if st[:1] in ("R", "C") else 2
+            names.append(ns[i - 1])
         ex = profile.get("exemptions", {})
+        self.all_files = parse_diff(diff, names)          # deleted and binary files count toward size, nothing else
+        for f in self.all_files:
+            if any_glob(f.path, ex.get("generated")) or any_glob(f.path, ex.get("vendor")) or any_glob(f.path, ex.get("lockfiles")):
+                f.classes.add("G")
+            if any_glob(f.path, ex.get("fixtures")):
+                f.classes.add("F")
+        self.files = [f for f in self.all_files if f.status not in ("D", "B")]
         for f in self.files:
             f.head_text = head_text(f.path)
             f.lang = lang_of(f.path, f.head_text)
@@ -380,10 +402,40 @@ class Change:
             self.pr = {"title": a.title or "", "body": Path(a.body_file).read_text() if a.body_file else "",
                        "headRefName": a.branch or sh(["git", "branch", "--show-current"]).stdout.strip(), "url": "", "number": 0}
         if not self.repo:
-            url = sh(["git", "remote", "get-url", "origin"]).stdout.strip()
-            m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-            self.repo = m.group(1) if m else ""
+            self.repo = origin_repo()
+        self.sanitize()
         self.added_norm = norm_kw("\n".join(l.raw for f in self.files for l in f.added))
+
+    def sanitize(self):
+        """Record credentials (C02 reads these), then blank them everywhere else: added lines, hunk context, PR text,
+        commit messages. Whole PEM blocks go, not just their header line."""
+        self.secret_hits = []
+        for f in self.files:
+            for h in f.hunks:
+                in_pem, rows = False, []
+                for op, line, text in h["lines"]:
+                    flagged = in_pem or bool(PEM_BEGIN.search(text)) or any(rx.search(text) for rx in SECRET_RES)
+                    if PEM_BEGIN.search(text):
+                        in_pem = True
+                    if in_pem and PEM_END.search(text):
+                        in_pem = False
+                    if flagged and op == "+":
+                        self.secret_hits.append(hit(f.path, line.no, "looks like a credential (value not shown)"))
+                    if flagged:
+                        text = "[REDACTED]"
+                        if line is not None:
+                            line.raw, line.code, line.comment = text, "", ""
+                    rows.append((op, line, text))
+                h["lines"] = rows
+        texts = [("PR description", (self.pr or {}).get("body") or ""), ("PR title", (self.pr or {}).get("title") or "")] + \
+                [(f"commit {c['sha'][:8]}", c["message"]) for c in self.commits]
+        for where, t in texts:
+            if redact(t) != t:
+                self.secret_hits.append(hit(None, None, f"{where} contains what looks like a credential"))
+        if self.pr:
+            self.pr["body"], self.pr["title"] = redact(self.pr.get("body") or ""), redact(self.pr.get("title") or "")
+        for c in self.commits:
+            c["message"], c["subject"] = redact(c["message"]), redact(c["subject"])
 
     def files_for(self, sig):
         only, exempt = set(sig.get("only", [])), set(sig.get("exempt", []))
@@ -407,7 +459,7 @@ class Change:
         return sum(f.eligible_lines for f in self.files if not f.classes & {"G", "F"})
 
     def changed_lines(self):
-        return int(sum(f.n_added + 0.5 * f.n_deleted for f in self.files if not f.classes & {"G", "F"}))
+        return int(sum(f.n_added + 0.5 * f.n_deleted for f in self.all_files if not f.classes & {"G", "F"}))
 
     @property
     def body(self):
@@ -660,25 +712,22 @@ SECRET_RES = [re.compile(x) for x in [
     r"\bkey-[0-9a-f]{32}\b", r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b"]]
 
 
+PEM_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----")
+PEM_END = re.compile(r"-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----")
+PEM_BLOCK = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|\Z)", re.S)
+
+
 def redact(text):
+    text = PEM_BLOCK.sub("[REDACTED]", text)
     for rx in SECRET_RES:
         text = rx.sub("[REDACTED]", text)
     return text
 
 
 def d_secrets(ch, sig, p):
-    hits = []
-    for f in ch.files:                                   # every file: generated and test files leak too
-        if any_glob(f.path, (sig.get("params") or {}).get("allow_files")):
-            continue
-        for l in f.added:
-            if any(rx.search(l.raw) for rx in SECRET_RES):
-                hits.append(hit(f.path, l.no, "looks like a credential (value not shown)"))
-    texts = [("PR description", ch.body), ("PR title", ch.title)] + [(f"commit {c['sha'][:8]}", c["message"]) for c in ch.commits]
-    for where, t in texts:
-        if any(rx.search(t or "") for rx in SECRET_RES):
-            hits.append(hit(None, None, f"{where} contains what looks like a credential"))
-    return hits, None
+    """Every file, generated and test files included. The scan itself runs in Change.sanitize, before anything is redacted."""
+    allow = (sig.get("params") or {}).get("allow_files")
+    return [h for h in ch.secret_hits if not (h["path"] and any_glob(h["path"], allow))], None
 
 
 def d_pr_size(ch, sig, p):
@@ -1030,20 +1079,20 @@ def pr_state(ch):
     return {
         "instruction": INSTRUCTION,
         "repo": ch.repo,
-        "pr_title": ch.title,
+        "pr_title": ch.title[:300],
         "pr_description": ch.body[:7000],
-        "files_changed": [{"path": f.path, "added": f.n_added, "deleted": f.n_deleted,
+        "files_changed": [{"path": f.path[:200], "added": f.n_added, "deleted": f.n_deleted,
                            "kind": "generated" if "G" in f.classes else "test" if "T" in f.classes else "docs" if "D" in f.classes else "code"}
-                          for f in files[:60]],
-        "commit_subjects": [c["subject"] for c in ch.commits][:30],
-        "test_files_changed": [f.path for f in ch.files if "T" in f.classes][:30],
+                          for f in sorted(ch.all_files, key=lambda f: -(f.n_added + f.n_deleted))[:60]],
+        "commit_subjects": [c["subject"][:120] for c in ch.commits][:30],
+        "test_files_changed": [f.path[:200] for f in ch.files if "T" in f.classes][:30],
         "diff_sample": sample,
     }
 
 
 def build_packets(ch, sigs, judging):
     """One packet per unit kind. A packet is a Jev decision file plus a map question-id -> (signal, unit)."""
-    packets, limit, maxb = [], judging.get("max_units", 6), judging.get("max_request_bytes", 24000)
+    packets, limit, maxb, too_big = [], judging.get("max_units", 6), judging.get("max_request_bytes", 24000), set()
     by_unit = {}
     for sid, s in sigs.items():
         by_unit.setdefault(s["params"]["unit"], []).append(sid)
@@ -1087,11 +1136,17 @@ def build_packets(ch, sigs, judging):
                 index = {k: v for k, v in index.items() if not k.endswith(f"__{last}")}
             elif len(st.get("pr_description", "")) > 1500:
                 st["pr_description"] = st["pr_description"][: len(st["pr_description"]) // 2] + " …[cut]"
+            elif len(st.get("files_changed", [])) > 10:
+                st["files_changed"] = st["files_changed"][: len(st["files_changed"]) // 2]
+            elif len(st.get("commit_subjects", [])) > 5 or len(st.get("test_files_changed", [])) > 5:
+                st["commit_subjects"], st["test_files_changed"] = st.get("commit_subjects", [])[:5], st.get("test_files_changed", [])[:5]
             else:
+                too_big.update(sid for sid, _ in index.values())
+                doc["questions"] = {}
                 break
         if doc["questions"]:
             packets.append((kind, doc, index))
-    return packets
+    return packets, too_big
 
 
 def run_jev(packets, repeats, out_dir, timeout):
@@ -1227,7 +1282,8 @@ def score(ch, profile, use_jev, out_dir):
             unassessed += [{"signal": sid, "why": "Jev unavailable (no key)"} for sid in tier2]
         else:
             repeats = int(judging.get("repeats", 3))
-            packets = build_packets(ch, tier2, judging)
+            packets, too_big = build_packets(ch, tier2, judging)
+            unassessed += [{"signal": sid, "why": "too much to send to Jev"} for sid in sorted(too_big)]
             answers, failures = run_jev(packets, repeats, out_dir, int(judging.get("timeout_s", 90)))
             jev_note = "on" if not failures else ("partial" if answers else "unavailable")
             asked = set()
@@ -1251,7 +1307,7 @@ def score(ch, profile, use_jev, out_dir):
                     finish(sid, dict(s, norm="ratio"), hits, sev)
                     results[-1]["norm"] = "judged"
             for sid in tier2:
-                if sid not in {r["id"] for r in results}:
+                if sid not in {r["id"] for r in results} and sid not in too_big:
                     why = "no candidates in this change" if sid not in asked else "Jev gave no answer"
                     if sid in asked or unit_kind(tier2[sid]) == "pr":
                         unassessed.append({"signal": sid, "why": why if ch.pr or unit_kind(tier2[sid]) != "pr" else "no PR text"})
@@ -1396,12 +1452,38 @@ def render_rules(profile, repo=""):
                                                                                   if s.get("norm") == "veto" and s.get("enabled", True)) or "none") + ".",
         "- Rules marked *Jev* are judged by Jev, which answers each question with a probability. Answers below 0.70 count for nothing; "
         "the full weight applies at 0.95. Each question is asked 3 times and the middle answer is used.",
-        "- Generated files, vendored code, lockfiles and fixtures are not scored. Tests are scored only by the test rules.",
+        "- Generated files, vendored code, lockfiles and fixtures are skipped by the code, comment and test rules and don't count toward size; "
+        "the secret check still scans them. Test files are skipped by most code rules, but suppressions, TODOs and commented-out code count there too.",
         "- When a rule is wrong for one spot, put `slop:allow <ID> <reason>` on that line or the two lines above it (or in the PR description "
         "for PR-level rules). The reason must be at least 12 characters, and every waiver is listed in the review. Agents may not waive their own findings.", "",
+        "## A PR description that scores well", "",
+        "```markdown",
+        "fix(issues): stop long asset names overlapping the Observed column (#883)",
+        "",
+        "Long asset names ran into the next column on the Issues table, so the Observed time was unreadable.",
+        "Names now wrap inside their cell.",
+        "",
+        "## Changes",
+        "- The Asset cell wraps instead of overflowing.",
+        "- The table keeps its column widths at 1280px.",
+        "",
+        "## How to verify on dev",
+        "1. Open Issues on uat.development.elastio.us and sort by Asset.",
+        "2. Find an asset with a long name: it wraps, and Observed stays readable.",
+        "```", "",
+        "One change, a plain why, behaviour instead of file names, steps a teammate can follow. About 60 words.", "",
         "| Category | Cap | Counts toward blocking |", "|---|---:|---|"]
     for c, v in cats.items():
         out.append(f"| {v['title']} | {v['cap']} | {'yes' if v.get('substantive') else 'no'} |")
+    own = own_signals(profile)
+    if own and profile.get("extends"):
+        out += ["", f"## What {profile.get('title') or profile.get('id')} changes from the defaults", ""]
+        for sid in own:
+            s = profile["signals"][sid]
+            if s.get("enabled", True):
+                out.append(f"- **{sid} {s['title']}**: {s.get('what', '').replace(' (Judged by Jev.)', '')}")
+            else:
+                out.append(f"- **{sid} {s['title']}** is turned off.")
     for c, v in cats.items():
         rows = [(sid, s) for sid, s in profile["signals"].items() if s.get("category") == c and s.get("enabled", True)]
         if not rows:
@@ -1413,9 +1495,18 @@ def render_rules(profile, repo=""):
             scope = ""
             if s.get("when", {}).get("repos"):
                 scope = " Only in " + ", ".join(f"`{r}`" for r in s["when"]["repos"]) + "."
-            out.append(f"| {sid} | {s['title']}{judge} | {s.get('what', '').replace('|', '¦')}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
+            what = s.get('what', '').replace(' (Judged by Jev.)', '').replace('|', '¦')
+            out.append(f"| {sid} | {s['title']}{judge} | {what}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
     out += ["", f"_Generated from profile `{profile.get('id')}` by `bin/slop-score rules`. Change the profile, not this page._", ""]
     return "\n".join(out)
+
+
+def own_signals(profile):
+    """Signal ids the most specific profile file sets itself (new rules or overrides of inherited ones)."""
+    try:
+        return list(json.loads(Path(profile["_files"][-1]).read_text()).get("signals", {}))
+    except (KeyError, IndexError, OSError, json.JSONDecodeError):
+        return []
 
 
 def post_status(res, ch):
@@ -1426,7 +1517,10 @@ def post_status(res, ch):
     state = "failure" if res["verdict"] == "block" else "success"
     top = ", ".join(s["id"] for s in res["signals"][:4])
     desc = f"{res['score']}/100 {'blocked' if state == 'failure' else res['verdict']}" + (f": {top}" if top else "")
-    r = sh(["gh", "api", f"repos/{m.group(1)}/statuses/{ch.pr['headRefOid']}", "-f", f"state={state}", "-f", "context=ai-slop-score",
+    if ch.pr.get("headRefOid") and ch.pr["headRefOid"] != res["head_sha"]:
+        print(f"slop-score: the PR head moved to {ch.pr['headRefOid'][:8]}; setting the status on the scored commit {res['head_sha'][:8]} only",
+              file=sys.stderr)
+    r = sh(["gh", "api", f"repos/{m.group(1)}/statuses/{res['head_sha']}", "-f", f"state={state}", "-f", "context=ai-slop-score",
             "-f", f"description={desc[:139]}", "-f", f"target_url={ch.pr['url']}"])
     if r.returncode != 0:
         print(f"slop-score: could not set the commit status: {r.stderr.strip()[:200]}", file=sys.stderr)
@@ -1478,7 +1572,7 @@ def main():
     a = ap.parse_args(argv)
     if a.help or not a.base:
         sys.exit(__doc__)
-    repo_guess = a.repo or (re.match(r"https://github.com/([^/]+/[^/]+)/pull/", a.pr).group(1) if a.pr else "")
+    repo_guess = a.repo or (re.match(r"https://github.com/([^/]+/[^/]+)/pull/", a.pr).group(1) if a.pr else origin_repo())
     profile = pick_profile(a.profile, repo_guess)
     errs = validate(profile)
     if errs:
@@ -1486,7 +1580,8 @@ def main():
     ch = Change(a, profile)
     res = score(ch, profile, not a.no_jev, a.out_dir)
     prev = json.loads(Path(a.previous).read_text()) if a.previous and Path(a.previous).exists() else None
-    md = render_md(res, profile, prev)
+    res = json.loads(redact(json.dumps(res)))
+    md = redact(render_md(res, profile, prev))
     if a.out_dir:
         Path(a.out_dir).mkdir(parents=True, exist_ok=True)
         Path(a.out_dir, "slop.json").write_text(json.dumps(res, indent=1))
