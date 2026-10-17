@@ -119,6 +119,16 @@ Reviews of PRs that request you. See [PR review](pr-review.md).
 | `pr_review.rule_modules` | `[security, ocr, multitenant, migrations, contracts]` | Built-in or git rule modules. |
 | `pr_review.extra_rule_modules` | `[]` | Your overlay's private modules. |
 
+### `slop`
+
+The [AI Slop Score](slop-score.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `slop.enabled` | `true` | Score every reviewed PR and post the section in the review. |
+| `slop.profiles` | `[default]` | Profiles to try, in order; the first whose `when` matches the repo is used. Looked up in `<overlay>/slop/`, then `slop-profiles/`. |
+| `slop.post_status` | `true` | Set the `ai-slop-score` commit status on the PR head (only when `pr_review.post` is true). |
+
 ### `limits`
 
 | Key | Default | Meaning |
