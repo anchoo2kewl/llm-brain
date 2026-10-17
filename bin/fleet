@@ -212,7 +212,7 @@ slop_for() { # slop_for <pr-url> <key> <head-sha> <base-branch> <dir with src/>
   SLOP="(AI Slop Score is off for this fleet.)"; SLOP_VERDICT="off"
   [[ "$(cfg '.slop.enabled')" == "true" ]] || return 0
   hist="$BRAIN_STATE/slop/$key"; mkdir -p "$hist"
-  prev="$(ls -t "$hist"/*.json 2>/dev/null | grep -v "/$sha.json" | head -1 || true)"
+  prev="$(ls -t "$hist"/*.json 2>/dev/null | grep -v "/$sha.json" | head -1 || true)"   # markers (.shown/.pending) aren't .json
   [[ -n "$prev" ]] && args+=(--previous "$prev")
   [[ "$(cfg '.slop.post_status')" == "true" && "$(cfg '.pr_review.post')" == "true" ]] && args+=(--post-status)
   (cd "$dir/src" && "$BRAIN_DIR/bin/slop-score" --base "origin/$base" --pr "$url" --out-dir "$dir/slop" ${args[@]+"${args[@]}"} \
@@ -231,27 +231,36 @@ slop_for() { # slop_for <pr-url> <key> <head-sha> <base-branch> <dir with src/>
 # plus the ai-slop-score commit status. For PRs that get no review on this head (the fleet's own; ones reviewed
 # before the score existed). Does nothing when that head is already scored.
 slop_publish() { # slop_publish <pr-url> [force]
-  local url="$1" force="${2:-}" nwo num key sha base dir cid
+  local url="$1" force="${2:-}" nwo num key sha base dir cid me post
   [[ "$(cfg '.slop.enabled')" == "true" ]] || return 0
   [[ "$url" =~ ^https://github.com/([^/]+/[^/]+)/pull/([0-9]+) ]] || return 0
   nwo="${BASH_REMATCH[1]}"; num="${BASH_REMATCH[2]}"; key="review-${nwo#*/}-$num"
   sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)" || return 0
-  [[ -z "$force" && -f "$BRAIN_STATE/slop/$key/$sha.json" ]] && return 0
+  post="$(cfg '.pr_review.post')"
+  # done = shown on the PR (or scored, on a dry run); a score that failed to post is retried next tick
+  [[ -z "$force" && -f "$BRAIN_STATE/slop/$key/$sha.$([[ "$post" == "true" ]] && echo shown || echo json)" ]] && return 0
   base="$(gh pr view "$url" --json baseRefName --jq .baseRefName)"
   dir="$(mktemp -d "$BRAIN_STATE/slop-run.XXXXXX")"
   if git clone -q --filter=blob:none --no-checkout "git@github.com:$nwo.git" "$dir/src" \
      && git -C "$dir/src" fetch -q origin "pull/$num/head" "$base:refs/remotes/origin/$base" && git -C "$dir/src" checkout -q --detach "$sha"; then
     slop_for "$url" "$key" "$sha" "$base" "$dir"
-    if [[ "$SLOP_VERDICT" != "error" && "$SLOP_VERDICT" != "off" && "$(cfg '.pr_review.post')" == "true" ]]; then
+    if [[ "$SLOP_VERDICT" != "error" && "$SLOP_VERDICT" != "off" && "$post" == "true" ]]; then
+      touch "$BRAIN_STATE/slop/$key/$sha.pending"
       printf '%s\n\n<!-- llm-brain:ai-slop-score -->\n' "$SLOP" >"$dir/comment.md"
-      cid="$(gh api "repos/$nwo/issues/$num/comments" --paginate \
-        --jq '.[] | select(.body | contains("<!-- llm-brain:ai-slop-score -->")) | .id' | tail -1)"
-      if [[ -n "$cid" ]]; then
-        gh api -X PATCH "repos/$nwo/issues/comments/$cid" -F body=@"$dir/comment.md" >/dev/null
+      # our own marker comment only (never someone's quote of it); a failed lookup must not become a duplicate
+      if me="$(gh api user --jq .login)" && cid="$(gh api "repos/$nwo/issues/$num/comments" --paginate --jq \
+           ".[] | select(.user.login == \"$me\" and (.body | contains(\"<!-- llm-brain:ai-slop-score -->\"))) | .id")"; then
+        cid="$(tail -1 <<<"$cid")"
+        if { [[ -n "$cid" ]] && gh api -X PATCH "repos/$nwo/issues/comments/$cid" -F body=@"$dir/comment.md" >/dev/null; } \
+           || { [[ -z "$cid" ]] && gh api "repos/$nwo/issues/$num/comments" -F body=@"$dir/comment.md" >/dev/null; }; then
+          touch "$BRAIN_STATE/slop/$key/$sha.shown"; rm -f "$BRAIN_STATE/slop/$key/$sha.pending"
+          log "$key: AI Slop Score shown on $url"
+        else
+          log "$key: could not post the slop comment on $url; retrying next tick"
+        fi
       else
-        gh api "repos/$nwo/issues/$num/comments" -F body=@"$dir/comment.md" >/dev/null
+        log "$key: could not read the comments on $url; retrying next tick"
       fi
-      log "$key: AI Slop Score shown on $url"
     fi
   else
     log "slop: clone failed for $url"
@@ -306,7 +315,7 @@ cmd_review_prs() {
         log "$key: last review produced no result — retry $((fails + 1))/3"
       else
         # reviewed before the slop score existed: score it and show it as a comment, a few PRs per tick
-        if [[ ! -f "$BRAIN_STATE/slop/$key/$sha.json" ]] && (( backfilled < $(cfg '.slop.backfill_per_tick // 3') )); then
+        if [[ ! -f "$BRAIN_STATE/slop/$key/$sha.json" || -f "$BRAIN_STATE/slop/$key/$sha.pending" ]] && (( backfilled < $(cfg '.slop.backfill_per_tick // 3') )); then
           backfilled=$((backfilled + 1)); slop_publish "$url" || true
         fi
         continue
