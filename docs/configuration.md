@@ -37,6 +37,10 @@ source ~/projects/llm-brain/bin/lib.sh; cfg '.intake'
 | `reviewers` | `[]` | GitHub handles requested on every fleet PR. |
 | `overlay` | unset | Only read from `local.yaml`: path of the overlay folder. |
 
+### `host_name`
+
+How this machine is named in claim comments ("Picked up by the llm-brain fleet on ..."), notifications and prompts. Empty means `hostname -s`. Set it per machine in `~/.config/llm-brain/local.yaml`, or with `$BRAIN_HOST_NAME`. Claims, logs and state keep using `hostname -s`, so renaming never orphans an in-flight claim.
+
 ### `providers`
 
 One entry per LLM CLI. A provider is available when it is `enabled` and its `cli` is on `PATH`.
@@ -128,6 +132,7 @@ The [AI Slop Score](slop-score.md).
 | `slop.enabled` | `true` | Score every reviewed PR and post the section in the review. |
 | `slop.profiles` | `[default]` | Profiles to try, in order; the first whose `when` matches the repo is used. Looked up in `<overlay>/slop/`, then `slop-profiles/`. |
 | `slop.post_status` | `true` | Set the `ai-slop-score` commit status on the PR head (only when `pr_review.post` is true). |
+| `slop.backfill_per_tick` | `3` | PRs reviewed before the score existed get it as a comment; at most this many per tick. |
 
 ### `limits`
 

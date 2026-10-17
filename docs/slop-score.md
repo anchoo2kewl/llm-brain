@@ -141,7 +141,8 @@ For PR-level rules, put it in the description: `<!-- slop:allow P12 release note
 - **Reviews** (`fleet review-prs`): each PR head is scored before the reviewer starts. The section goes into the review verbatim, every time. A `block` means the event is `COMMENT`, never `APPROVE`. Scores are kept in `~/.local/state/llm-brain/slop/<pr>/<sha>.json` for the re-review delta.
 - **Commit status**: with `slop.post_status` (and `pr_review.post`), the commit that was scored gets an `ai-slop-score` status: `failure` when blocked, `success` otherwise. If the author pushed while it was scoring, only the scored commit gets it; the new head is scored on the next tick. Make it a required check in branch protection to block merges for real.
 - **The fleet's own PRs**: the implement and babysit prompts run `slop-score --post-status` after each push and fix what it lists until it is not blocked. Babysit won't merge a blocked PR. The implement prompt carries a description template that passes by design: 1-2 sentences of what and why, at most 5 change bullets, behaviour changes, how to verify, what wasn't tested.
-- `fleet slop <pr-url> [--post]` scores any PR, open or merged, and prints the section.
+- **PRs with no review on their current head** get the section as one PR comment instead, edited in place on each new head: the fleet's own PRs (every tick), and PRs it reviewed before the score existed (`slop.backfill_per_tick` of them per tick).
+- `fleet slop <pr-url>` scores any PR, open or merged, and prints the section; `--post` also shows it on the PR (comment + status).
 
 ## The command
 
