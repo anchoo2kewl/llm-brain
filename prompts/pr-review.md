@@ -38,10 +38,12 @@ Spend your time where a mistake would leak data, let a user act outside their te
 {{SLOP}}
 </slop-section>
 
-- Paste that section, unchanged, at the end of the review body (without the `<slop-section>` tags). **Every** review gets it,
+- Paste that section, unchanged, at the end of the review body (without the `<slop-section>` tags), enclosed in
+  `<!-- llm-brain:score:start -->` and `<!-- llm-brain:score:end -->` on their own lines. These markers let the next
+  review omit the old computed score from its input while keeping actual findings and human feedback. **Every** review gets it,
   including the one-line "Approving. Nothing found." kind.
 - Don't repeat its items as your own findings or inline comments, and don't re-score: the number is computed, not judged by you.
-  If an item is plainly a false positive, add one line under the section saying which and why.
+  If an item is plainly a false positive, add one line after the closing marker saying which and why.
 - Verdict `block`: the event is `COMMENT`, never `APPROVE`. Say `Not approving yet: AI Slop Score over the block line` (plus any Red items).
 - Verdict `warn`: it doesn't stop an approval on its own; the section already tells the author what to tighten.
 - Verdict `error` or `off`: say nothing about it beyond pasting the section.
