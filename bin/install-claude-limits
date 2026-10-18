@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Install Claude Code resource limits for all local interactive/fleet sessions."""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import tempfile
+
+NATIVE_LIMITS = {
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",  # sizing for unrecognized gateway aliases
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16384",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "2",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
+    "CLAUDE_CODE_MAX_TURNS": "80",
+}
+EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolBatch")
+
+
+def install(home, source, python):
+    loader = importlib.machinery.SourceFileLoader("claude_budget_defaults", str(source))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    directory = home / ".local/lib/llm-brain"
+    directory.mkdir(parents=True, exist_ok=True)
+    state = home / ".local/state/llm-brain/claude-budget"
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    script = directory / "claude-budget"
+    policy = directory / "claude-budget-policy.json"
+    settings = home / ".claude/settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    config = json.loads(settings.read_text()) if settings.exists() else {}
+    # Validate before changing anything; a second install preserves a custom policy.
+    limits = json.loads(policy.read_text()) if policy.exists() else module.DEFAULTS
+    if any(type(limits.get(k)) is not int or limits[k] <= 0 for k in module.DEFAULTS):
+        raise ValueError("existing budget policy has invalid limits")
+    command = " ".join(shlex.quote(str(p)) for p in (python, script)) + " --policy " + shlex.quote(str(policy)) + " --state-dir " + shlex.quote(str(state))
+    config.setdefault("env", {}).update(NATIVE_LIMITS)
+    # Keep the chosen model family, dropping only the explicit extended-context tag.
+    if isinstance(config.get("model"), str):
+        config["model"] = re.sub(r"\[1m\]", "", config["model"], flags=re.I)
+    hooks = config.setdefault("hooks", {})
+    for event in EVENTS:
+        groups = hooks.setdefault(event, [])
+        for group in groups:
+            group["hooks"] = [h for h in group.get("hooks", []) if "claude-budget --policy" not in h.get("command", "")]
+        groups[:] = [g for g in groups if g.get("hooks")]
+        handler = {"type": "command", "command": command, "timeout": 30, "onFailure": "block"}
+        groups.append({"hooks": [handler]})
+    # Existing hooks (including AgentShield), permissions, plugins and status line stay.
+    if settings.exists():
+        backup = settings.with_name("settings.pre-claude-limits.json")
+        if not backup.exists():
+            shutil.copy2(settings, backup)
+    if source.resolve() != script.resolve():
+        shutil.copy2(source, script)
+    script.chmod(0o700)
+    if not policy.exists():
+        policy.write_text(json.dumps(limits, indent=2) + "\n")
+        policy.chmod(0o600)
+    fd, temp = tempfile.mkstemp(dir=settings.parent, prefix="settings.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        os.replace(temp, settings)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+    return limits
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--source", type=Path, default=Path(__file__).with_name("claude-budget"))
+    args = ap.parse_args()
+    claude = next((p for p in [shutil.which("claude"), str(Path.home()/".local/bin/claude"), "/opt/homebrew/bin/claude"] if p and Path(p).exists()), None)
+    if not claude:
+        ap.error("Claude Code is not installed")
+    version = subprocess.run([claude, "--version"], capture_output=True, text=True, check=True).stdout
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version)
+    if not match or tuple(map(int, match.groups())) < (2, 1, 295):
+        ap.error("Claude Code >=2.1.295 is required for fail-closed hooks; update it before installing")
+    python = shutil.which("python3")
+    if not python:
+        ap.error("python3 is required")
+    limits = install(Path.home(), args.source, Path(python))
+    print("Installed Claude limits in user settings: 200K context, compact at 100K, 2 concurrent agents, depth 1, 80 turns.")
+    print("Persistent session-tree policy:", json.dumps(limits, sort_keys=True))
+    print("Restart existing Claude sessions to load the environment limits. Existing usage counts on the next hook.")
+
+
+if __name__ == "__main__":
+    main()

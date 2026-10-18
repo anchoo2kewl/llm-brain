@@ -75,3 +75,5 @@ These appear on the fleet overview and on [Insights](hub-insights.md). Without t
 ### Hub terminals and the gateway
 
 Hub terminals use the CLI's own login by default. Set `terminals.gateway: true` to send interactive Claude and Codex terminals through the gateway too. Claude and Codex hub tasks always use the gateway when it answers, the way `llm-run` does. Gemini uses its own login.
+
+For interactive and unattended session budgets, subagent caps, and context limits, see [Claude resource limits](claude-limits.md).
