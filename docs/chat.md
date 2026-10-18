@@ -54,7 +54,15 @@ chat:
     U0000000002: teammate-a
 ```
 
-A message from a trusted person that names an issue or PR becomes a note on it, in `~/.local/state/llm-brain/notes/<owner>__<repo>__<n>.md`. Implement and babysit workers get those notes in their prompt and treat them like that person's review comments. The latest note wins when two disagree. A new note changes the PR's fingerprint, so it wakes the babysitter.
+A message from a trusted person that names an issue or PR becomes a note on it, in `~/.local/state/llm-brain/notes/<owner>__<repo>__<n>.md`. Implement, babysit and external PR review workers receive those notes with source links and sender IDs. The owner's explicit decisions take precedence over conflicting teammate proposals; unresolved conflicts must be reported. A new note changes an owned PR's fingerprint, so it wakes the babysitter.
+
+The owner's own instructions are retained too. Set `owner.slack_user_id` to their verified Slack ID (otherwise the connected account is used), `owner.name` to their full name, and `owner.aliases` to names/handles people use to address them. Aliases identify the addressee in already-ingested messages; they never grant a sender trust. Slack's search outside watched channels still uses the account's native @-mention. Continue watching the relevant handoff channels and DMs.
+
+GitHub's object type determines the route: a confirmed PR is review context, including PRs linked through `/issues/N`. A confirmed issue is task context, still subject to intake, assignment, ownership and pause checks; mentioning it does not start a task. Unknown objects remain unresolved. Review requests do not grant permission to merge, tag, deploy or bypass checks.
+
+Concrete new trusted requests (for example, “please review/check/re-run/merge #12”) create a deduplicated review-request token. Slack requests can enter the external review queue without a GitHub reviewer request, within the configured owners/repository scope; closed PRs are archived and drafts wait. A new token permits one bounded same-head feedback pass after a successful prior review. It reads the new context and directly relevant code rather than repeating the whole review. Repeated identical requests and status-only updates do not restart the reviewer. Review capacity, own-PR exclusion, pause checks and resource-stop handoffs still apply. Owned PRs continue through their existing babysitter.
+
+`chat/state.json` records routing receipts with sources and target kinds. `routed` means delivered to notes, **not completed**; `needs_reference` and `needs_resolution` indicate missing scope or unresolved object types. Review request tokens are in `chat/review-requests/`; a dispatched token is recorded in `prs/<review-key>.chat-reviewed`. The worker's final review/log is the evidence of completion.
 
 Messages from anyone else are only used for the digest.
 
@@ -63,8 +71,11 @@ Messages from anyone else are only used for the digest.
 | In the message | Means |
 | --- | --- |
 | `https://github.com/acme/web/pull/12` | `acme/web#12` |
-| `web#12`, `api#7` | The known repo whose name is `web`, ends in `-web`, or contains `web`; the shortest match wins. |
-| `#123` | The repo an earlier explicit ref with the same number used; else the channel's repo from `chat.channel_repos`. |
+| `web#12`, `api#7` | A unique known repo by exact name, suffix, then substring. Ambiguous matches are not guessed. |
+| `SDK #99` | A unique exact-name/suffix repo alias, including a space before the number. |
+| `#123`, `#123/#124` | A prior explicit mapping in the same conversation thread; else the channel's repo from `chat.channel_repos`. Mappings do not leak between channels/threads. |
+| `#123-#126` | A small inclusive range in that same context (at most 21 targets). |
+| Reply with no reference | Inherits the already-seen trusted parent/thread's targets, if available; otherwise needs a reference. |
 
 Known repos are `chat.repos`, `intake.repos` and the GitHub URLs in the overlay's `repos.txt`.
 
@@ -94,3 +105,12 @@ The babysitter skips PRs whose issue has `agent:stop`.
 ## Logs
 
 `chat-watch` writes to `fleet.log`. Each digest run has its own log, `logs/chat-insights.<time>.log`. A digest run that does not end with a valid `INSIGHTS {…}` line is logged and ignored.
+
+After deploying routing changes, re-route already-stored channel feedback without advancing the normal cursor or paying for another digest:
+
+```sh
+bin/chat-watch --replay-channel C0123456789 --dry-run  # inspect proposed routes
+bin/chat-watch --replay-channel C0123456789            # update notes and request tokens
+```
+
+Replay reads only the hub's stored messages and GitHub object metadata. Existing notes are upgraded with source markers instead of duplicated. It does not itself launch workers or send Slack messages; the next normal fleet tick applies the configured workflow gates.
