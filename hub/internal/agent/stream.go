@@ -115,12 +115,16 @@ func (c *Capture) claude(ev map[string]any) string {
 		return strings.Join(out, "\n")
 	case "result":
 		c.Final = str(ev, "result")
-		if e, _ := ev["is_error"].(bool); e || (str(ev, "subtype") != "" && str(ev, "subtype") != "success") {
+		outcome := str(ev, "subtype")
+		if str(ev, "terminal_reason") == "hook_stopped" {
+			outcome = "incomplete (guard stopped)"
+			c.Err = "hook_stopped: a guard halted this session; work is incomplete"
+		} else if e, _ := ev["is_error"].(bool); e || (str(ev, "subtype") != "" && str(ev, "subtype") != "success") {
 			c.Err = strings.TrimSpace(str(ev, "subtype") + " " + oneLine(c.Final, 300))
 		}
 		cost, _ := ev["total_cost_usd"].(float64)
 		ms, _ := ev["duration_ms"].(float64)
-		return fmt.Sprintf("● result: %s in %.0fs ($%.2f)\n%s", str(ev, "subtype"), ms/1000, cost, c.Final)
+		return fmt.Sprintf("● result: %s in %.0fs ($%.2f)\n%s", outcome, ms/1000, cost, c.Final)
 	}
 	return ""
 }

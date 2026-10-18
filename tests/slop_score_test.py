@@ -264,7 +264,7 @@ class SlopScoreTest(unittest.TestCase):
 
     def test_rules_markdown(self):
         out = subprocess.run([str(SLOP), "rules", "--profile", "default"], env=ENV, capture_output=True, text=True, check=True).stdout
-        self.assertIn("| P12 | Long description |", out)
+        self.assertIn('| <a name="rule-p12"></a>P12 | Long description |', out)
         self.assertIn("blocks approval", out)
 
     def test_profiles_validate(self):

@@ -44,7 +44,18 @@ case "$provider" in
     else
       args+=(--permission-mode plan --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)")
     fi
-    exec claude "${args[@]}"
+    # A budget hook stops Claude's loop, but the CLI may report exit 0. Preserve
+    # human-readable output while translating a guard stop to an incomplete run.
+    budget_stop="$(mktemp "$BRAIN_STATE/runs/budget-stop.XXXXXX")"
+    trap 'rm -f "$budget_stop"' EXIT
+    export BRAIN_CLAUDE_BUDGET_STOP_FILE="$budget_stop"
+    rc=0
+    claude "${args[@]}" || rc=$?
+    if [[ -s "$budget_stop" ]]; then
+      printf 'BUDGET_STOPPED %s\n' "$(cat "$budget_stop")" >&2
+      exit 75
+    fi
+    exit "$rc"
     ;;
   codex)
     args=(exec -C "$cwd" --skip-git-repo-check)

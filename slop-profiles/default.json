@@ -119,7 +119,8 @@
     "repeats": 3,
     "max_units": 6,
     "max_request_bytes": 24000,
-    "timeout_s": 90
+    "timeout_s": 90,
+    "cache_ttl_s": 86400
   },
   "signals": {
     "P01": {
