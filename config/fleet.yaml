@@ -11,7 +11,7 @@ providers:
   claude:
     enabled: true
     cli: claude
-    model: ""          # empty = the CLI's default (settings.json)
+    model: sonnet      # explicit fleet default; do not inherit an interactive Opus/1M setting
   codex:
     enabled: true
     cli: codex
@@ -77,6 +77,7 @@ reviewers: []                   # always requested on every PR
 pr_review:
   enabled: true
   provider: claude
+  model: ""                     # optional override; otherwise providers.<provider>.model
   owners: []                    # orgs to watch, e.g. [acme]
   repo_regex: ".*"              # narrow to some repos
   updated_since: "1970-01-01"   # skip stale review requests
