@@ -39,3 +39,5 @@ Every feature of llm-brain, one page per area. Start with [Getting started](gett
 | Doc | What's in it |
 | --- | --- |
 | [Troubleshooting](troubleshooting.md) | Known gotchas, where the logs are, how to unstick things |
+
+[Claude resource limits](claude-limits.md): shared session budgets, subagent caps and bounded context for interactive and fleet work.

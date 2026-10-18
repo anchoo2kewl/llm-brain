@@ -11,6 +11,7 @@ Options for scoring:
   --profile NAME|PATH a profile by name (<overlay>/slop/NAME.json, then slop-profiles/NAME.json) or file.
                       Default: the first of config `slop.profiles` whose `when` matches the repo.
   --no-jev            deterministic signals only (tier 1).
+  --no-jev-cache      request fresh Jev samples instead of reusing identical successful samples.
   --previous FILE     an earlier slop.json for this PR, to report what changed.
   --out-dir DIR       write slop.json, slop.md and the Jev packets there.
   --json | --markdown what to print (default: markdown).
@@ -23,7 +24,7 @@ capped per signal and per category; the score is the sum, capped at 100. A PR is
 `thresholds.block` AND at least `min_families` substantive categories contribute `min_family_points` each, or when
 a veto signal (e.g. a committed secret) fires.
 """
-import argparse, concurrent.futures, fnmatch, hashlib, json, os, re, statistics, subprocess, sys, tempfile
+import argparse, concurrent.futures, fcntl, fnmatch, hashlib, json, math, os, re, signal, statistics, subprocess, sys, tempfile, time
 from pathlib import Path, PurePosixPath
 
 BRAIN = Path(__file__).resolve().parent.parent
@@ -116,6 +117,9 @@ def validate(profile):
             for k in ("unit", "question", "yes", "no"):
                 if k not in s.get("params", {}):
                     errs.append(f"{sid}: jev signal needs params.{k}")
+    ttl = profile.get("judging", {}).get("cache_ttl_s", 86400)
+    if type(ttl) is not int or ttl < 0:
+        errs.append("judging.cache_ttl_s: need a nonnegative integer (0 disables the cache)")
     t = profile.get("thresholds", {})
     if not (0 <= t.get("warn", 0) <= t.get("block", 100) <= 100):
         errs.append("thresholds: need 0 <= warn <= block <= 100")
@@ -1161,41 +1165,107 @@ def build_packets(ch, sigs, judging):
     return packets, too_big
 
 
-def run_jev(packets, repeats, out_dir, timeout):
-    """Ask every packet `repeats` times, in parallel. Returns {qid: [p, ...]} and the list of failures."""
+def run_jev(packets, repeats, out_dir, timeout, cache_dir=None, cache_ttl=86400):
+    """Preserve independent repeats; reuse only complete, valid, identical samples."""
     jobs, answers, failures = [], {}, []
+    stats = {"hits": 0, "requests": 0}
+    if not packets:
+        return answers, failures, stats
     work = Path(out_dir or tempfile.mkdtemp(prefix="slop-jev-")) / "jev"
     work.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="run-", dir=work))  # concurrent runs never share answer artifacts
+    cache = Path(cache_dir or os.environ.get("BRAIN_SLOP_CACHE_DIR") or
+                 Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "llm-brain/slop-jev")
+    if cache_ttl > 0:
+        cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    adapter_digest = hashlib.sha256((BRAIN / "bin/jev").read_bytes()).hexdigest()
     for kind, doc, _ in packets:
-        for r in range(repeats):
-            f = work / f"{kind}-{r}.json"
+        for repeat in range(repeats):
+            f = work / f"{kind}-{repeat}.json"
             f.write_text(json.dumps(doc, indent=1))
-            jobs.append(f)
+            identity = {"schema": 1, "adapter": adapter_digest, "kind": kind, "repeat": repeat,
+                        "model": os.environ.get("TYPESAFE_DEFAULT_MODEL", "jev-latest"),
+                        "endpoint": os.environ.get("TYPESAFE_BASE_URL", "https://api.typesafe.ai"), "packet": doc}
+            key = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            jobs.append((f, doc, key))
 
-    def ask(f):
-        r = subprocess.run([str(BRAIN / "bin/jev"), "decide", str(f)], capture_output=True, text=True, timeout=timeout,
-                           env=dict(os.environ, JEV_TIMEOUT=str(timeout)))
-        a = f.with_name(f.stem + ".answers.json")
-        if r.returncode != 0 or not a.exists():
-            return f, None, (r.stderr or r.stdout).strip()[-200:]
-        return f, json.loads(a.read_text()), ""
+    def valid(raw, questions):
+        if not isinstance(raw, dict):
+            return {}
+        return {q: float(v) for q, v in raw.items() if q in questions and type(v) in (int, float)
+                and math.isfinite(v) and 0 <= v <= 1}
+
+    def request(f, doc):
+        answer_file = f.with_name(f.stem + ".answers.json")
+        answer_file.unlink(missing_ok=True)  # never mistake an old artifact for a fresh answer
+        # Each repeat is one request, never a hidden curl retry of a paid POST.
+        proc = subprocess.Popen([str(BRAIN / "bin/jev"), "decide", str(f)], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, start_new_session=True,
+                                env=dict(os.environ, JEV_TIMEOUT=str(timeout), JEV_RETRIES="0"))
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate()
+            return None, "Jev request timed out"
+        if proc.returncode != 0 or not answer_file.exists():
+            return None, (stderr or stdout).strip()[-200:] or f"Jev exited {proc.returncode} without an answer file"
+        values = valid(json.loads(answer_file.read_text()), doc["questions"])
+        complete = len(values) == len(doc["questions"])
+        return values, "" if complete else "missing or invalid probabilities"
+
+    def ask(job):
+        f, doc, key = job
+        if cache_ttl <= 0:
+            values, err = request(f, doc)
+            return f, values, err, False
+        # Separate lock survives atomic replacement; concurrent scorers share work.
+        with (cache / (key + ".lock")).open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            path = cache / (key + ".json")
+            try:
+                entry = json.loads(path.read_text())
+                age = time.time() - entry["at"]
+                values = valid(entry["answers"], doc["questions"])
+                if entry.get("schema") == 1 and 0 <= age < cache_ttl and len(values) == len(doc["questions"]):
+                    f.with_name(f.stem + ".answers.json").write_text(json.dumps(values))
+                    return f, values, "", True
+            except (OSError, ValueError, TypeError, KeyError):
+                pass
+            values, err = request(f, doc)
+            if not err and values is not None:
+                fd, temp = tempfile.mkstemp(dir=cache, suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "w") as out:
+                        json.dump({"schema": 1, "at": time.time(), "answers": values}, out)
+                    os.replace(temp, path)
+                finally:
+                    if os.path.exists(temp):
+                        os.unlink(temp)
+            return f, values, err, False
+
+    def safe(job):
+        try:
+            return ask(job)
+        except Exception as exc:
+            return job[0], None, str(exc)[:200], False
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(jobs)))) as ex:
-        for f, ans, err in ex.map(lambda f: _safe(ask, f), jobs):
-            if ans is None:
+        for f, ans, err, hit_cache in ex.map(safe, jobs):
+            stats["hits" if hit_cache else "requests"] += 1
+            if err:
                 failures.append(f"{f.name}: {err}")
-                continue
-            for q, v in ans.items():
-                if isinstance(v, (int, float)):
-                    answers.setdefault(q, []).append(float(v))
-    return answers, failures
+            if ans is not None:
+                for q, value in ans.items():
+                    answers.setdefault(q, []).append(value)
+    if jobs:
+        print(f"slop-score: Jev samples: {stats['hits']} cached, {stats['requests']} requested", file=sys.stderr)
+    return answers, failures, stats
 
-
-def _safe(fn, f):
-    try:
-        return fn(f)
-    except Exception as e:                                   # a timeout or bad JSON is one failed repeat, not a crash
-        return f, None, str(e)[:200]
 
 
 def judged(ps, repeats):
@@ -1228,14 +1298,14 @@ def skipped(ch, profile):
     return None
 
 
-def score(ch, profile, use_jev, out_dir):
+def score(ch, profile, use_jev, out_dir, use_cache=True):
     why = skipped(ch, profile)
     if why:
         return {"schema_version": 1, "tool_version": VERSION, "repo": ch.repo, "pr": (ch.pr or {}).get("url"), "head_sha": ch.head,
                 "profile": {"id": profile.get("id"), "digest": ""}, "score": 0, "verdict": "skipped", "note": why, "signals": [],
                 "thresholds": profile["thresholds"], "vetoes": [], "jev": "off", "families": [], "unassessed": [], "waived": [],
                 "assessed": {"files": len(ch.files), "review_lines": ch.review_lines(), "production_lines": ch.prod_lines(), "excluded": []},
-                "docs_url": profile.get("docs_url", "")}
+                "docs_url": profile.get("docs_url", ""), "rules_url": profile.get("rules_url", "")}
     sigs = {sid: s for sid, s in profile["signals"].items() if s.get("enabled", True)
             and when_hits(s.get("when"), ch.repo, [f.path for f in ch.files], ch.added_norm)}
     results, unassessed, waived = [], [], []
@@ -1285,6 +1355,7 @@ def score(ch, profile, use_jev, out_dir):
 
     judging = profile.get("judging", {})
     jev_note = "off"
+    cache_stats = {"hits": 0, "requests": 0}
     if tier2:
         if not use_jev or not judging.get("enabled", True):
             jev_note = "off"
@@ -1296,7 +1367,8 @@ def score(ch, profile, use_jev, out_dir):
             repeats = int(judging.get("repeats", 3))
             packets, too_big = build_packets(ch, tier2, judging)
             unassessed += [{"signal": sid, "why": "too much to send to Jev"} for sid in sorted(too_big)]
-            answers, failures = run_jev(packets, repeats, out_dir, int(judging.get("timeout_s", 90)))
+            answers, failures, cache_stats = run_jev(packets, repeats, out_dir, int(judging.get("timeout_s", 90)),
+                                                       cache_ttl=int(judging.get("cache_ttl_s", 86400)) if use_cache else 0)
             jev_note = "on" if not failures else ("partial" if answers else "unavailable")
             asked = set()
             for kind, doc, index in packets:
@@ -1362,13 +1434,14 @@ def score(ch, profile, use_jev, out_dir):
         "repo": ch.repo, "pr": (ch.pr or {}).get("url") or None, "head_sha": ch.head, "base": ch.base, "merge_base": ch.merge_base,
         "profile": {"id": profile.get("id"), "title": profile.get("title"), "files": profile.get("_files"),
                     "digest": hashlib.sha256(json.dumps({k: v for k, v in profile.items() if k != "_files"}, sort_keys=True).encode()).hexdigest()[:16]},
-        "score": sc, "verdict": verdict, "note": note, "thresholds": th, "families": families, "jev": jev_note,
+        "score": sc, "verdict": verdict, "note": note, "thresholds": th, "families": families, "jev": jev_note, "jev_cache": cache_stats,
         "vetoes": [r["id"] for r in vetoes],
         "signals": [r for r in results if r["points"] > 0 or r["veto"]],
         "clean_signals": [r["id"] for r in results if r["points"] == 0 and not r["veto"]],
         "unassessed": unassessed, "waived": waived,
         "assessed": {"files": len(ch.files), "review_lines": ch.review_lines(), "production_lines": ch.prod_lines(), "excluded": excluded},
         "docs_url": profile.get("docs_url", ""),
+        "rules_url": profile.get("rules_url", ""),
     }
 
 
@@ -1392,12 +1465,18 @@ def render_md(res, profile, prev=None):
     cats = profile["categories"]
     th = res["thresholds"]
     if res["verdict"] == "skipped":
-        return f"### AI Slop Score: skipped\nNot scored: {res['note']}.\n"
+        guide = f"[Profile rules and exemptions]({res['rules_url']})\n" if res.get("rules_url") else ""
+        return f"### AI Slop Score: skipped\nNot scored: {res['note']}.\n{guide}"
     word = {"pass": "pass", "warn": "warning", "block": "blocked"}[res["verdict"]]
     tier = {"on": "Tier 1 + Jev", "partial": "Tier 1 + Jev (partial)", "off": "Tier 1 only", "unavailable": "Tier 1 only; Jev unavailable"}[res["jev"]]
     out = [f"### AI Slop Score: {res['score']}/100 · {word}",
            f"Blocks at {th['block']}, warns at {th['warn']}. Profile `{res['profile']['id']}`, {tier}."
            + (f" [How this is scored]({res['docs_url']})" if res["docs_url"] else "")]
+    rules_url = res.get("rules_url", "")
+    def rule_link(sid):
+        return f"[{sid}]({rules_url.split('#')[0]}#rule-{sid.lower()})" if rules_url else sid
+    if rules_url:
+        out.append(f"[Full {profile.get('title') or 'profile'} rules and how to improve]({rules_url})")
     if res["vetoes"]:
         out.append(f"**Blocked regardless of score:** {', '.join(res['vetoes'])}.")
     if res["note"]:
@@ -1424,7 +1503,7 @@ def render_md(res, profile, prev=None):
         for s in sigs[:7]:
             where = "; ".join(loc(h) for h in s["evidence"][:3]) + (f" (+{s['count'] - 3} more)" if s["count"] > 3 else "")
             pts = "veto" if s["veto"] else f"{s['points']:.1f}"
-            out.append(f"| {pts} | **{s['id']}** {s['title']} · {cats[s['category']]['title']} | {where.replace('|', '¦')} |")
+            out.append(f"| {pts} | **{rule_link(s['id'])}** {s['title']} · {cats[s['category']]['title']} | {where.replace('|', '¦')} |")
         if len(sigs) > 7:
             out.append(f"| {sum(s['points'] for s in sigs[7:]):.1f} | also: {', '.join(s['id'] for s in sigs[7:])} | |")
         out += ["", "**To fix**"]
@@ -1432,7 +1511,7 @@ def render_md(res, profile, prev=None):
         for s in sigs:
             if s["remedy"] not in seen:
                 seen.add(s["remedy"])
-                out.append(f"- [ ] {s['remedy']} ({s['id']})")
+                out.append(f"- [ ] {s['remedy']} ({rule_link(s['id'])})")
     foot = []
     if res["assessed"]["excluded"]:
         foot.append(f"Not scored: {len(res['assessed']['excluded'])} generated/vendored/fixture files")
@@ -1451,6 +1530,18 @@ def render_rules(profile, repo=""):
     out = [f"# AI Slop Score rules: {profile.get('title') or profile.get('id')}", ""]
     if profile.get("description"):
         out += [profile["description"], ""]
+    out += ["## Before requesting review", "",
+        "- Keep the PR focused on one change. Explain the problem and resulting behaviour in the opening sentences.",
+        "- Give concrete verification steps and expected results. Test changed behaviour, including failure cases.",
+        "- Remove debug output, unfinished code and redundant comments. Explain necessary suppressions.",
+        "- Fix the review's **To fix** checklist; each rule ID links to its exact check and remedy below.", ""]
+    if profile.get("skip", {}).get("titles") or profile.get("skip", {}).get("base_branches"):
+        out += ["## When scoring is skipped", ""]
+        for pattern in profile.get("skip", {}).get("titles", []):
+            out.append(f"- PR titles matching `{pattern}`.")
+        if profile.get("skip", {}).get("base_branches"):
+            out.append("- PRs targeting " + ", ".join(f"`{b}`" for b in profile["skip"]["base_branches"]) + ".")
+        out.append("")
     out += [
         "Every pull request the review agent reviews gets an **AI Slop Score** from 0 (pristine) to 100 (slop), posted in the review "
         "with what raised it and how to fix it. The score is about whether a teammate can understand, trust and maintain the change. "
@@ -1493,7 +1584,7 @@ def render_rules(profile, repo=""):
         for sid in own:
             s = profile["signals"][sid]
             if s.get("enabled", True):
-                out.append(f"- **{sid} {s['title']}**: {s.get('what', '').replace(' (Judged by Jev.)', '')}")
+                out.append(f"- **[{sid} {s['title']}](#rule-{sid.lower()})**: {s.get('what', '').replace(' (Judged by Jev.)', '')} **To improve:** {s['remedy']}")
             else:
                 out.append(f"- **{sid} {s['title']}** is turned off.")
     for c, v in cats.items():
@@ -1508,7 +1599,7 @@ def render_rules(profile, repo=""):
             if s.get("when", {}).get("repos"):
                 scope = " Only in " + ", ".join(f"`{r}`" for r in s["when"]["repos"]) + "."
             what = s.get('what', '').replace(' (Judged by Jev.)', '').replace('|', '¦')
-            out.append(f"| {sid} | {s['title']}{judge} | {what}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
+            out.append(f"| <a name=\"rule-{sid.lower()}\"></a>{sid} | {s['title']}{judge} | {what}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
     out += ["", f"_Generated from profile `{profile.get('id')}` by `bin/slop-score rules`. Change the profile, not this page._", ""]
     return "\n".join(out)
 
@@ -1576,6 +1667,7 @@ def main():
     ap.add_argument("--branch")
     ap.add_argument("--profile")
     ap.add_argument("--no-jev", action="store_true")
+    ap.add_argument("--no-jev-cache", action="store_true")
     ap.add_argument("--previous")
     ap.add_argument("--out-dir")
     ap.add_argument("--json", action="store_true")
@@ -1590,7 +1682,7 @@ def main():
     if errs:
         die("bad profile:\n  " + "\n  ".join(errs))
     ch = Change(a, profile)
-    res = score(ch, profile, not a.no_jev, a.out_dir)
+    res = score(ch, profile, not a.no_jev, a.out_dir, use_cache=not a.no_jev_cache)
     prev = json.loads(Path(a.previous).read_text()) if a.previous and Path(a.previous).exists() else None
     res = json.loads(redact(json.dumps(res)))
     md = redact(render_md(res, profile, prev))

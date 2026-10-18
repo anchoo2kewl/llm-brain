@@ -61,6 +61,12 @@ Without Jev (no key, or `--no-jev`), the judged signals are listed as not assess
 
 `bin/slop-score rules` prints the full table for a profile: what each rule checks, its points, how to fix it. Share that output with your team; it is how the Elastio rules gist is made.
 
+Profiles can set `rules_url` to the published output of `slop-score rules`. Every score then links to the
+company's complete rules, and each finding and checklist item links to that rule's `#rule-<lowercase ID>`
+anchor. Keep `docs_url` for the general scoring explanation. The generated guide includes a pre-review
+checklist, exemptions, company overrides with remedies, and all inherited rules; sharing only the overlay
+JSON would omit those inherited checks. Refresh the published guide whenever either profile changes.
+
 ## Profiles
 
 A profile is a JSON file. llm-brain ships `slop-profiles/default.json`. A company keeps its own in its overlay, `<overlay>/slop/<name>.json`, and picks it in the overlay `config.yaml`:
@@ -160,6 +166,7 @@ bin/slop-score rules --profile elastio                                          
 | `--title`, `--body-file`, `--branch` | The same, by hand. |
 | `--profile NAME\|PATH` | Use this profile instead of `slop.profiles`. |
 | `--no-jev` | Deterministic signals only. |
+| `--no-jev-cache` | Request fresh Jev samples; bypass the successful-sample cache. |
 | `--previous FILE` | An earlier `slop.json`, to report what changed. |
 | `--out-dir DIR` | Write `slop.json`, `slop.md` and the Jev requests there. |
 | `--json`, `--markdown` | What to print (markdown by default). |
@@ -174,3 +181,31 @@ Tests: `python3 tests/slop_score_test.py` builds throwaway repos with known slop
 Start with the score posted but not required. Run `fleet slop` over the last few weeks of merged PRs; aim for well under 5% of PRs your team was happy with being blocked, and check that the ones you weren't happy with are. Tune detectors before weights: a noisy signal should be narrowed (`paths`, `exclude`, patterns) or turned off. When the profile changes, a re-review says so, so a lower score isn't mistaken for a better PR.
 
 On blue-stack-uiv3, the first calibration (10 PRs from 2026-10-15/16) blocked the two PRs a reviewer had called hard to read (#877 at 46, #891 at 36). It warned on five that were long but clear, and passed three.
+
+## Conserving judge and review tokens
+
+Deterministic checks run locally and do not consume Claude tokens. Tier 2 calls Jev directly; it does not
+launch a Claude agent. Identical successful Jev samples are cached for 24 hours (`judging.cache_ttl_s: 86400`;
+`0` disables caching). Set `BRAIN_SLOP_CACHE_DIR` to relocate the cache; otherwise it uses
+`$XDG_CACHE_HOME/llm-brain/slop-jev` or `~/.cache/llm-brain/slop-jev`.
+
+The key includes the full redacted evidence packet, questions, judge model, endpoint, adapter code, and repeat
+index. Three repeats remain three independent samples; one cached answer is never multiplied into three votes.
+Changed evidence/questions/model invalidate the cache, and expired, partial, invalid or failed responses are
+not reused. Cache files contain only timestamps and validated probabilities, not source code or credentials.
+File locks prevent concurrent scorers from paying for the same sample twice. `jev_cache` in the score JSON
+reports cache hits and request attempts. All deterministic checks are rerun, including secrets and waivers;
+a head SHA alone is never treated as proof that the score is still current.
+
+The scorer disables hidden HTTP POST retries for its judge calls (`JEV_RETRIES=0`) and terminates the whole
+judge process group on timeout. Failures remain explicitly unassessed. The score thresholds and majority rule
+are unchanged. Use `--no-jev-cache` when a fresh assessment is needed. `bin/jev` keeps its normal default retry
+policy for other callers; `JEV_RETRIES` can override it explicitly.
+
+New fleet reviews enclose their generated score in `<!-- llm-brain:score:start -->` and
+`<!-- llm-brain:score:end -->`. Future review prompts omit only our old marked score blocks and our generated
+standalone score comments, since the current head's full score is supplied separately. Findings, inline comments,
+human follow-ups outside the markers, other reviewers' feedback, and legacy unmarked reviews are retained.
+The public score remains complete; this trims repeated machine output from subsequent model input.
+
+Offline regression checks: `python3 tests/slop_cache_test.py` and `python3 tests/review_feedback_test.py`.

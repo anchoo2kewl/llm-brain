@@ -68,8 +68,10 @@ From `prompts/implement.md`:
 `fleet babysit` finds your open PRs in the `pr_owners` orgs that carry the marker, or that name an issue the fleet owns (`repo#N` or the issue URL). For each:
 
 - It skips the PR when its issue has `agent:stop`.
-- It computes a fingerprint: head SHA, review count, comment count, review decision, merge state, CI states, and a hash of the chat notes. If nothing changed since the last pass, it does nothing.
-- Otherwise it starts a babysit worker, which reads every review, thread and CI log, fixes, replies on each thread, re-runs the internal review and requests `reviewers`.
+- It waits while the implementation worker for that issue is still running, so two workers do not edit the same branch.
+- `bin/fleet-plan` computes a stable fingerprint from head, external review/comment contents, review decision, merge state, named CI results, and chat notes. The owner's own acknowledgements and slop comments do not create work.
+- Unchanged PRs are skipped. CI-only transitions while waiting for checks or approval are also skipped before launching an LLM. New external feedback/chat notes, missing fleet markers, failed checks, and merge conflicts still start a worker. Once checks settle and approval exists (when required), a worker evaluates merge.
+- A worker reads relevant feedback and CI logs, fixes, replies on each thread, re-runs internal review after pushing changes, and requests `reviewers`.
 
 A new chat note from a trusted person changes the fingerprint, so it wakes the babysitter.
 
@@ -141,3 +143,16 @@ Names come from `labels.*` in the config.
 ## Limits of multi-repo intake
 
 Several intake repos work for dispatch. Some lookups use only the first entry: babysit looks up a PR's issue in `intake.repos[0]`, and the "open PR by hand" check searches only `pr_owners[0]`. Keep the main repo first.
+
+## Token discipline
+
+Fleet Claude runs explicitly use `providers.claude.model: sonnet` by default, rather than inheriting an interactive
+`opus[1m]` setting. Set `LLM_MODEL` for a single adapter run, or `pr_review.model` for external PR reviews.
+Override the provider default in your overlay when a particular fleet needs another model. Interactive Claude
+settings and hub terminal preferences are not changed by this setting.
+
+Successful previous-head PR reviews use that head as the next review's diff scope, plus directly affected code.
+First reviews, retries without a successful prior result, and force-pushed histories use the full PR scope.
+Implementation prompts call for bounded, independent delegation and exiting when blocked instead of polling.
+
+Offline dispatch regression checks: `python3 tests/fleet_plan_test.py`.

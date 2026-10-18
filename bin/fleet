@@ -133,7 +133,7 @@ fleet_prs() { # JSON array of my open PRs for fleet issues: the body marker, or 
 
 cmd_babysit() {
   paused && { log "paused"; return; }
-  local row url key fp_file new_fp issue refs
+  local row url key fp_file new_fp issue refs plan notes_hash
   fleet_prs | jq -c '.[]' | while read -r row; do
     url="$(jq -r .url <<<"$row")"
     key="pr-$(jq -r '.repository.name + "-" + (.number|tostring)' <<<"$row")"
@@ -144,13 +144,21 @@ cmd_babysit() {
     if [[ -n "$issue" ]] && gh issue view "$issue" -R "$(cfg '.intake.repos[0]')" --json labels --jq '[.labels[].name]' | grep -q "\"$(cfg '.labels.stop')\""; then
       continue                                                 # someone said stop (label or chat)
     fi
-    # Fingerprint = head sha + review/comment/check state. Unchanged -> nothing to do.
-    new_fp="$(gh pr view "$url" --json headRefOid,reviews,comments,statusCheckRollup,mergeStateStatus,reviewDecision \
-      | jq -c '{h:.headRefOid, r:(.reviews|length), c:(.comments|length), d:.reviewDecision, m:.mergeStateStatus,
-                ci:[.statusCheckRollup[]? | (.conclusion // .state // .status)] | sort}')$(notes_for $refs | md5 -q)"
+    # Don't race the implementation worker on its own branch.
+    [[ -n "$issue" ]] && worker_running "issue-$issue" && continue
     fp_file="$BRAIN_STATE/prs/$key.fp"
-    [[ -f "$fp_file" && "$(cat "$fp_file")" == "$new_fp" ]] && continue
-    # Wait while CI is still running unless there is human/bot feedback to act on.
+    notes_hash=""
+    if [[ -n "$(notes_for $refs)" ]]; then notes_hash="$(notes_for $refs | shasum -a 256 | cut -d ' ' -f1)"; fi
+    plan="$(gh pr view "$url" --json headRefOid,reviews,comments,statusCheckRollup,mergeStateStatus,reviewDecision \
+      | "$BRAIN_DIR/bin/fleet-plan" --previous "$fp_file" --owner "$(cfg '.intake.assignee')" \
+          --notes-hash "$notes_hash" --marked "$(jq -r '.marked // false' <<<"$row")" \
+          --require-approval "$(cfg '.merge.require_approval')")" || continue
+    new_fp="$(jq -c '.fingerprint' <<<"$plan")"
+    if [[ "$(jq -r .run <<<"$plan")" != "true" ]]; then
+      # Remember skipped CI transitions too, so old feedback doesn't wake another worker.
+      echo "$new_fp" >"$fp_file"
+      continue
+    fi
     (( $(capacity_left) > 0 )) || { log "at capacity"; return; }
     echo "$new_fp" >"$fp_file"
     local pf="$BRAIN_STATE/runs/$key.prompt"
@@ -191,18 +199,23 @@ review_queue() {
     add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
 }
 
-# Everything already said on a PR (reviews, inline threads, comments; people and bots), so the review adds only what's new.
+# Prior feedback for deduplication; only our explicitly marked computed scores are omitted (the current score is supplied separately).
 existing_feedback() { # existing_feedback <owner/repo> <number>
-  local nwo="$1" num="$2"
+  local nwo="$1" num="$2" me
+  me="$(cfg '.owner.github')"
   echo "## Reviews"
-  gh api "repos/$nwo/pulls/$num/reviews" --paginate \
-    --jq '.[] | select((.body // "") != "") | "### \(.user.login) — \(.state) at \(.submitted_at) (commit \(.commit_id[0:8]))\n\(.body)\n"'
+  gh api "repos/$nwo/pulls/$num/reviews" --paginate | jq -r --arg me "$me" '
+    .[] | (if .user.login == $me then ((.body // "") | gsub("<!-- llm-brain:score:start -->[\\s\\S]*?<!-- llm-brain:score:end -->"; "[Previous computed score omitted; current score supplied separately.]")) else (.body // "") end) as $body
+    | select($body != "")
+    | "### \(.user.login) — \(.state) at \(.submitted_at) (commit \(.commit_id[0:8]))\n\($body)\n"'
   echo "## Inline comments"
   gh api "repos/$nwo/pulls/$num/comments" --paginate \
     --jq '.[] | "### \(.user.login) on \(.path):\(.line // .original_line) at \(.created_at)\(if .in_reply_to_id then " (reply)" else "" end)\n\(.body)\n"'
   echo "## PR comments"
-  gh api "repos/$nwo/issues/$num/comments" --paginate \
-    --jq '.[] | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
+  gh api "repos/$nwo/issues/$num/comments" --paginate | jq -r --arg me "$me" '
+    .[] | select((.user.login == $me and (.body | startswith("### AI Slop Score:"))
+                 and (.body | test("<!-- llm-brain:ai-slop-score -->\\s*$"))) | not)
+    | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
 }
 
 # AI Slop Score of one PR head, scored in its clone. Sets SLOP (the review section) and SLOP_VERDICT for the prompt,
@@ -299,7 +312,7 @@ post_mode() {
 cmd_review_prs() {
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
-  local url key sha last dir pf nwo base num prior lf fails backfilled=0
+  local url key sha last dir pf nwo base num prior lf fails scope backfilled=0
   for url in ${ONLY_PR:-$(review_queue)}; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
@@ -310,6 +323,10 @@ cmd_review_prs() {
     if [[ "$sha" == "$last" ]]; then                        # one review per head commit…
       lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1)"
       fails="$(cat "$BRAIN_STATE/prs/$key.fails" 2>/dev/null || echo 0)"
+      if [[ -n "$lf" ]] && grep -q '^BUDGET_STOPPED ' "$lf"; then
+        log "$key: resource budget stopped this review — needs a human handoff, not an automatic retry"
+        continue
+      fi
       if [[ -n "$lf" ]] && ! grep -q '^REVIEWED ' "$lf" && (( fails < 3 )); then
         echo $((fails + 1)) >"$BRAIN_STATE/prs/$key.fails"  # …unless that review died without posting
         log "$key: last review produced no result — retry $((fails + 1))/3"
@@ -332,13 +349,19 @@ cmd_review_prs() {
       && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
     existing_feedback "$nwo" "$num" >"$dir/existing.md"
     slop_for "$url" "$key" "$sha" "$base" "$dir"
-    prior=""; [[ -n "$last" ]] && prior="This is a RE-REVIEW: your previous review was of ${last:0:8}. Focus on \`git diff $last..HEAD\` and whether your earlier points were resolved; say which."
+    prior=""; scope="origin/$base"
+    lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1 || true)"
+    if [[ -n "$last" && "$last" != "$sha" && -n "$lf" ]] && grep -q '^REVIEWED ' "$lf" \
+       && git -C "$dir/src" merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
+      scope="$last"
+      prior="This is a RE-REVIEW of changes since ${last:0:8}. Review only that delta plus directly affected code and whether earlier findings were resolved. Do not repeat a full unchanged-file review."
+    fi
     pf="$dir/prompt.md"
     prompt_env pr-review
-    PR_URL="$url" HOST="$HOST_NAME" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
+    PR_URL="$url" HOST="$HOST_NAME" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" REVIEW_BASE="$scope" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
-    BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
+    LLM_MODEL="$(cfg '.pr_review.model // ""')" BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
   done
 }
 
