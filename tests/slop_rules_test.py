@@ -4,6 +4,7 @@ import json
 import runpy
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,36 @@ class RulesTest(unittest.TestCase):
         self.assertIn("Before requesting review", md)
         self.assertIn("PRs targeting `production`", md)
         self.assertIn("**To improve:** " + self.profile["signals"]["P03"]["remedy"], md)
+
+    def test_inline_and_heading_test_evidence_is_accepted(self):
+        params = self.profile["signals"]["P03"]["params"]
+        for body in [
+            '**Tests:** regression test fails on base and passes here.\n',
+            '**Tests**: regression test fails on base and passes here.\n',
+            '## Tests\nRegression test fails on base and passes here.\n',
+            '## How to verify\n1. Open Issues; long names wrap and time stays visible.\n',
+        ]:
+            ch = SimpleNamespace(pr={}, body=body, review_lines=lambda: 100)
+            with self.subTest(body=body):
+                self.assertEqual(slop["d_verify_section"](ch, {}, params)[0], [])
+
+    def test_other_sections_do_not_make_empty_tests_pass(self):
+        params = self.profile["signals"]["P03"]["params"]
+        for body in [
+            '**Tests:**\n**Deploy order**\nThis API first, then the UI companion PR.\n',
+            '## Tests\n## Deploy order\nThis API first, then the UI companion PR.\n',
+            '## What\nThe endpoint validates allowed values before lookup.\n',
+        ]:
+            ch = SimpleNamespace(pr={}, body=body, review_lines=lambda: 100)
+            with self.subTest(body=body):
+                self.assertTrue(slop["d_verify_section"](ch, {}, params)[0])
+
+    def test_company_guidance_and_reference_prs_are_published(self):
+        self.profile["pr_guidance"] = ['- Keep Why short; include Tests and unchecked work.']
+        self.profile["pr_examples"] = [{"title": "Small UI fix", "url": "https://example.com/pr/773"}]
+        md = slop["render_rules"](self.profile)
+        self.assertIn(self.profile["pr_guidance"][0], md)
+        self.assertIn('[Small UI fix](https://example.com/pr/773)', md)
 
 
 if __name__ == "__main__":
