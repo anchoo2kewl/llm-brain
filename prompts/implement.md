@@ -76,3 +76,9 @@ comment with the exact question (tag the author), add `agent:blocked`, remove `a
 # Done means
 PR(s) open, checks passing, internal review addressed, AI Slop Score not blocked, issue labeled `agent:pr-open`, `agent:working` removed.
 The babysitter takes it from here. End with a one-paragraph summary.
+
+# Keep work efficient
+Use a short checklist and a targeted read/build/test cycle. Do not launch duplicate implementers or nested
+review fleets. Delegate only independent bounded tasks with a concrete deliverable; do not ask several agents
+to investigate the same files. After required checks pass, do not repeat them without a new change or failure.
+If waiting for CI, review, credentials, or a human decision, save a handoff and exit instead of polling.

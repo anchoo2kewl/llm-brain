@@ -35,7 +35,7 @@ The only vendor-specific code in the fleet. Modes:
 | `write` | `-p … --dangerously-skip-permissions` | `exec --dangerously-bypass-approvals-and-sandbox` | `-p … --yolo` |
 | `review` | `--permission-mode plan`, tools limited to Read, Grep, Glob, `git diff/log/show`, `gh pr view/diff` | `exec --sandbox read-only` | `-p …` |
 
-The model is `$LLM_MODEL`, else `providers.<p>.model`, else the CLI's default.
+The model is `$LLM_MODEL`, else `providers.<p>.model`, else the CLI's default. The fleet explicitly defaults Claude to `sonnet`, so an interactive Opus/1M preference does not silently apply to automation. `pr_review.model` optionally overrides the model for external PR review workers.
 
 Before running, it:
 
