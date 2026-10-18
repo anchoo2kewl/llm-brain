@@ -61,6 +61,12 @@ Without Jev (no key, or `--no-jev`), the judged signals are listed as not assess
 
 `bin/slop-score rules` prints the full table for a profile: what each rule checks, its points, how to fix it. Share that output with your team; it is how the Elastio rules gist is made.
 
+Profiles can set `rules_url` to the published output of `slop-score rules`. Every score then links to the
+company's complete rules, and each finding and checklist item links to that rule's `#rule-<lowercase ID>`
+anchor. Keep `docs_url` for the general scoring explanation. The generated guide includes a pre-review
+checklist, exemptions, company overrides with remedies, and all inherited rules; sharing only the overlay
+JSON would omit those inherited checks. Refresh the published guide whenever either profile changes.
+
 ## Profiles
 
 A profile is a JSON file. llm-brain ships `slop-profiles/default.json`. A company keeps its own in its overlay, `<overlay>/slop/<name>.json`, and picks it in the overlay `config.yaml`:

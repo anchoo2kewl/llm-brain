@@ -1305,7 +1305,7 @@ def score(ch, profile, use_jev, out_dir, use_cache=True):
                 "profile": {"id": profile.get("id"), "digest": ""}, "score": 0, "verdict": "skipped", "note": why, "signals": [],
                 "thresholds": profile["thresholds"], "vetoes": [], "jev": "off", "families": [], "unassessed": [], "waived": [],
                 "assessed": {"files": len(ch.files), "review_lines": ch.review_lines(), "production_lines": ch.prod_lines(), "excluded": []},
-                "docs_url": profile.get("docs_url", "")}
+                "docs_url": profile.get("docs_url", ""), "rules_url": profile.get("rules_url", "")}
     sigs = {sid: s for sid, s in profile["signals"].items() if s.get("enabled", True)
             and when_hits(s.get("when"), ch.repo, [f.path for f in ch.files], ch.added_norm)}
     results, unassessed, waived = [], [], []
@@ -1441,6 +1441,7 @@ def score(ch, profile, use_jev, out_dir, use_cache=True):
         "unassessed": unassessed, "waived": waived,
         "assessed": {"files": len(ch.files), "review_lines": ch.review_lines(), "production_lines": ch.prod_lines(), "excluded": excluded},
         "docs_url": profile.get("docs_url", ""),
+        "rules_url": profile.get("rules_url", ""),
     }
 
 
@@ -1464,12 +1465,18 @@ def render_md(res, profile, prev=None):
     cats = profile["categories"]
     th = res["thresholds"]
     if res["verdict"] == "skipped":
-        return f"### AI Slop Score: skipped\nNot scored: {res['note']}.\n"
+        guide = f"[Profile rules and exemptions]({res['rules_url']})\n" if res.get("rules_url") else ""
+        return f"### AI Slop Score: skipped\nNot scored: {res['note']}.\n{guide}"
     word = {"pass": "pass", "warn": "warning", "block": "blocked"}[res["verdict"]]
     tier = {"on": "Tier 1 + Jev", "partial": "Tier 1 + Jev (partial)", "off": "Tier 1 only", "unavailable": "Tier 1 only; Jev unavailable"}[res["jev"]]
     out = [f"### AI Slop Score: {res['score']}/100 · {word}",
            f"Blocks at {th['block']}, warns at {th['warn']}. Profile `{res['profile']['id']}`, {tier}."
            + (f" [How this is scored]({res['docs_url']})" if res["docs_url"] else "")]
+    rules_url = res.get("rules_url", "")
+    def rule_link(sid):
+        return f"[{sid}]({rules_url.split('#')[0]}#rule-{sid.lower()})" if rules_url else sid
+    if rules_url:
+        out.append(f"[Full {profile.get('title') or 'profile'} rules and how to improve]({rules_url})")
     if res["vetoes"]:
         out.append(f"**Blocked regardless of score:** {', '.join(res['vetoes'])}.")
     if res["note"]:
@@ -1496,7 +1503,7 @@ def render_md(res, profile, prev=None):
         for s in sigs[:7]:
             where = "; ".join(loc(h) for h in s["evidence"][:3]) + (f" (+{s['count'] - 3} more)" if s["count"] > 3 else "")
             pts = "veto" if s["veto"] else f"{s['points']:.1f}"
-            out.append(f"| {pts} | **{s['id']}** {s['title']} · {cats[s['category']]['title']} | {where.replace('|', '¦')} |")
+            out.append(f"| {pts} | **{rule_link(s['id'])}** {s['title']} · {cats[s['category']]['title']} | {where.replace('|', '¦')} |")
         if len(sigs) > 7:
             out.append(f"| {sum(s['points'] for s in sigs[7:]):.1f} | also: {', '.join(s['id'] for s in sigs[7:])} | |")
         out += ["", "**To fix**"]
@@ -1504,7 +1511,7 @@ def render_md(res, profile, prev=None):
         for s in sigs:
             if s["remedy"] not in seen:
                 seen.add(s["remedy"])
-                out.append(f"- [ ] {s['remedy']} ({s['id']})")
+                out.append(f"- [ ] {s['remedy']} ({rule_link(s['id'])})")
     foot = []
     if res["assessed"]["excluded"]:
         foot.append(f"Not scored: {len(res['assessed']['excluded'])} generated/vendored/fixture files")
@@ -1523,6 +1530,18 @@ def render_rules(profile, repo=""):
     out = [f"# AI Slop Score rules: {profile.get('title') or profile.get('id')}", ""]
     if profile.get("description"):
         out += [profile["description"], ""]
+    out += ["## Before requesting review", "",
+        "- Keep the PR focused on one change. Explain the problem and resulting behaviour in the opening sentences.",
+        "- Give concrete verification steps and expected results. Test changed behaviour, including failure cases.",
+        "- Remove debug output, unfinished code and redundant comments. Explain necessary suppressions.",
+        "- Fix the review's **To fix** checklist; each rule ID links to its exact check and remedy below.", ""]
+    if profile.get("skip", {}).get("titles") or profile.get("skip", {}).get("base_branches"):
+        out += ["## When scoring is skipped", ""]
+        for pattern in profile.get("skip", {}).get("titles", []):
+            out.append(f"- PR titles matching `{pattern}`.")
+        if profile.get("skip", {}).get("base_branches"):
+            out.append("- PRs targeting " + ", ".join(f"`{b}`" for b in profile["skip"]["base_branches"]) + ".")
+        out.append("")
     out += [
         "Every pull request the review agent reviews gets an **AI Slop Score** from 0 (pristine) to 100 (slop), posted in the review "
         "with what raised it and how to fix it. The score is about whether a teammate can understand, trust and maintain the change. "
@@ -1565,7 +1584,7 @@ def render_rules(profile, repo=""):
         for sid in own:
             s = profile["signals"][sid]
             if s.get("enabled", True):
-                out.append(f"- **{sid} {s['title']}**: {s.get('what', '').replace(' (Judged by Jev.)', '')}")
+                out.append(f"- **[{sid} {s['title']}](#rule-{sid.lower()})**: {s.get('what', '').replace(' (Judged by Jev.)', '')} **To improve:** {s['remedy']}")
             else:
                 out.append(f"- **{sid} {s['title']}** is turned off.")
     for c, v in cats.items():
@@ -1580,7 +1599,7 @@ def render_rules(profile, repo=""):
             if s.get("when", {}).get("repos"):
                 scope = " Only in " + ", ".join(f"`{r}`" for r in s["when"]["repos"]) + "."
             what = s.get('what', '').replace(' (Judged by Jev.)', '').replace('|', '¦')
-            out.append(f"| {sid} | {s['title']}{judge} | {what}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
+            out.append(f"| <a name=\"rule-{sid.lower()}\"></a>{sid} | {s['title']}{judge} | {what}{scope} | {pts} | {s['remedy'].replace('|', '¦')} |")
     out += ["", f"_Generated from profile `{profile.get('id')}` by `bin/slop-score rules`. Change the profile, not this page._", ""]
     return "\n".join(out)
 
