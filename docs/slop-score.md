@@ -66,6 +66,11 @@ company's complete rules, and each finding and checklist item links to that rule
 anchor. Keep `docs_url` for the general scoring explanation. The generated guide includes a pre-review
 checklist, exemptions, company overrides with remedies, and all inherited rules; sharing only the overlay
 JSON would omit those inherited checks. Refresh the published guide whenever either profile changes.
+Optional `pr_guidance` (Markdown bullet strings) and `pr_examples` (`title`/`url` objects) let a company
+publish its writing baseline and real reference PRs in that guide. `Tests` headings and bold inline labels
+such as `**Tests:** regression red on base, green here` count as verification evidence; an empty section
+cannot borrow text from the following section. The detector checks presence, not whether a claimed run
+actually happened; reviewers still verify the evidence.
 
 ## Profiles
 

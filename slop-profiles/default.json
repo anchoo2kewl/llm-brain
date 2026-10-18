@@ -175,7 +175,7 @@
       "norm": "binary",
       "weight": 6,
       "params": {
-        "heading_regex": "(?im)^\\s*(#{1,6}\\s*|\\*\\*)(how to (verify|test)|verification|testing|test plan)\\b",
+        "heading_regex": "(?im)^\\s*(#{1,6}\\s*|\\*\\*)(how to (verify|test)|verification|testing|tests|test plan)\\b",
         "min_chars": 20,
         "min_eligible_lines": 15
       },
