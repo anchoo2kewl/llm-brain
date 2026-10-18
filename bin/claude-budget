@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Persistent Claude Code session-tree budget hook. No model/network calls."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import tempfile
+
+DEFAULTS = {
+    "max_agent_calls": 6,
+    "max_responses": 200,
+    "max_output_tokens": 100000,
+    "max_input_tokens": 20000000,  # includes cache reads/writes, across the tree
+    "max_tool_calls": 300,
+}
+AGENT_TOOLS = {"Agent", "Task"}  # Task is the pre-rename Agent tool
+
+
+def stopped(reason):
+    return {"continue": False, "stopReason": "Claude budget: " + reason +
+            ". Work is preserved. Review the transcript and start a fresh, bounded session with a handoff; "
+            "do not automatically restart or spawn a replacement session."}
+
+
+def exceeded(state, policy):
+    if len(state["messages"]) >= policy["max_responses"]:
+        return "session tree reached %s model responses" % policy["max_responses"]
+    for index, limit, label in [(1, "max_output_tokens", "output tokens"),
+                                (0, "max_input_tokens", "input tokens including cache")]:
+        if sum(m[index] for m in state["messages"].values()) >= policy[limit]:
+            return "session tree reached %s %s" % (policy[limit], label)
+    if len(state["tools"]) > policy["max_tool_calls"]:
+        return "session tree reached %s tool calls" % policy["max_tool_calls"]
+    return ""
+
+
+def scan(path, state, policy):
+    """Incremental scan, keeping only usage and tool IDs, never transcript text."""
+    name = str(path)
+    if not path.exists():
+        if name in state["files"]:
+            raise ValueError("a previously counted transcript disappeared")
+        return
+    stat = path.stat()
+    cursor = state["files"].get(name, {})
+    offset = cursor.get("offset", 0)
+    if cursor.get("inode") != stat.st_ino or stat.st_size < offset:
+        # Rewrites/compaction never refund spent usage or tool reservations.
+        offset = 0
+    with path.open("rb") as stream:
+        stream.seek(offset)
+        while True:
+            line = stream.readline()
+            if not line or not line.endswith(b"\n"):
+                break  # incomplete writes are retried next time
+            offset = stream.tell()
+            try:
+                row = json.loads(line)
+            except (ValueError, UnicodeError):
+                raise ValueError("malformed transcript; budget cannot be verified")
+            if row.get("type") != "assistant":
+                continue
+            message = row.get("message") or {}
+            usage = message.get("usage")
+            mid = message.get("id")
+            if mid and usage and message.get("model") != "<synthetic>":
+                # Streaming content blocks share an API message id: retain maxima.
+                old = state["messages"].setdefault(mid, [0, 0])
+                inp = sum(int(usage.get(k, 0) or 0) for k in
+                          ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+                old[0] = max(old[0], inp)
+                old[1] = max(old[1], int(usage.get("output_tokens", 0) or 0))
+            for block in message.get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id"):
+                    tid = block["id"]
+                    state["tools"][tid] = True
+                    if block.get("name") in AGENT_TOOLS:
+                        state["agents"][tid] = True
+            state["blocked"] = exceeded(state, policy)
+            if state["blocked"]:
+                break
+    state["files"][name] = {"offset": offset, "inode": stat.st_ino}
+
+
+def root_transcript(payload):
+    path = Path(payload["transcript_path"]).expanduser().resolve()
+    if not path.is_absolute() or path.suffix != ".jsonl":
+        raise ValueError("invalid transcript path")
+    # In subagent hooks the transcript may be the agent's own file.
+    # /project/<root-uuid>/subagents/agent-id.jsonl -> /project/<root-uuid>.jsonl
+    if path.parent.name == "subagents":
+        return path.parent.parent.with_suffix(".jsonl"), True
+    return path, bool(payload.get("agent_id"))
+
+
+def check(payload, policy, state_dir):
+    root, is_subagent = root_transcript(payload)
+    key = hashlib.sha256(str(root).encode()).hexdigest()
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    state_path = state_dir / (key + ".json")
+    with (state_dir / (key + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # parallel Agent calls cannot race the launch cap
+        state = json.loads(state_path.read_text()) if state_path.exists() else {
+            "version": 1, "files": {}, "messages": {}, "tools": {}, "agents": {}, "blocked": ""
+        }
+        if state.get("version") != 1:
+            raise ValueError("unrecognized budget state version")
+        if state["blocked"]:
+            return stopped(state["blocked"])
+        paths = [root] + sorted(root.with_suffix("").glob("subagents/*.jsonl"))
+        for path in paths:
+            scan(path, state, policy)
+            if state["blocked"]:
+                break
+        result = {}
+        if state["blocked"]:
+            result = stopped(state["blocked"])
+        elif payload.get("hook_event_name") == "PreToolUse":
+            tid = payload.get("tool_use_id")
+            if not tid:
+                raise ValueError("tool call has no id; budget cannot be reserved")
+            tool = payload.get("tool_name")
+            if tool in AGENT_TOOLS:
+                reason = ""
+                if is_subagent:
+                    reason = "Nested subagents are disabled. Complete the bounded task yourself."
+                elif len(state["agents"]) - int(tid in state["agents"]) >= policy["max_agent_calls"]:
+                    reason = "Session tree has used all %s agent launches/resumes. Continue directly; do not retry Agent or start another Claude process." % policy["max_agent_calls"]
+                if reason:
+                    result = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                              "permissionDecision": "deny", "permissionDecisionReason": reason}}
+                else:
+                    state["agents"][tid] = True  # failed launches are conservatively charged
+            if not result:
+                if tid not in state["tools"] and len(state["tools"]) >= policy["max_tool_calls"]:
+                    state["blocked"] = "session tree reached %s tool calls" % policy["max_tool_calls"]
+                    result = stopped(state["blocked"])
+                else:
+                    state["tools"][tid] = True
+        if not result and not state.get("warned"):
+            near = (len(state["messages"]) >= policy["max_responses"] * .8 or
+                    len(state["tools"]) >= policy["max_tool_calls"] * .8 or
+                    sum(m[1] for m in state["messages"].values()) >= policy["max_output_tokens"] * .8 or
+                    sum(m[0] for m in state["messages"].values()) >= policy["max_input_tokens"] * .8)
+            if near:
+                warning = "Claude session-tree budget is at least 80% used. Finish the current small step, save a concise handoff, and stop. Do not spawn more agents or restart automatically."
+                result = {"systemMessage": warning, "hookSpecificOutput": {
+                    "hookEventName": payload["hook_event_name"], "additionalContext": warning}}
+                state["warned"] = True
+        # Atomic replacement under a separate stable lock file. Never erase counters
+        # on resume, compaction, file truncation, or a change of working directory.
+        fd, temp = tempfile.mkstemp(dir=state_dir, prefix=key + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as out:
+                json.dump(state, out, separators=(",", ":"))
+            os.replace(temp, state_path)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+        return result
+
+
+def main():
+    import sys
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--policy", type=Path, required=True)
+    ap.add_argument("--state-dir", type=Path, required=True)
+    args = ap.parse_args()
+    try:
+        policy = json.loads(args.policy.read_text())
+        for k in DEFAULTS:
+            if type(policy.get(k)) is not int or policy[k] <= 0:
+                raise ValueError("missing or invalid positive limit: " + k)
+        result = check(json.load(sys.stdin), policy, args.state_dir)
+    except Exception as exc:
+        # Never convert broken protection into an unlimited session or a retry loop.
+        result = stopped("guard cannot verify limits (%s)" % type(exc).__name__)
+    if result.get("continue") is False and os.environ.get("BRAIN_CLAUDE_BUDGET_STOP_FILE"):
+        # Headless Claude currently returns exit 0 for hook_stopped. Tell the fleet
+        # adapter explicitly, so an incomplete internal review is never "clean".
+        try:
+            Path(os.environ["BRAIN_CLAUDE_BUDGET_STOP_FILE"]).write_text(result["stopReason"])
+        except OSError:
+            pass  # the hook still stops the turn if its optional adapter marker fails
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

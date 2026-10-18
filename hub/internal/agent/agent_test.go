@@ -824,3 +824,14 @@ func TestRunStopsTurnsBeforeReturning(t *testing.T) {
 		t.Fatalf("final report missing when Run returned: %+v", a)
 	}
 }
+
+func TestClaudeHookStopIsNotSuccessfulReview(t *testing.T) {
+	c := &Capture{Provider: "claude"}
+	line := c.Line(`{"type":"result","subtype":"success","is_error":false,"terminal_reason":"hook_stopped","result":"","session_id":"s"}`)
+	if strings.Contains(line, "result: success") || !strings.Contains(line, "incomplete") {
+		t.Fatalf("guard stop displayed as success: %s", line)
+	}
+	if !strings.Contains(c.Err, "hook_stopped") {
+		t.Fatalf("guard stop reported as success: %+v", c)
+	}
+}

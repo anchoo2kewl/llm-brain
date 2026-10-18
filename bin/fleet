@@ -318,6 +318,10 @@ cmd_review_prs() {
     if [[ "$sha" == "$last" ]]; then                        # one review per head commit…
       lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1)"
       fails="$(cat "$BRAIN_STATE/prs/$key.fails" 2>/dev/null || echo 0)"
+      if [[ -n "$lf" ]] && grep -q '^BUDGET_STOPPED ' "$lf"; then
+        log "$key: resource budget stopped this review — needs a human handoff, not an automatic retry"
+        continue
+      fi
       if [[ -n "$lf" ]] && ! grep -q '^REVIEWED ' "$lf" && (( fails < 3 )); then
         echo $((fails + 1)) >"$BRAIN_STATE/prs/$key.fails"  # …unless that review died without posting
         log "$key: last review produced no result — retry $((fails + 1))/3"
