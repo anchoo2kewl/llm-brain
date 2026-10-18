@@ -50,6 +50,7 @@ cfg_path() { local p; p="$(cfg "$1")"; echo "${p/#\~/$HOME}"; }
 WORK_ROOT="${FLEET_WORK_ROOT:-$(cfg_path '.work_root')}"
 prompt_env() { # prompt_env <prompt-name>
   export OWNER="$(cfg '.owner.name')" OWNER_GH="$(cfg '.owner.github')" WORK_ROOT
+  export OWNER_ALIASES="$(cfg -o=json '.owner.aliases // []' | jq -r 'join(", ")')"
   export PEOPLE="$(cfg -o=json '.people' | jq -r 'to_entries | map("\(.value) (@\(.key))") | join(", ") | if . == "" then "your teammates" else . end')"
   export HOUSE="$(house "$1")"
   [[ -n "$HOUSE" ]] || HOUSE="(none)"

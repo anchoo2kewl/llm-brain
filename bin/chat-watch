@@ -10,7 +10,7 @@ Acts on team chat. The hub holds the Slack connection (token, watched channels, 
                           and kill its worker (e.g. "stand down on #840, someone else is taking it").
 It never posts anywhere in chat.
 """
-import argparse, json, os, re, signal, subprocess, sys, urllib.request
+import argparse, hashlib, json, os, re, signal, subprocess, sys, tempfile, urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -53,37 +53,187 @@ def known_repos():
 
 
 def resolve(short, repos):
-    """'api' -> acme/web-api; fuzzy: exact name, then '-<short>' suffix, then substring; shortest wins."""
+    """'api' -> acme/web-api; exact name, then suffix, then substring; require a unique match."""
     s = short.lower()
     for test in (lambda n: n == s, lambda n: n.endswith("-" + s), lambda n: s in n):
         hits = sorted((r for r in repos if test(r.split("/")[1].lower())), key=len)
         if hits:
-            return hits[0]
+            return hits[0] if len(hits) == 1 else None
     return None
 
 
 def refs(text, default_repo, repos, learned=None):
-    """learned: number -> repo from earlier explicit refs, so a later bare #17446 means the same repo#17446."""
+    """Resolve explicit refs first; learned bare-number mappings are scoped to one thread."""
     learned = {} if learned is None else learned
     out = set()
     for o, n, num in re.findall(r"github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\d+)", text):
         out.add((f"{o}/{n}", int(num)))
     body = re.sub(r"https?://\S+", " ", text)
-    for short, num in re.findall(r"(?<![\w/])([A-Za-z][\w.-]*)#(\d+)", body):
-        r = resolve(short, repos)
-        if r:
-            out.add((r, int(num)))
-    for r, n in out:
-        learned[str(n)] = r
-    for num in re.findall(r"(?<![\w/#-])#(\d+)\b", body):
-        r = learned.get(num) or default_repo
-        if r:
-            out.add((r, int(num)))
+    def qualified(match):
+        prefix, gap, num = match.groups()
+        if "/" in prefix:
+            repo = prefix if prefix in repos else None
+        elif gap:
+            # "SDK #99" is useful; ordinary words like "on #99" are not repo aliases.
+            matches = [r for r in repos if r.split("/")[1].lower() == prefix.lower()
+                       or r.split("/")[1].lower().endswith("-" + prefix.lower())]
+            repo = matches[0] if len(matches) == 1 else None
+        else:
+            repo = resolve(prefix, repos)
+        if repo:
+            out.add((repo, int(num)))
+            return " "
+        return match.group(0)
+    body = re.sub(r"(?<![\w/])([A-Za-z][\w.-]*(?:/[\w.-]+)?)([ \t]*)#(\d+)", qualified, body)
+    for number in {str(n) for _, n in out}:
+        matches = {r for r, n in out if str(n) == number}
+        if len(matches) == 1:
+            learned[number] = next(iter(matches))
+        else:
+            learned.pop(number, None)
+    def expand_range(match):
+        first, last = map(int, match.groups())
+        return " ".join(f"#{n}" for n in range(first, last + 1)) if 0 <= last - first <= 20 else match.group(0)
+    body = re.sub(r"#(\d+)\s*[-–]\s*#?(\d+)", expand_range, body)
+    for num in re.findall(r"(?<![\w#-])#(\d+)\b", body):
+        repo = learned.get(num) or default_repo
+        if repo:
+            out.add((repo, int(num)))
     return out
 
 
 def note_path(repo, num):
     return NOTES / f"{repo.replace('/', '__')}__{num}.md"
+
+
+# Identity aliases describe the addressee; only authenticated sender IDs grant authority.
+def addressed_to_owner(text, aliases):
+    return any(re.search(r"(?<![\w])" + re.escape(alias) + r"(?![\w])", text, re.I)
+               for alias in aliases if alias)
+
+
+def target_kind(repo, number):
+    """GitHub issues endpoints include PRs: verify the object, never guess by number."""
+    try:
+        result = subprocess.run(["gh", "api", f"repos/{repo}/issues/{number}"], capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return "unknown"
+    if result.returncode:
+        return "unknown"
+    try:
+        obj = json.loads(result.stdout)
+        if not isinstance(obj, dict):
+            return "unknown"
+        return "review" if "pull_request" in obj else "task" if obj.get("number") == number else "unknown"
+    except json.JSONDecodeError:
+        return "unknown"
+
+
+def review_requested(text):
+    # Status-only chatter stays in context/digest; it must not buy another full review.
+    return bool(re.search(
+        r"\b(?:please|could you|can you|would you)\s+(?:(?:re[- ]?)?(?:review|check|score|run)|look|verify|merge|address|fix)\b"
+        r"|(?im:^[ \t]*(?:re[- ]?review|re[- ]?score|review|check|score|verify|merge|address|fix)\b)", text, re.I))
+
+
+def prepare_messages(rows, me, trusted, people, channel_repos, repos, st, aliases, owner, lookup=target_kind):
+    """Pure routing except the injected GitHub type lookup. No task or review is launched here."""
+    new, kinds = [], {}
+    scoped = st.setdefault("scoped_refs", {})
+    threads = st.setdefault("thread_refs", {})
+    for m in rows:
+        uid = m.get("user_id", "")
+        is_owner = bool(uid and uid == (me.get("owner_id") or me.get("user_id")))
+        authorized = is_owner or uid in trusted
+        text = m.get("text", "")
+        conv = m.get("conv_id") or m.get("conv_name", "")
+        thread = m.get("thread_ts") or m.get("ts", "")
+        scope = conv + "/" + thread
+        # Never let another sender's bare number poison a trusted instruction's mapping.
+        learned = dict(scoped.get(scope, {}))
+        found = refs(text, channel_repos.get(conv) or channel_repos.get(m.get("conv_name", "")), repos, learned)
+        if not found and m.get("thread_ts"):
+            found = {(r, int(n)) for r, n in threads.get(scope, [])}
+        if authorized:
+            scoped[scope] = learned
+            if found:
+                threads[scope] = sorted(found)
+        targets = []
+        for repo, number in sorted(found):
+            ref = f"{repo}#{number}"
+            if authorized and ref not in kinds:
+                kinds[ref] = lookup(repo, number)
+            targets.append({"ref": ref, "kind": kinds.get(ref, "context")})
+        new.append({
+            "id": m.get("id"), "source_id": conv + "/" + m.get("ts", str(m.get("id", ""))),
+            "at": (m.get("at") or "")[:19].replace("T", " "),
+            "where": m.get("conv_name") or m.get("conv_kind"), "kind": m.get("conv_kind"),
+            "who": owner if is_owner else people.get(trusted.get(uid)) or m.get("user_name") or uid,
+            "sender_id": uid, "owner": is_owner, "trusted": authorized,
+            "to_me": bool(m.get("mentions_me")) or m.get("conv_kind") in ("dm", "group_dm") or addressed_to_owner(text, aliases),
+            "thread": bool(m.get("thread_ts")) and m.get("thread_ts") != m.get("ts"),
+            "text": text, "link": m.get("permalink", ""),
+            "refs": [t["ref"] for t in targets], "targets": targets,
+            "review_requested": authorized and review_requested(text),
+        })
+    # Bound thread metadata; notes retain the original instructions and source links.
+    for mapping in (scoped, threads):
+        for key in list(mapping)[:-1000]:
+            del mapping[key]
+    return new
+
+
+def atomic_json(path, value):
+    fd, temp = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(value, f, indent=1)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def save_messages(new, st):
+    receipts = st.setdefault("routes", {})
+    history = st.setdefault("review_requests", {})
+    request_dir = CHAT / "review-requests"
+    request_dir.mkdir(parents=True, exist_ok=True)
+    for m in new:
+        if not m["trusted"]:
+            continue
+        for target in m["targets"]:
+            repo, num = target["ref"].rsplit("#", 1)
+            path = note_path(repo, int(num))
+            marker = "<!-- llm-brain:slack-message:" + m["source_id"] + " -->"
+            existing = path.read_text() if path.exists() else ""
+            if marker not in existing:
+                header = f"### {m['at']} — {m['who']} in {m['where']}\n"
+                legacy = header + m['text'] + "\n\n"
+                entry = (f"{marker}\n{header}Source: {m['link'] or m['source_id']} · "
+                         f"sender {m['sender_id']} · route {target['kind']}\n{m['text']}\n\n")
+                if legacy in existing:
+                    path.write_text(existing.replace(legacy, entry, 1))
+                else:
+                    with path.open("a") as f:
+                        f.write(entry)
+            if target["kind"] == "review" and m["review_requested"]:
+                digest = hashlib.sha256(re.sub(r"\s+", " ", m["text"]).strip().encode()).hexdigest()
+                seen = history.setdefault(target["ref"], [])
+                if digest not in seen:
+                    seen.append(digest)
+                    del seen[:-50]
+                token = hashlib.sha256("\n".join(seen).encode()).hexdigest()
+                # Same content received again keeps the token unchanged, including after replay.
+                request_dir.joinpath(path.stem + ".sha256").write_text(token + "\n")
+                atomic_json(request_dir / (path.stem + ".json"), {
+                    "url": f"https://github.com/{repo}/pull/{num}", "token": token,
+                    "source": m["link"] or m["source_id"]})
+        status = "needs_resolution" if any(t["kind"] == "unknown" for t in m["targets"]) else "routed" if m["targets"] else "needs_reference"
+        receipts[str(m["id"])] = {"source": m["link"] or m["source_id"], "sender": m["sender_id"],
+            "targets": m["targets"], "state": status}
+    for key in list(receipts)[:-1000]:
+        del receipts[key]
 
 
 # ---------------------------------------------------------------- main
@@ -97,6 +247,7 @@ def hub_get(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print what's new; write nothing, act on nothing")
+    ap.add_argument("--replay-channel", metavar="ID", help="re-route stored messages from this channel without advancing the cursor or running insights")
     a = ap.parse_args()
     if not cfg(".chat.enabled") and not a.dry_run:
         return
@@ -104,47 +255,41 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
     sf = CHAT / "state.json"
     st = json.loads(sf.read_text()) if sf.exists() else {}
-    learned = st.setdefault("learned", {})
-    trusted = cfg(".chat.trusted") or {}          # chat user id -> github handle
-    people = cfg(".people") or {}                 # github handle -> display name
-    channel_repos = cfg(".chat.channel_repos") or {}  # channel name -> what a bare #123 means there
+    trusted = cfg(".chat.trusted") or {}
+    people = cfg(".people") or {}
+    channel_repos = cfg(".chat.channel_repos") or {}
     repos = known_repos()
+    owner = cfg(".owner.name") or "owner"
+    aliases = [owner, cfg(".owner.github") or "", *(cfg(".owner.aliases") or [])]
     try:
         me = hub_get("/api/chat/me")
-        rows = hub_get(f"/api/chat/messages?after={st.get('after', 0)}&limit=500")
+        me["owner_id"] = cfg(".owner.slack_user_id") or me.get("user_id")
+        if a.replay_channel:
+            rows, after = [], 0
+            while True:
+                batch = hub_get(f"/api/chat/messages?after={after}&limit=5000")
+                batch = batch.get("messages", batch) if isinstance(batch, dict) else batch
+                rows.extend(m for m in batch if m.get("conv_id") == a.replay_channel)
+                if len(batch) < 5000:
+                    break
+                after = max(int(m["id"]) for m in batch)
+        else:
+            rows = hub_get(f"/api/chat/messages?after={st.get('after', 0)}&limit=500")
     except Exception as e:
         log(f"hub unreachable or chat not connected: {e}")
         return
     rows = rows.get("messages", rows) if isinstance(rows, dict) else rows
-    new = []
-    for m in rows:
-        uid = m.get("user_id", "")
-        if uid and uid == me.get("user_id"):
-            continue                                  # my own messages aren't news to me
-        text = m.get("text", "")
-        new.append({
-            "at": (m.get("at") or "")[:19].replace("T", " "), "where": m.get("conv_name") or m.get("conv_kind"),
-            "kind": m.get("conv_kind"), "who": people.get(trusted.get(uid)) or m.get("user_name") or uid,
-            "trusted": uid in trusted, "to_me": bool(m.get("mentions_me")) or m.get("conv_kind") in ("dm", "group_dm"),
-            "thread": bool(m.get("thread_ts")) and m.get("thread_ts") != m.get("ts"), "text": text,
-            "link": m.get("permalink", ""),
-            "refs": sorted(f"{r}#{n}" for r, n in refs(text, channel_repos.get(m.get("conv_name", "")), repos, learned)),
-        })
-    if rows:
-        st["after"] = max(int(m["id"]) for m in rows)
+    new = prepare_messages(rows, me, trusted, people, channel_repos, repos, st,
+                           aliases + [me.get("user_name", "")], owner)
     if a.dry_run:
         print(json.dumps(new, indent=1))
         return
-    for m in new:
-        if not m["trusted"]:
-            continue
-        for ref in m["refs"]:
-            repo, num = ref.rsplit("#", 1)
-            with open(note_path(repo, int(num)), "a") as f:
-                f.write(f"### {m['at']} — {m['who']} in {m['where']}\n{m['text']}\n\n")
-    sf.write_text(json.dumps(st, indent=1))
+    save_messages(new, st)
+    if rows and not a.replay_channel:
+        st["after"] = max(int(m["id"]) for m in rows)
+    atomic_json(sf, st)
     log(f"{len(new)} new message(s), {sum(m['trusted'] for m in new)} from trusted people")
-    if new and cfg(".chat.insights"):
+    if new and not a.replay_channel and cfg(".chat.insights"):
         insights(new[-200:])
 
 
