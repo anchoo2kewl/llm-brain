@@ -579,9 +579,11 @@ def d_verify_section(ch, sig, p):
     if not m:
         return [hit(detail="no How to verify section")], None
     rest = body[m.end():]
-    nxt = re.search(r"(?m)^\s*#{1,6}\s", rest[1:])
-    section = rest[: nxt.start() + 1] if nxt else rest
-    section = re.sub(r"^[^\n]*\n", "", section, count=1)
+    # Bold inline labels ("**Tests:** ran ...") contain evidence on the same
+    # line. Strip only the label's punctuation, then stop at the next section.
+    rest = re.sub(r"^[ \t]*:?[ \t]*(?:\*\*)?[ \t]*:?[ \t]*", "", rest, count=1)
+    nxt = re.search(r"(?m)^[ \t]*(?:#{1,6}[ \t]+|\*\*[^*\n]+\*\*)", rest)
+    section = rest[:nxt.start()] if nxt else rest
     if len(section.strip()) < p.get("min_chars", 20):
         return [hit(detail="the How to verify section is empty")], None
     return [], None
@@ -1530,11 +1532,16 @@ def render_rules(profile, repo=""):
     out = [f"# AI Slop Score rules: {profile.get('title') or profile.get('id')}", ""]
     if profile.get("description"):
         out += [profile["description"], ""]
-    out += ["## Before requesting review", "",
+    guidance = profile.get("pr_guidance") or [
         "- Keep the PR focused on one change. Explain the problem and resulting behaviour in the opening sentences.",
         "- Give concrete verification steps and expected results. Test changed behaviour, including failure cases.",
         "- Remove debug output, unfinished code and redundant comments. Explain necessary suppressions.",
-        "- Fix the review's **To fix** checklist; each rule ID links to its exact check and remedy below.", ""]
+        "- Fix the review's **To fix** checklist; each rule ID links to its exact check and remedy below."]
+    out += ["## Before requesting review", "", *guidance, ""]
+    if profile.get("pr_examples"):
+        out += ["## Reference PRs", ""]
+        out += [f"- [{example['title']}]({example['url']})" for example in profile["pr_examples"]]
+        out += ["", "Use these as examples of useful evidence and concise writing; they are not automatic waivers of code or security checks.", ""]
     if profile.get("skip", {}).get("titles") or profile.get("skip", {}).get("base_branches"):
         out += ["## When scoring is skipped", ""]
         for pattern in profile.get("skip", {}).get("titles", []):

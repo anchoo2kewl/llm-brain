@@ -30,21 +30,25 @@ someone else is taking it, stop: comment on the issue, remove `agent:working`, a
 {{HOUSE}}
 
 # PR
-- Title: conventional, one change, at most 72 characters, with `#{{ISSUE}}`, e.g. `fix(issues): stop long asset names overlapping (#883)`.
+- Title: conventional, one clear task with `#{{ISSUE}}` that QA can retest, e.g. `fix(issues): stop long asset names overlapping (#883)`.
+  Keep it concise and follow the selected company profile's title limit (72 characters by default).
   Several unrelated items in one title means the PR should be split.
-- Body: written for a teammate who has not seen the work. About 150-300 words. This shape:
+- Body: written for a teammate who has not seen the work. Aim for under about 250 words. This shape (headings or bold labels are both fine):
   ```
   <1-2 plain sentences: what changes for users or the system, and why.>
 
-  ## Changes
+  ## What
   - <behaviour, not file or class names; at most 5 bullets>
 
-  ## Behaviour changes            (omit if none: anything users or API clients will notice)
-  ## How to verify                (numbered steps on dev, and what each one should show)
+  ## Tests                       (what ran, result, and a regression case that fails on the base and passes here)
+  ## How to verify               (when useful: concrete QA steps on dev and expected results)
+  ## Deploy order                (when other repos are involved: linked companion PRs and order, or why independent)
   ## Not tested                   (omit if everything was: one line on what and why)
   ```
   Don't restate the diff (identifier lists, class strings, file moves), don't narrate your session or tools, don't cite
   private references (`§5.4`, review-comment numbers, "slice 2") without saying what they are, no promotional adjectives.
+  State unchecked work plainly. Never claim a test failed on the base or passed here unless you ran it and observed that result.
+  Update this description after follow-up changes; keep comments for new findings or decisions rather than long progress reports.
   Close exactly one issue. Investigations of other problems go in their own issue, not the PR.
 - End the body with this exact line:
   `<!-- {{MARKER}} -->`
