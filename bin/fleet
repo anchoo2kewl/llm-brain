@@ -189,13 +189,40 @@ cmd_review() {
   rm -rf "$dir/src"
 }
 
-# PRs where I'm a requested reviewer (or @-mentioned) in the review orgs, not my own.
+# Trusted Slack requests can ask for review without a GitHub reviewer request.
+chat_review_queue() {
+  local file url token key seen owner repo row owners
+  owners="$(cfg -o=json '.pr_review.owners')"
+  for file in "$BRAIN_STATE"/chat/review-requests/*.json; do
+    [[ -f "$file" ]] || continue
+    url="$(jq -r '.url // ""' "$file")"; token="$(jq -r '.token // ""' "$file")"
+    [[ "$url" =~ ^https://github.com/([^/]+)/([^/]+)/pull/([0-9]+)$ && -n "$token" ]] || continue
+    owner="${BASH_REMATCH[1]}"; repo="${BASH_REMATCH[2]}"; key="review-$repo-${BASH_REMATCH[3]}"
+    jq -e --arg owner "$owner" 'index($owner) != null' <<<"$owners" >/dev/null || continue
+    [[ "$repo" =~ $(cfg '.pr_review.repo_regex') ]] || continue
+    seen="$(cat "$BRAIN_STATE/prs/$key.chat-reviewed" 2>/dev/null || true)"
+    [[ "$token" == "$seen" ]] && continue
+    row="$(gh pr view "$url" --json url,author,isDraft,state)" || continue
+    if [[ "$(jq -r .state <<<"$row")" != OPEN ]]; then
+      mv "$file" "$file.closed"; continue
+    fi
+    if [[ "$(jq -r .author.login <<<"$row")" == "$(cfg '.intake.assignee')" ]]; then
+      mv "$file" "$file.owned"; continue
+    fi
+    jq -c --arg repo "$repo" '. + {repository:{name:$repo}} | [.]' <<<"$row"
+  done
+}
+
+# PRs where I'm requested/@-mentioned or explicitly asked in Slack, within review scope, not my own.
 review_queue() {
   local owner
+  {
   for owner in $(cfg '.pr_review.owners[]'); do
     gh search prs --owner "$owner" --state open --review-requested "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
     gh search prs --owner "$owner" --state open --mentions "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
-  done | jq -s --arg me "$(cfg '.intake.assignee')" --arg re "$(cfg '.pr_review.repo_regex')" '
+  done
+  chat_review_queue
+  } | jq -s --arg me "$(cfg '.intake.assignee')" --arg re "$(cfg '.pr_review.repo_regex')" '
     add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
 }
 
@@ -312,7 +339,7 @@ post_mode() {
 cmd_review_prs() {
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
-  local url key sha last dir pf nwo base num prior lf fails scope backfilled=0
+  local url key sha last dir pf nwo base num prior lf fails scope chat_repo chat_num chat_token chat_seen feedback_only backfilled=0
   for url in ${ONLY_PR:-$(review_queue)}; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
@@ -320,6 +347,10 @@ cmd_review_prs() {
     [[ "$(gh pr view "$url" --json author --jq .author.login)" == "$(cfg '.intake.assignee')" ]] && { log "$url is mine — not reviewing"; continue; }
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
+    chat_repo="${url#https://github.com/}"; chat_repo="${chat_repo%/pull/*}"; chat_num="${url##*/}"
+    chat_token="$(cat "$BRAIN_STATE/chat/review-requests/${chat_repo/\//__}__${chat_num}.sha256" 2>/dev/null || true)"
+    chat_seen="$(cat "$BRAIN_STATE/prs/$key.chat-reviewed" 2>/dev/null || true)"
+    feedback_only=false
     if [[ "$sha" == "$last" ]]; then                        # one review per head commit…
       lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1)"
       fails="$(cat "$BRAIN_STATE/prs/$key.fails" 2>/dev/null || echo 0)"
@@ -327,7 +358,10 @@ cmd_review_prs() {
         log "$key: resource budget stopped this review — needs a human handoff, not an automatic retry"
         continue
       fi
-      if [[ -n "$lf" ]] && ! grep -q '^REVIEWED ' "$lf" && (( fails < 3 )); then
+      if [[ -n "$chat_token" && "$chat_token" != "$chat_seen" ]]; then
+        feedback_only=true
+        log "$key: new trusted Slack request — bounded feedback pass on the same head"
+      elif [[ -n "$lf" ]] && ! grep -q '^REVIEWED ' "$lf" && (( fails < 3 )); then
         echo $((fails + 1)) >"$BRAIN_STATE/prs/$key.fails"  # …unless that review died without posting
         log "$key: last review produced no result — retry $((fails + 1))/3"
       else
@@ -351,16 +385,20 @@ cmd_review_prs() {
     slop_for "$url" "$key" "$sha" "$base" "$dir"
     prior=""; scope="origin/$base"
     lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1 || true)"
-    if [[ -n "$last" && "$last" != "$sha" && -n "$lf" ]] && grep -q '^REVIEWED ' "$lf" \
+    if [[ "$feedback_only" == true && -n "$lf" ]] && grep -q '^REVIEWED ' "$lf"; then
+      scope="$sha"
+      prior="SAME-HEAD SLACK FOLLOW-UP. There is no new code delta. Read the trusted Slack instructions, inspect only their directly relevant code/contracts and review readiness, and report new unresolved points. Do not repeat a full review or merge/deploy anything."
+    elif [[ -n "$last" && "$last" != "$sha" && -n "$lf" ]] && grep -q '^REVIEWED ' "$lf" \
        && git -C "$dir/src" merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
       scope="$last"
       prior="This is a RE-REVIEW of changes since ${last:0:8}. Review only that delta plus directly affected code and whether earlier findings were resolved. Do not repeat a full unchanged-file review."
     fi
     pf="$dir/prompt.md"
     prompt_env pr-review
-    PR_URL="$url" HOST="$HOST_NAME" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" REVIEW_BASE="$scope" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
+    NOTES="$(notes_for "$chat_repo#$chat_num")" PR_URL="$url" HOST="$HOST_NAME" BRAIN_DIR="$BRAIN_DIR" HEAD_SHA="$sha" BASE="origin/$base" REVIEW_BASE="$scope" NWO="$nwo" NUMBER="$num" PRIOR="$prior" EXISTING="$dir/existing.md" POST_MODE="$(post_mode "$dir")" SLOP="$SLOP" SLOP_VERDICT="$SLOP_VERDICT" \
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
+    printf '%s\n' "$chat_token" >"$BRAIN_STATE/prs/$key.chat-reviewed"
     LLM_MODEL="$(cfg '.pr_review.model // ""')" BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
   done
 }

@@ -122,6 +122,7 @@ notify:
 # mentions of you anywhere) at /settings/slack; bin/chat-watch reads new messages from the hub every
 # tick. Messages from `trusted` people that name an issue/PR become notes the workers act on, like
 # review comments; an LLM pass writes a short digest and can stop a fleet issue when a trusted person says so.
+# Identity comes from owner.name/github/slack_user_id; optional owner.aliases are addressing labels, not trust.
 chat:
   enabled: false
   hub_url: http://127.0.0.1:8787
