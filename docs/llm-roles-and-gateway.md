@@ -60,6 +60,15 @@ Setup is in CLIProxyAPI's own docs. llm-brain needs:
 
 Give personal accounts a higher `priority` than work ones (for example 10 and 0) and use `fill-first` routing. Work accounts are then used only while personal ones are cooling down after a 429 or quota hit, and personal takes over again after its reset.
 
+Keep `routing.session-affinity` off when a recovered personal credential should regain priority on the next
+request, including in an existing session. Read reset/cooldown times from the gateway's account data rather
+than scheduling a weekly priority flip. A cooldown ending does not require changing or rewriting credentials.
+
+Normal terminal Claude sessions using their own login are outside this gateway policy. Routing them through
+`ANTHROPIC_BASE_URL` plus gateway credentials enables the same failover, but disables Claude Remote Control
+and built-in dictation while those gateway credentials are active; see
+[Anthropic's gateway surface notes](https://code.claude.com/docs/en/llm-gateway-connect#slack-cloud-sessions-and-remote-control).
+
 Stop the gateway before you edit a credential file. A live rewrite can invalidate or resurrect a spent refresh token.
 
 ### What the hub shows

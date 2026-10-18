@@ -199,18 +199,23 @@ review_queue() {
     add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
 }
 
-# Everything already said on a PR (reviews, inline threads, comments; people and bots), so the review adds only what's new.
+# Prior feedback for deduplication; only our explicitly marked computed scores are omitted (the current score is supplied separately).
 existing_feedback() { # existing_feedback <owner/repo> <number>
-  local nwo="$1" num="$2"
+  local nwo="$1" num="$2" me
+  me="$(cfg '.owner.github')"
   echo "## Reviews"
-  gh api "repos/$nwo/pulls/$num/reviews" --paginate \
-    --jq '.[] | select((.body // "") != "") | "### \(.user.login) — \(.state) at \(.submitted_at) (commit \(.commit_id[0:8]))\n\(.body)\n"'
+  gh api "repos/$nwo/pulls/$num/reviews" --paginate | jq -r --arg me "$me" '
+    .[] | (if .user.login == $me then ((.body // "") | gsub("<!-- llm-brain:score:start -->[\\s\\S]*?<!-- llm-brain:score:end -->"; "[Previous computed score omitted; current score supplied separately.]")) else (.body // "") end) as $body
+    | select($body != "")
+    | "### \(.user.login) — \(.state) at \(.submitted_at) (commit \(.commit_id[0:8]))\n\($body)\n"'
   echo "## Inline comments"
   gh api "repos/$nwo/pulls/$num/comments" --paginate \
     --jq '.[] | "### \(.user.login) on \(.path):\(.line // .original_line) at \(.created_at)\(if .in_reply_to_id then " (reply)" else "" end)\n\(.body)\n"'
   echo "## PR comments"
-  gh api "repos/$nwo/issues/$num/comments" --paginate \
-    --jq '.[] | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
+  gh api "repos/$nwo/issues/$num/comments" --paginate | jq -r --arg me "$me" '
+    .[] | select((.user.login == $me and (.body | startswith("### AI Slop Score:"))
+                 and (.body | test("<!-- llm-brain:ai-slop-score -->\\s*$"))) | not)
+    | "### \(.user.login) at \(.created_at)\n\(.body)\n"'
 }
 
 # AI Slop Score of one PR head, scored in its clone. Sets SLOP (the review section) and SLOP_VERDICT for the prompt,
