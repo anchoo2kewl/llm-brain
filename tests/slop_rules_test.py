@@ -12,6 +12,20 @@ slop = runpy.run_path(str(ROOT / "bin/slop-score"))
 
 
 class RulesTest(unittest.TestCase):
+    def test_size_threshold_and_gradual_penalty(self):
+        profile = json.loads((ROOT / "slop-profiles/default.json").read_text())
+        params = profile["signals"]["Z01"]["params"]
+        for config in (params, {}):
+            for lines in (800, 2000, 3999, 4000):
+                change = SimpleNamespace(changed_lines=lambda: lines)
+                self.assertEqual(slop["d_pr_size"](change, {}, config), ([], None))
+            for lines, severity in ((4001, 1 / 6000), (7000, .5), (10000, 1), (20000, 1)):
+                change = SimpleNamespace(changed_lines=lambda: lines)
+                hits, actual = slop["d_pr_size"](change, {}, config)
+                self.assertTrue(hits)
+                self.assertAlmostEqual(actual, severity)
+        self.assertTrue(profile["signals"]["S05"].get("enabled", True))
+
     def setUp(self):
         self.profile = json.loads((ROOT / "slop-profiles/default.json").read_text())
         self.result = {

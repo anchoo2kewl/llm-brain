@@ -52,7 +52,7 @@ Without Jev (no key, or `--no-jev`), the judged signals are listed as not assess
 | Category | Signals |
 |---|---|
 | PR clarity | How to verify section, title length, description over budget, description that restates the code, private references (`§5.4`, `AC2`, "Vitalii's 194"), session narration, promotional words, placeholders, a missing description. Jev: can a teammate say what and why from the opening; is it a work log; is a behaviour change buried. |
-| Scope | Over 800 changed lines; a title listing several changes. Jev: should it be split. |
+| Scope | A soft size signal above 4,000 weighted changed lines, scaling to at most 8 points at 10,000; a title listing several changes. Jev: should independently shippable changes be split (S05). A focused feature or refactor need not be split just to meet a line budget. |
 | Code | Debug output, suppressions without a reason, TypeScript `any`, Rust `.unwrap()`, swallowed Go errors, shell `\|\| true`, Python bare `except`, SQL built from strings, `todo!()`-style unfinished code. |
 | Comments and docs | TODOs without a ticket, commented-out code. Jev: comments that narrate the code, docs that contradict it. |
 | Tests | No test changes for a large change, tests that assert nothing, skipped tests without a reason. Jev: an untested behaviour change. |
