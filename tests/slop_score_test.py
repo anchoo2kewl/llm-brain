@@ -198,7 +198,7 @@ class SlopScoreTest(unittest.TestCase):
 
     def test_deleted_files_count_toward_size(self):
         r = Repo()
-        r.write("src/big.py", "".join(f"x{i} = {i}\n" for i in range(2000)))
+        r.write("src/big.py", "".join(f"x{i} = {i}\n" for i in range(10000)))
         r.commit("feat: big")
         r.git("branch", "-f", "base")
         (r.dir / "src/big.py").unlink()
