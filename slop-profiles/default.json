@@ -366,17 +366,17 @@
       "remedy": "Say what each commit changes; `fix`, `update`, `wip` alone tell a reader nothing."
     },
     "Z01": {
-      "title": "Too big to review",
-      "what": "At most 800 changed lines (added lines, plus half the deleted ones), not counting generated files, lockfiles and fixtures.",
+      "title": "Large change",
+      "what": "A soft size signal above 4,000 changed lines (added lines, plus half the deleted ones), excluding generated files, lockfiles and fixtures. It scales to its full weight at 10,000 lines. Focus is assessed separately by S05.",
       "category": "scope",
       "detector": "pr_size",
       "norm": "ratio",
       "weight": 8,
       "params": {
-        "max_lines": 800,
-        "full_at": 2000
+        "max_lines": 4000,
+        "full_at": 10000
       },
-      "remedy": "Split it: land the refactor, then the behaviour change, then the follow-ups. Each PR should be reviewable in one sitting."
+      "remedy": "Keep the PR focused. For a very large change, consider independently reviewable stages; a coherent feature or refactor need not be split just to reduce its line count."
     },
     "Z02": {
       "title": "Several changes in one title",
