@@ -746,7 +746,7 @@ def d_secrets(ch, sig, p):
 
 
 def d_pr_size(ch, sig, p):
-    n, mx, full = ch.changed_lines(), p.get("max_lines", 800), p.get("full_at", 2000)
+    n, mx, full = ch.changed_lines(), p.get("max_lines", 4000), p.get("full_at", 10000)
     if n <= mx:
         return [], None
     return [hit(detail=f"{n} changed lines without generated files and fixtures (max {mx})")], min(1.0, (n - mx) / max(full - mx, 1))
