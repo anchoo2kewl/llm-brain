@@ -263,18 +263,40 @@ class SlopScoreTest(unittest.TestCase):
         self.assertEqual(res["verdict"], "skipped")
 
     def test_rust_test_entrypoints_are_not_unused_helpers(self):
-        for attribute in ["#[test]", "#[tokio::test]", '#[tokio::test(flavor = "current_thread")]',
-                          "#[async_std::test]", "#[tokio::test]\n#[cfg(unix)]"]:
-            with self.subTest(attribute=attribute):
+        cases = [
+            "#[test]\nfn handles_case() {}",
+            "#[tokio::test]\nasync fn handles_case() {}",
+            '#[tokio::test(flavor = "current_thread")]\nasync fn handles_case() {}',
+            "#[async_std::test]\nasync fn handles_case() {}",
+            "#[sqlx::test]\nasync fn handles_case() {}",
+            "#[::tokio::test]\nasync fn handles_case() {}",
+            "#[rstest]\nfn handles_case() {}",
+            "#[rstest::rstest]\n#[case(vec![1])]\nfn handles_case() {}",
+            "#[test_case::test_case(&[1, 2] => 3)]\nfn handles_case() {}",
+            "#[tokio::test]\n#[cfg(unix)]\nasync fn handles_case() {}",
+            "#[test]\n/// Documentation.\nfn handles_case() {}",
+            '#[test]\n#[should_panic(expected = "a]b")]\nfn handles_case() {}',
+            "#[test] fn handles_case() {}",
+            "mod cases {\n    #[tokio::test]\n    async fn handles_case() {}\n}",
+        ]
+        for source in cases:
+            with self.subTest(source=source):
                 r = Repo()
-                async_kw = "" if attribute == "#[test]" else "async "
-                r.write("src/lib.rs", f"{attribute}\n{async_kw}fn handles_case() {{}}\n\nfn unused_helper() {{}}\n")
+                r.write("src/lib.rs", source + "\n\nfn unused_helper() {}\n")
                 r.commit("test(scan): cover async target validation")
                 res = r.score()
                 evidence = [e["detail"] for signal in res["signals"] if signal["id"] == "S02"
                             for e in signal["evidence"]]
                 self.assertEqual(len(evidence), 1, evidence)
                 self.assertIn("unused_helper", evidence[0])
+
+    def test_commented_rust_test_attribute_does_not_hide_unused_helper(self):
+        for comment in ["// #[tokio::test]", "/* #[test] */"]:
+            with self.subTest(comment=comment):
+                r = Repo()
+                r.write("src/lib.rs", comment + "\nfn unused_helper() {}\n")
+                r.commit("test(scan): preserve unused helper detection")
+                self.assertIn("S02", ids(r.score()))
 
     def test_rules_markdown(self):
         out = subprocess.run([str(SLOP), "rules", "--profile", "default"], env=ENV, capture_output=True, text=True, check=True).stdout
