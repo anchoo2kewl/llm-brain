@@ -998,6 +998,9 @@ def d_unused_private(ch, sig, p):
             name = next(g for g in m.groups()[::-1] if g and g.strip())
             if f.lang == "rust":
                 name = m.group(2)
+                attributes = "\n".join(lines[: l.no - 1])
+                if re.search(r"#\[(?:test|tokio::test|async_std::test)(?:\([^]]*\))?\]\s*(?:#\[[^]]*\]\s*)*$", attributes):
+                    continue                              # invoked by the test harness
                 indent = len(m.group(1))
                 if indent:
                     impl = next((t for t in reversed(lines[: l.no - 1]) if re.match(r"^\s*impl\b", t) and len(t) - len(t.lstrip()) < indent), "")

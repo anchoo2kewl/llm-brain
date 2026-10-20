@@ -262,6 +262,20 @@ class SlopScoreTest(unittest.TestCase):
         res = r.score(title="Release-candidate 16.10.2026", body="")
         self.assertEqual(res["verdict"], "skipped")
 
+    def test_rust_test_entrypoints_are_not_unused_helpers(self):
+        for attribute in ["#[test]", "#[tokio::test]", '#[tokio::test(flavor = "current_thread")]',
+                          "#[async_std::test]", "#[tokio::test]\n#[cfg(unix)]"]:
+            with self.subTest(attribute=attribute):
+                r = Repo()
+                async_kw = "" if attribute == "#[test]" else "async "
+                r.write("src/lib.rs", f"{attribute}\n{async_kw}fn handles_case() {{}}\n\nfn unused_helper() {{}}\n")
+                r.commit("test(scan): cover async target validation")
+                res = r.score()
+                evidence = [e["detail"] for signal in res["signals"] if signal["id"] == "S02"
+                            for e in signal["evidence"]]
+                self.assertEqual(len(evidence), 1, evidence)
+                self.assertIn("unused_helper", evidence[0])
+
     def test_rules_markdown(self):
         out = subprocess.run([str(SLOP), "rules", "--profile", "default"], env=ENV, capture_output=True, text=True, check=True).stdout
         self.assertIn('| <a name="rule-p12"></a>P12 | Long description |', out)
