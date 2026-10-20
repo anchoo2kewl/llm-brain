@@ -262,6 +262,42 @@ class SlopScoreTest(unittest.TestCase):
         res = r.score(title="Release-candidate 16.10.2026", body="")
         self.assertEqual(res["verdict"], "skipped")
 
+    def test_rust_test_entrypoints_are_not_unused_helpers(self):
+        cases = [
+            "#[test]\nfn handles_case() {}",
+            "#[tokio::test]\nasync fn handles_case() {}",
+            '#[tokio::test(flavor = "current_thread")]\nasync fn handles_case() {}',
+            "#[async_std::test]\nasync fn handles_case() {}",
+            "#[sqlx::test]\nasync fn handles_case() {}",
+            "#[::tokio::test]\nasync fn handles_case() {}",
+            "#[rstest]\nfn handles_case() {}",
+            "#[rstest::rstest]\n#[case(vec![1])]\nfn handles_case() {}",
+            "#[test_case::test_case(&[1, 2] => 3)]\nfn handles_case() {}",
+            "#[tokio::test]\n#[cfg(unix)]\nasync fn handles_case() {}",
+            "#[test]\n/// Documentation.\nfn handles_case() {}",
+            '#[test]\n#[should_panic(expected = "a]b")]\nfn handles_case() {}',
+            "#[test] fn handles_case() {}",
+            "mod cases {\n    #[tokio::test]\n    async fn handles_case() {}\n}",
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                r = Repo()
+                r.write("src/lib.rs", source + "\n\nfn unused_helper() {}\n")
+                r.commit("test(scan): cover async target validation")
+                res = r.score()
+                evidence = [e["detail"] for signal in res["signals"] if signal["id"] == "S02"
+                            for e in signal["evidence"]]
+                self.assertEqual(len(evidence), 1, evidence)
+                self.assertIn("unused_helper", evidence[0])
+
+    def test_commented_rust_test_attribute_does_not_hide_unused_helper(self):
+        for comment in ["// #[tokio::test]", "/* #[test] */"]:
+            with self.subTest(comment=comment):
+                r = Repo()
+                r.write("src/lib.rs", comment + "\nfn unused_helper() {}\n")
+                r.commit("test(scan): preserve unused helper detection")
+                self.assertIn("S02", ids(r.score()))
+
     def test_rules_markdown(self):
         out = subprocess.run([str(SLOP), "rules", "--profile", "default"], env=ENV, capture_output=True, text=True, check=True).stdout
         self.assertIn('| <a name="rule-p12"></a>P12 | Long description |', out)
