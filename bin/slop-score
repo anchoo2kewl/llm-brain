@@ -982,6 +982,24 @@ SKIP_NAMES = {"main", "init", "new", "default", "fmt", "from", "drop", "deref", 
               "deserialize", "setup", "teardown", "render", "handler", "test"}
 
 
+def rust_test_entrypoint(lines, no):
+    attributes = strip_strings("\n".join(lines[: no - 1]), "rust")
+    attributes = re.sub(r"//[^\n]*|/\*.*?\*/", "", attributes, flags=re.S)
+    end = len(attributes.rstrip())
+    while end and attributes[end - 1] == "]":
+        depth, start = 1, end - 1
+        while start and depth:
+            start -= 1
+            depth += (attributes[start] == "]") - (attributes[start] == "[")
+        if depth or not start or attributes[start - 1] != "#":
+            break
+        name = attributes[start + 1:end - 1].lstrip()
+        if re.match(r"(?:::)?(?:\w+::)*(?:test|rstest|test_case|wasm_bindgen_test)(?:\s|\(|$)", name):
+            return True
+        end = len(attributes[:start - 1].rstrip())
+    return False
+
+
 def d_unused_private(ch, sig, p):
     hits, checked = [], 0
     for f in ch.files_for(sig):
@@ -998,6 +1016,8 @@ def d_unused_private(ch, sig, p):
             name = next(g for g in m.groups()[::-1] if g and g.strip())
             if f.lang == "rust":
                 name = m.group(2)
+                if rust_test_entrypoint(lines, l.no):
+                    continue                              # invoked by the test harness
                 indent = len(m.group(1))
                 if indent:
                     impl = next((t for t in reversed(lines[: l.no - 1]) if re.match(r"^\s*impl\b", t) and len(t) - len(t.lstrip()) < indent), "")
