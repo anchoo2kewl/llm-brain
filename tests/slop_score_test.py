@@ -178,6 +178,30 @@ class SlopScoreTest(unittest.TestCase):
         r.commit("feat(sdk): add types")
         self.assertIn("K03", ids(r.score()))
 
+    def test_rename_into_generated_directory_is_still_scored(self):
+        r = Repo()
+        r.write(".gitattributes", "sdk/** linguist-generated\n")
+        original = "".join(f"export const value{i} = {i};\n" for i in range(30))
+        r.write("src/handwritten.ts", original)
+        r.commit("chore: seed handwritten source")
+        r.git("branch", "-f", "base")
+        (r.dir / "sdk").mkdir()
+        r.git("mv", "src/handwritten.ts", "sdk/moved.ts")
+        r.write("sdk/moved.ts", original + "export function fromJSON(value: any): any { return value; }\n")
+        r.commit("refactor(sdk): move source")
+        self.assertIn("R", r.git("diff", "--name-status", "--find-renames", "base", "HEAD"))
+        self.assertIn("K03", ids(r.score()))
+
+    def test_removing_generated_attribute_restores_code_scoring(self):
+        r = Repo()
+        r.write(".gitattributes", "sdk/** linguist-generated=true\n")
+        r.commit("chore: identify generated SDK")
+        r.git("branch", "-f", "base")
+        r.write(".gitattributes", "sdk/** -linguist-generated\n")
+        r.write("sdk/types.ts", "export function fromJSON(value: any): any { return value; }\n")
+        r.commit("feat(sdk): replace generated types")
+        self.assertIn("K03", ids(r.score()))
+
     def test_generated_attributes_never_skip_secret_scan(self):
         r = Repo()
         r.write(".gitattributes", "sdk/** linguist-generated=true\n")

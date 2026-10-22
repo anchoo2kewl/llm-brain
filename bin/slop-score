@@ -389,7 +389,7 @@ class Change:
         # A new attribute in this change must not exempt newly written code.
         generated = generated_attributes(self.merge_base, names) & generated_attributes("HEAD", names)
         for f in self.all_files:
-            if f.path in generated:
+            if f.path in generated and f.status != "R":
                 f.classes.add("G")
             if any_glob(f.path, ex.get("generated")) or any_glob(f.path, ex.get("vendor")) or any_glob(f.path, ex.get("lockfiles")):
                 f.classes.add("G")
