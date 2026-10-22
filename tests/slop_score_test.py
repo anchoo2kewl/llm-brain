@@ -160,6 +160,36 @@ class SlopScoreTest(unittest.TestCase):
         self.assertEqual(res["verdict"], "block")
         self.assertNotIn("ghp_", json.dumps(res), "the secret itself must never be echoed")
 
+    def test_existing_generated_attributes_exclude_sdk_code(self):
+        r = Repo()
+        r.write(".gitattributes", "sdk/** linguist-generated\n")
+        r.commit("chore: identify generated SDK")
+        r.git("branch", "-f", "base")
+        r.write("sdk/wrappers.ts", "export function fromJSON(value: any): any { return value; }\n")
+        r.commit("feat(sdk): regenerate types")
+        res = r.score()
+        self.assertNotIn("K03", ids(res))
+        self.assertIn("sdk/wrappers.ts", {f["path"] for f in res["assessed"]["excluded"]})
+
+    def test_new_generated_attributes_do_not_hide_new_code(self):
+        r = Repo()
+        r.write(".gitattributes", "sdk/** linguist-generated\n")
+        r.write("sdk/wrappers.ts", "export function fromJSON(value: any): any { return value; }\n")
+        r.commit("feat(sdk): add types")
+        self.assertIn("K03", ids(r.score()))
+
+    def test_generated_attributes_never_skip_secret_scan(self):
+        r = Repo()
+        r.write(".gitattributes", "sdk/** linguist-generated=true\n")
+        r.commit("chore: identify generated SDK")
+        r.git("branch", "-f", "base")
+        token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+        r.write("sdk/config.ts", f'export const token = "{token}";\n')
+        r.commit("feat(sdk): generate config")
+        res = r.score()
+        self.assertIn("C02", res["vetoes"])
+        self.assertNotIn(token, json.dumps(res))
+
     def test_pr_description_slop(self):
         r = Repo()
         r.write("src/a.py", "".join(f"def f{i}(x):\n    return x + {i}\n\n" for i in range(40)))
