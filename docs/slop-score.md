@@ -45,6 +45,11 @@ A re-review adds what changed: `Was 46 at 1a2b3c4d. Fixed: P03, P12.`
 
 Generated files, vendored code, lockfiles and fixtures are skipped by the code, comment and test signals, and don't count toward size; the secret check still scans them, so a key in a fixture is caught. Test files are skipped by most code signals, but suppressions without a reason, TODOs and commented-out code count there too. Deleted files count toward size at half weight.
 
+Protobuf clients in a Rust package are also recognized by their compiler signature
+and paired `src/protobuf` input, with language-specific output paths. Older
+`ts-proto` output needs a matching proto package and codec signature. Missing or
+ambiguous inputs remain scored. The secret scan still checks generated files.
+
 Without Jev (no key, or `--no-jev`), the judged signals are listed as not assessed and the score uses the rest. Nothing is guessed.
 
 ## The default rules
