@@ -211,6 +211,48 @@ class SlopScoreTest(unittest.TestCase):
         })
         self.assertIn("K03", ids(result), "handwritten TypeScript still receives code checks")
 
+    def test_service_only_ts_proto_and_handwritten_controls(self):
+        r = Repo()
+        r.write("sample/Cargo.toml", '[package]\nname = "sample"\nversion = "0.1.0"')
+        source = 'syntax = "proto3"; package example; service Greeter { rpc Hello(Request) returns (Response); }'
+        generated = '\n'.join([
+            '/* eslint-disable */',
+            'import { grpc } from "@improbable-eng/grpc-web";',
+            'import { BrowserHeaders } from "browser-headers";',
+            'export const protobufPackage = "example";',
+            'export interface Greeter {',
+            'export class GreeterClientImpl implements Greeter {',
+            'export const GreeterDesc = { serviceName: "example.Greeter" };',
+            'export class GrpcWebImpl {',
+            '      grpc.unary(methodDesc, {',
+        ])
+        for name, proto, output in [
+            ("service", source, generated),
+            ("manual", source, generated.replace('      grpc.unary(methodDesc, {', 'callServer();')),
+            ("wrong", source, generated.replace('example.Greeter', 'other.Greeter')),
+            ("message", 'syntax = "proto3"; package example; message Greeter {}', generated),
+            ("mixed", source + ' message Request {}', generated),
+            ("headers", source, generated.replace('import { BrowserHeaders }', '// import { BrowserHeaders }')),
+            ("class", source, generated.replace('export class GrpcWebImpl', '// export class GrpcWebImpl')),
+            ("interface", source, generated.replace('export interface Greeter', '// export interface Greeter')),
+            ("multi", source + ' service Second {}', generated),
+            ("banner", source, generated.replace('/* eslint-disable */', '')),
+            ("empty", source.replace('package example;', ''), generated.replace('"example"', '""').replace('example.Greeter', 'Greeter')),
+        ]:
+            r.write(f"sample/src/protobuf/{name}.proto", proto)
+            r.write(f"sample/ts/{name}.ts", output)
+        r.commit("fix(codec): recognize generated service clients")
+        result = r.score()
+        self.assertEqual({f["path"] for f in result["assessed"]["excluded"]}, {"sample/ts/service.ts", "sample/ts/empty.ts"})
+        self.assertIn("K02", ids(result), "handwritten controls remain assessed")
+        r.write("sample/ts/service.ts", generated + '\n// TOKEN=ghp_' +
+                "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8\n")
+        r.commit("test(codec): keep service output security checks")
+        result = r.score()
+        self.assertIn("sample/ts/service.ts", {f["path"] for f in result["assessed"]["excluded"]})
+        self.assertIn("C02", result["vetoes"])
+        self.assertNotIn("ghp_", json.dumps(result))
+
     def test_generated_protobuf_still_has_secret_veto(self):
         r = Repo()
         r.write("sample/Cargo.toml", '[package]\nname = "sample"\nversion = "0.1.0"')
