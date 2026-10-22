@@ -350,6 +350,18 @@ def head_text(path):
     return show.stdout if show.returncode == 0 else ""
 
 
+def generated_attributes(ref, paths):
+    """Read committed metadata; unsupported Git versions conservatively score every file."""
+    if not paths:
+        return set()
+    result = sh(["git", "-c", "core.attributesFile=/dev/null", "check-attr", "--source=" + ref,
+                 "-z", "--stdin", "linguist-generated"], input="\0".join(paths) + "\0")
+    if result.returncode:
+        return set()
+    fields = result.stdout.split("\0")
+    return {fields[i] for i in range(0, len(fields) - 2, 3) if fields[i + 2] in ("set", "true")}
+
+
 class Change:
     def __init__(self, a, profile):
         self.repo = a.repo
@@ -374,7 +386,11 @@ class Change:
             names.append(ns[i - 1])
         ex = profile.get("exemptions", {})
         self.all_files = parse_diff(diff, names)          # deleted and binary files count toward size, nothing else
+        # A new attribute in this change must not exempt newly written code.
+        generated = generated_attributes(self.merge_base, names) & generated_attributes("HEAD", names)
         for f in self.all_files:
+            if f.path in generated and f.status != "R":
+                f.classes.add("G")
             if any_glob(f.path, ex.get("generated")) or any_glob(f.path, ex.get("vendor")) or any_glob(f.path, ex.get("lockfiles")):
                 f.classes.add("G")
             if any_glob(f.path, ex.get("fixtures")):
