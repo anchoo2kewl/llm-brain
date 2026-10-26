@@ -1,4 +1,5 @@
 """Review accounting and alerts use fake GitHub/Telegram, never a model call."""
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
@@ -101,6 +102,59 @@ class Monitor(unittest.TestCase):
             data['alerts']['scheduler_stale'] = True
         self.watch(2001, dict(CONFIG, paused=True))
         self.assertEqual(self.sent, [])
+
+    def test_owner_change_clears_all_completion_evidence(self):
+        with m.ledger(self.root) as data:
+            receipt = {'head': 'head-a', 'review_id': 42}
+            data['receipts'] = {URL + '@head-a': receipt, URL + '@old-head': receipt}
+            data['items'][URL].update(receipt=receipt, candidate={'head': 'head-a', 'started': 999}, pid=123)
+        config = dict(CONFIG, owner={'github': 'new-owner'})
+        m.event(self.root, 'begin', [], config, now=1001)
+        with patch.object(m, 'verify', return_value=42) as verify:
+            counts = self.watch(1002, config)
+            verify.assert_not_called()
+        self.assertEqual(counts['completed_unique_heads'], 0)
+        self.assertEqual(counts['reviewed'], 0)
+        self.assertNotIn('candidate', self.data()['items'][URL])
+        self.assertNotIn('pid', self.data()['items'][URL])
+
+    def test_stop_clears_active_and_failed_delivery_then_rearm_notifies(self):
+        stopped = [dict(CONFIG, paused=True), dict(CONFIG, pr_review={'enabled': False}),
+                   dict(CONFIG, pr_review={'enabled': True, 'monitoring': {'expected': False}})]
+        for config in stopped:
+            with self.subTest(config=config):
+                m.event(self.root, 'discovery-failed', [], now=1000)
+                with m.ledger(self.root) as data:
+                    data['alerts'] = {'discovery_failed': True}
+                    data['alert_delivery'] = {'discovery_failed': {'error': 'offline', 'next_retry': 9999}}
+                self.sent.clear()
+                counts = self.watch(1001, config)
+                self.assertEqual(self.sent, [])
+                self.assertEqual(self.data()['alerts'], {})
+                self.assertEqual(self.data()['alert_delivery'], {})
+                self.assertEqual(counts['notification_failed'], 0)
+                self.assertEqual(counts['alerts'], [])
+                self.watch(1002)
+                self.assertEqual(self.sent, [('discovery_failed', True)])
+
+    def test_long_capacity_wait_uses_scheduler_health_not_wait_age(self):
+        m.event(self.root, 'wait', ['capacity'], now=1000)
+        for now in (2000, 4000):
+            m.event(self.root, 'begin', [], CONFIG, now=now)
+            self.assertEqual(self.watch(now + 1)['queued'], 1)
+            self.assertEqual(self.sent, [])
+        self.assertEqual(self.watch(4101)['queued'], 1)
+        self.assertIn(('scheduler_stale', True), self.sent)
+        self.assertNotIn(('eligible_missing', True), self.sent)
+
+    def test_watch_lock_contention_is_quiet_success_without_reading_input(self):
+        before = (self.root/'review-health.json').read_bytes()
+        with (self.root/'review-watch.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run([str(ROOT/'bin/review-monitor'), 'watch'], input='invalid json',
+                env=dict(os.environ, BRAIN_STATE=str(self.root)), capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
+        self.assertEqual((self.root/'review-health.json').read_bytes(), before)
 
     def test_stuck_lost_worker_and_no_progress_recovery(self):
         log = self.root/'worker.log'
@@ -218,7 +272,8 @@ class Monitor(unittest.TestCase):
         self.assertEqual(self.watch()['completed'], 0)
         (self.root/'logs/review-widget-1.1.log').write_text(f'REVIEWED {URL} APPROVE red=0\n')
         with patch.object(m, 'verify', return_value=42):
-            self.assertEqual(self.watch()['completed'], 1)
+            self.assertEqual(self.watch()['completed'], 0)
+            self.assertEqual(self.watch()['completed_unique_heads'], 0)
 
     def test_github_verification_matches_owner_head_submission_and_time(self):
         row = {'id': 42, 'user': {'login': 'OWNER'}, 'commit_id': 'head-a', 'state': 'APPROVED',

@@ -79,8 +79,11 @@ def event(root, kind, args, payload=None, now=None):
         if kind == 'begin':
             configured_owner = owner(payload)
             if data.get('owner', configured_owner) != configured_owner:
+                data['receipts'] = {}
                 for item in data['items'].values():
                     item.pop('receipt', None)
+                    item.pop('candidate', None)
+                    item.pop('pid', None)
                     item.update(status='queued', reason='owner_changed', since=now, head_verified=False)
             data.update(owner=configured_owner, heartbeat=now, paused=bool(payload.get('paused')),
                         enabled=payload.get('pr_review', {}).get('enabled', False),
@@ -227,7 +230,8 @@ def watch(root, config, now=None, send=deliver):
     paused = bool(config.get('paused')) or (Path(os.environ.get('BRAIN_LOCAL', str(Path.home()/'.config/llm-brain')))/'PAUSE').exists()
     enabled = config.get('pr_review', {}).get('enabled', False)
     heartbeat_age = now - snapshot.get('heartbeat', 0)
-    if expected and not paused and enabled:
+    armed = expected and not paused and enabled
+    if armed:
         if not scheduler_present():
             conditions.add('scheduler_absent')
         if me is None:
@@ -252,15 +256,6 @@ def watch(root, config, now=None, send=deliver):
                 if item.get('head') != live['headRefOid']:
                     item.update(head=live['headRefOid'], status='queued', reason='awaiting_dispatch', since=now)
                 candidate = item.get('candidate', {})
-                if candidate.get('head') != item['head']:
-                    repo, number = url.split('/pull/')
-                    key = 'review-' + repo.rsplit('/', 1)[-1] + '-' + number
-                    marker = root/'prs'/f'{key}.reviewed'
-                    logs = sorted((root/'logs').glob(f'{key}.*.log'), key=lambda p: p.stat().st_mtime, reverse=True)
-                    if marker.is_file() and marker.read_text().strip() == item['head'] and logs:
-                        text = logs[0].read_text(errors='replace')
-                        if re.search(r'^REVIEWED ' + re.escape(url) + r' (APPROVE|COMMENT) ', text, re.M):
-                            candidate = {'head': item['head'], 'started': marker.stat().st_mtime}
                 if candidate.get('head') == item['head'] and item.get('receipt', {}).get('head') != item['head']:
                     receipt = verify(url, item['head'], me, candidate['started'])
                     if receipt:
@@ -291,7 +286,9 @@ def watch(root, config, now=None, send=deliver):
                     else:
                         item.update(status='running', reason='worker')
             if item['status'] in ('queued', 'missing'):
-                capacity_wait = item.get('reason') == 'capacity' and now - item.get('wait_at', 0) < monitor.get('heartbeat_seconds', 900)
+                # Capacity is an explicit expected wait, not evidence of lost work.
+                # Missing/stale scheduler health is reported separately above.
+                capacity_wait = item.get('reason') == 'capacity'
                 if not capacity_wait and now - item.get('since', now) > monitor.get('missing_seconds', 900):
                     item.update(status='missing', reason='not_processing')
                     conditions.add('eligible_missing')
@@ -321,6 +318,10 @@ def watch(root, config, now=None, send=deliver):
         for url, item in data['items'].items():
             if item.get('receipt'):
                 data.setdefault('receipts', {})[url + '@' + item['receipt']['head']] = item['receipt']
+        if not armed:
+            conditions.clear()
+            data['alerts'] = {}
+            data['alert_delivery'] = {}
         data.update(conditions=sorted(conditions), expected=expected, watch_at=now)
         data['summary'] = summary(data, now)
         for condition, delivery in data.get('alert_delivery', {}).items():
@@ -385,7 +386,10 @@ def main():
     elif args.command == 'watch':
         root.mkdir(parents=True, exist_ok=True)
         with (root/'review-watch.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return 0
             print(json.dumps(watch(root, json.load(sys.stdin))))
     else:
         payload = json.load(sys.stdin) if args.command in ('begin', 'inventory') else None
