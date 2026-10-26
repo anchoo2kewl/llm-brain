@@ -15,12 +15,25 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
+# Validate identity even for direct review-pr invocations that bypass discovery.
+review_owner() {
+  cfg -o=json '.owner.github' | jq -er '
+    select(type == "string") | select(test("^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"))
+    | select(contains("--") | not) | ascii_downcase'
+}
+
+review_metric() {
+  "$BRAIN_DIR/bin/review-monitor" "$@"
+}
+
 spawn() { # spawn <key> <provider> <mode> <timeout> <prompt-file>
   local key="$1" provider="$2" mode="$3" timeout="$4" prompt_file="$5"
   local logf="$BRAIN_STATE/logs/$key.$(date +%Y%m%d-%H%M%S).log"
-  nohup gtimeout --kill-after=5m "$timeout" \
-    "$BRAIN_DIR/bin/llm-run" "$provider" "$mode" "${SPAWN_CWD:-$WORK_ROOT}" "$prompt_file" "fleet-$key" \
-    >"$logf" 2>&1 </dev/null &
+  local command=("$BRAIN_DIR/bin/llm-run" "$provider" "$mode" "${SPAWN_CWD:-$WORK_ROOT}" "$prompt_file" "fleet-$key")
+  if [[ "$key" == review-* ]]; then
+    command=("$BRAIN_DIR/bin/review-monitor" run "$BRAIN_REVIEW_URL" "$BRAIN_REVIEW_SHA" "$BRAIN_REVIEW_OWNER" "$logf" -- "${command[@]}")
+  fi
+  nohup gtimeout --kill-after=5m "$timeout" "${command[@]}" >"$logf" 2>&1 </dev/null &
   echo $! >"$BRAIN_STATE/runs/$key.pid"
   log "started $key ($provider/$mode, pid $!, log $logf)"
 }
@@ -191,7 +204,8 @@ cmd_review() {
 
 # Trusted Slack requests can ask for review without a GitHub reviewer request.
 chat_review_queue() {
-  local file url token key seen owner repo row owners
+  local file url token key seen owner repo row owners me
+  me="$(review_owner)" || return 1
   owners="$(cfg -o=json '.pr_review.owners')"
   for file in "$BRAIN_STATE"/chat/review-requests/*.json; do
     [[ -f "$file" ]] || continue
@@ -206,7 +220,7 @@ chat_review_queue() {
     if [[ "$(jq -r .state <<<"$row")" != OPEN ]]; then
       mv "$file" "$file.closed"; continue
     fi
-    if [[ "$(jq -r .author.login <<<"$row")" == "$(cfg '.owner.github')" ]]; then
+    if [[ "$(jq -r '.author.login // "" | ascii_downcase' <<<"$row")" == "$me" ]]; then
       mv "$file" "$file.owned"; continue
     fi
     jq -c --arg repo "$repo" '. + {repository:{name:$repo}} | [.]' <<<"$row"
@@ -215,14 +229,18 @@ chat_review_queue() {
 
 # Assignment, direct/team requests, mentions and trusted chat; no age cutoff.
 review_queue() {
-  local candidates
+  local candidates combined eligible me
+  me="$(review_owner)" || return 1
   # Capture first: failed discovery must not dispatch a partial queue.
-  candidates="$(cfg -o=json '.' | "$BRAIN_DIR/bin/review-discovery")" || return 1
-  {
-    printf '%s\n' "$candidates"
-    chat_review_queue
-  } | jq -s --arg me "$(cfg '.owner.github')" --arg re "$(cfg '.pr_review.repo_regex')" '
-    add | unique_by(.url) | map(select(.isDraft | not) | select((.author.login // "") | ascii_downcase != ($me | ascii_downcase)) | select(.repository.name | test($re))) | .[].url' -r
+  if ! candidates="$(cfg -o=json '.' | "$BRAIN_DIR/bin/review-discovery")"; then
+    review_metric discovery-failed
+    return 1
+  fi
+  combined="$( { printf '%s\n' "$candidates"; chat_review_queue; } | jq -sc 'add | unique_by(.url)')" || { review_metric discovery-failed; return 1; }
+  eligible="$(jq --arg me "$me" --arg re "$(cfg '.pr_review.repo_regex')" '
+    map(select(.isDraft | not) | select((.author.login // "") | ascii_downcase != $me) | select(.repository.name | test($re)))' <<<"$combined")" || { review_metric discovery-failed; return 1; }
+  printf '%s\n' "$eligible" | review_metric inventory "$(jq length <<<"$combined")" || { review_metric discovery-failed; return 1; }
+  jq -r '.[].url' <<<"$eligible"
 }
 
 # Prior feedback for deduplication; only our explicitly marked computed scores are omitted (the current score is supplied separately).
@@ -336,6 +354,11 @@ post_mode() {
 }
 
 cmd_review_prs() {
+  local me monitoring_config
+  me="$(review_owner)" || { review_metric discovery-failed; log "invalid review owner"; return 1; }
+  monitoring_config="$(cfg -o=json '.')"
+  if paused; then monitoring_config="$(jq '.paused = true' <<<"$monitoring_config")"; fi
+  printf '%s\n' "$monitoring_config" | review_metric begin || return 1
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
   local url key sha last dir pf nwo base num prior lf fails scope chat_repo chat_num chat_token chat_seen feedback_only backfilled=0 queue
@@ -343,10 +366,11 @@ cmd_review_prs() {
   if [[ -z "$queue" ]]; then queue="$(review_queue)" || return 1; fi
   for url in $queue; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
-    worker_running "$key" && continue
     # never review my own PRs (the queue filters them too; this covers `review-pr <url>`)
-    [[ "$(gh pr view "$url" --json author --jq .author.login)" == "$(cfg '.owner.github')" ]] && { log "$url is mine — not reviewing"; continue; }
+    [[ "$(gh pr view "$url" --json author --jq .author.login | tr '[:upper:]' '[:lower:]')" == "$me" ]] && { log "$url is mine — not reviewing"; continue; }
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
+    review_metric head "$url" "$sha" || return 1
+    worker_running "$key" && continue
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
     chat_repo="${url#https://github.com/}"; chat_repo="${chat_repo%/pull/*}"; chat_num="${url##*/}"
     chat_token="$(cat "$BRAIN_STATE/chat/review-requests/${chat_repo/\//__}__${chat_num}.sha256" 2>/dev/null || true)"
@@ -356,6 +380,7 @@ cmd_review_prs() {
       lf="$(ls -t "$BRAIN_STATE/logs/$key".*.log 2>/dev/null | head -1)"
       fails="$(cat "$BRAIN_STATE/prs/$key.fails" 2>/dev/null || echo 0)"
       if [[ -n "$lf" ]] && grep -q '^BUDGET_STOPPED ' "$lf"; then
+        review_metric budget "$url"
         log "$key: resource budget stopped this review — needs a human handoff, not an automatic retry"
         continue
       fi
@@ -375,13 +400,13 @@ cmd_review_prs() {
     else
       rm -f "$BRAIN_STATE/prs/$key.fails"
     fi
-    (( $(review_capacity_left) > 0 )) || { log "review pool full"; return; }
+    (( $(review_capacity_left) > 0 )) || { review_metric wait capacity; log "review pool full"; return; }
     dir="$BRAIN_STATE/reviews/$key"; rm -rf "$dir"; mkdir -p "$dir"
     gh pr view "$url" --json headRepository,headRepositoryOwner,headRefName,baseRefName,number >"$dir/pr.json"
     nwo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' "$dir/pr.json")"
     base="$(jq -r .baseRefName "$dir/pr.json")"; num="$(jq -r .number "$dir/pr.json")"
     git clone -q --filter=blob:none --branch "$(jq -r .headRefName "$dir/pr.json")" "git@github.com:$nwo.git" "$dir/src" \
-      && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { log "clone failed for $url"; continue; }
+      && git -C "$dir/src" fetch -q origin "$base:refs/remotes/origin/$base" || { review_metric failure "$url" clone_failed; log "clone failed for $url"; continue; }
     existing_feedback "$nwo" "$num" >"$dir/existing.md"
     slop_for "$url" "$key" "$sha" "$base" "$dir"
     prior=""; scope="origin/$base"
@@ -400,6 +425,7 @@ cmd_review_prs() {
       render "$BRAIN_DIR/prompts/pr-review.md" >"$pf"
     echo "$sha" >"$BRAIN_STATE/prs/$key.reviewed"
     printf '%s\n' "$chat_token" >"$BRAIN_STATE/prs/$key.chat-reviewed"
+    BRAIN_REVIEW_URL="$url" BRAIN_REVIEW_SHA="$sha" BRAIN_REVIEW_OWNER="$me" \
     LLM_MODEL="$(cfg '.pr_review.model // ""')" BRAIN_REPO="$nwo" BRAIN_PR="$num" SPAWN_CWD="$dir/src" spawn "$key" "$(cfg '.pr_review.provider')" write "$(cfg '.limits.review_timeout')" "$pf"
   done
 }
@@ -492,6 +518,7 @@ case "${1:-}" in
     log "tick"; "$BRAIN_DIR/bin/chat-watch" 2>>"$BRAIN_STATE/logs/fleet.log" || true; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
   snapshot) cmd_snapshot ;;
   review-prs) cmd_review_prs ;;
+  review-status) review_metric status ;;
   review-pr) shift; ONLY_PR="$1" cmd_review_prs ;;
   dispatch) cmd_dispatch ;;
   babysit) cmd_babysit ;;

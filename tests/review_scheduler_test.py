@@ -27,7 +27,11 @@ class ReviewScheduler(unittest.TestCase):
             root = Path(tmp)
             (root/'bin').mkdir()
             (root/'bin/fleet').write_bytes((ROOT/'bin/fleet').read_bytes())
+            (root/'bin/review-monitor').write_bytes((ROOT/'bin/review-monitor').read_bytes())
+            (root/'bin/review-monitor').chmod(0o755)
             (root/'bin/lib.sh').write_text('''
+BRAIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cfg() { if [[ "$*" == '-o=json .owner.github' ]]; then echo '"owner"'; else echo '{"owner":{"github":"owner"}}'; fi; }
 paused() { return 0; }
 log() { echo "$*"; }
 gh() { echo unexpected-github >&2; return 99; }
@@ -45,6 +49,13 @@ gh() { echo unexpected-github >&2; return 99; }
         dispatch = slack_review_dispatch_test.SlackReviewDispatch()
         self.assertEqual(dispatch.run_case('seen'), '')
         self.assertEqual(dispatch.run_case('budget'), '')
+
+    def test_watchdog_is_independent_and_opt_in(self):
+        config = plistlib.loads((ROOT/'launchd/com.llm-brain.review-watch.plist').read_bytes())
+        self.assertEqual(config['ProgramArguments'], ['__BRAIN__/bin/review-watch'])
+        self.assertEqual(config['Label'], 'com.llm-brain.review-watch')
+        self.assertNotIn('com.llm-brain.review-watch', (ROOT/'bootstrap.sh').read_text())
+        self.assertNotIn('fleet', (ROOT/'bin/review-watch').read_text().split('source ', 1)[1])
 
     def test_bootstrap_does_not_automatically_load_review_scheduler(self):
         self.assertNotIn('com.llm-brain.reviews', (ROOT/'bootstrap.sh').read_text())
