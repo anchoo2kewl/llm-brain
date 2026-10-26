@@ -206,24 +206,23 @@ chat_review_queue() {
     if [[ "$(jq -r .state <<<"$row")" != OPEN ]]; then
       mv "$file" "$file.closed"; continue
     fi
-    if [[ "$(jq -r .author.login <<<"$row")" == "$(cfg '.intake.assignee')" ]]; then
+    if [[ "$(jq -r .author.login <<<"$row")" == "$(cfg '.owner.github')" ]]; then
       mv "$file" "$file.owned"; continue
     fi
     jq -c --arg repo "$repo" '. + {repository:{name:$repo}} | [.]' <<<"$row"
   done
 }
 
-# PRs where I'm requested/@-mentioned or explicitly asked in Slack, within review scope, not my own.
+# Assignment, direct/team requests, mentions and trusted chat; no age cutoff.
 review_queue() {
-  local owner
+  local candidates
+  # Capture first: failed discovery must not dispatch a partial queue.
+  candidates="$(cfg -o=json '.' | "$BRAIN_DIR/bin/review-discovery")" || return 1
   {
-  for owner in $(cfg '.pr_review.owners[]'); do
-    gh search prs --owner "$owner" --state open --review-requested "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
-    gh search prs --owner "$owner" --state open --mentions "@me" --updated ">=$(cfg '.pr_review.updated_since')" --json url,author,repository,isDraft --limit 50
-  done
-  chat_review_queue
-  } | jq -s --arg me "$(cfg '.intake.assignee')" --arg re "$(cfg '.pr_review.repo_regex')" '
-    add | unique_by(.url) | map(select(.isDraft | not) | select(.author.login != $me) | select(.repository.name | test($re))) | .[].url' -r
+    printf '%s\n' "$candidates"
+    chat_review_queue
+  } | jq -s --arg me "$(cfg '.owner.github')" --arg re "$(cfg '.pr_review.repo_regex')" '
+    add | unique_by(.url) | map(select(.isDraft | not) | select((.author.login // "") | ascii_downcase != ($me | ascii_downcase)) | select(.repository.name | test($re))) | .[].url' -r
 }
 
 # Prior feedback for deduplication; only our explicitly marked computed scores are omitted (the current score is supplied separately).
@@ -339,12 +338,14 @@ post_mode() {
 cmd_review_prs() {
   paused && { log "paused"; return; }
   [[ "$(cfg '.pr_review.enabled')" == "true" ]] || return 0
-  local url key sha last dir pf nwo base num prior lf fails scope chat_repo chat_num chat_token chat_seen feedback_only backfilled=0
-  for url in ${ONLY_PR:-$(review_queue)}; do
+  local url key sha last dir pf nwo base num prior lf fails scope chat_repo chat_num chat_token chat_seen feedback_only backfilled=0 queue
+  queue="${ONLY_PR:-}"
+  if [[ -z "$queue" ]]; then queue="$(review_queue)" || return 1; fi
+  for url in $queue; do
     key="review-$(sed -E 's#https://github.com/[^/]+/([^/]+)/pull/([0-9]+)#\1-\2#' <<<"$url")"
     worker_running "$key" && continue
     # never review my own PRs (the queue filters them too; this covers `review-pr <url>`)
-    [[ "$(gh pr view "$url" --json author --jq .author.login)" == "$(cfg '.intake.assignee')" ]] && { log "$url is mine — not reviewing"; continue; }
+    [[ "$(gh pr view "$url" --json author --jq .author.login)" == "$(cfg '.owner.github')" ]] && { log "$url is mine — not reviewing"; continue; }
     sha="$(gh pr view "$url" --json headRefOid --jq .headRefOid)"
     last="$(cat "$BRAIN_STATE/prs/$key.reviewed" 2>/dev/null || true)"
     chat_repo="${url#https://github.com/}"; chat_repo="${chat_repo%/pull/*}"; chat_num="${url##*/}"

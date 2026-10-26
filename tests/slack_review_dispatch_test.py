@@ -30,7 +30,7 @@ review_capacity_left() { echo 1; }
 cfg() {
  case "$1" in
   .pr_review.enabled) echo true;;
-  .intake.assignee) echo owner;;
+  .intake.assignee|.owner.github) echo owner;;
   '.slop.backfill_per_tick // 3') echo 0;;
   .pr_review.provider) echo claude;;
   .limits.review_timeout) echo 10m;;
@@ -73,6 +73,18 @@ log() { :; }
     def test_guard_stop_is_not_bypassed_by_feedback(self):
         self.assertEqual(self.run_case('budget'),'')
 
+    def test_discovery_failure_returns_error_before_any_dispatch(self):
+        script = """
+set -euo pipefail
+paused() { return 1; }
+cfg() { echo true; }
+review_queue() { echo https://github.com/acme/web/pull/1; return 1; }
+gh() { echo 'unexpected dispatch' >&2; exit 99; }
+""" + FUNCTION + '\ncmd_review_prs\n'
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('unexpected dispatch', result.stderr)
+
 
 class SlackQueue(unittest.TestCase):
     def queue(self, kind):
@@ -84,6 +96,11 @@ class SlackQueue(unittest.TestCase):
             meta.write_text(json.dumps({'url':f'https://github.com/{owner}/web/pull/910','token':'request'}))
             if kind=='seen': (state/'prs/review-web-910.chat-reviewed').write_text('request\n')
             functions=''
+            (state/'bin').mkdir()
+            helper=state/'bin/review-discovery'
+            helper.write_text("#!/bin/sh\ncat >/dev/null\necho '[]'\n")
+            helper.chmod(0o755)
+            if kind=='failure': helper.write_text('#!/bin/sh\nexit 1\n')
             for name in ['chat_review_queue','review_queue']:
                 functions+=name+'() {'+(ROOT/'bin/fleet').read_text().split('\n'+name+'() {',1)[1].split('\n}\n',1)[0]+'\n}\n'
             script=r"""
@@ -93,23 +110,30 @@ cfg() {
   '-o=json .pr_review.owners') echo '["acme"]';;
   '.pr_review.owners[]') echo acme;;
   '.pr_review.repo_regex') echo '^web$';;
-  '.intake.assignee') echo owner;;
-  *) echo '2026-10-14';;
+  '.intake.assignee'|'.owner.github') echo owner;;
+  *) echo '{}';;
  esac
 }
 gh() {
  if [[ "$1" == search ]]; then echo '[]'; return; fi
  echo called >> "$BRAIN_STATE/calls"
- local draft=false state=OPEN author=naj
+ local draft=false state=OPEN author=contributor
  [[ "$CASE" == draft ]] && draft=true
  [[ "$CASE" == closed ]] && state=MERGED
- [[ "$CASE" == own ]] && author=owner
+ [[ "$CASE" == own ]] && author=OWNER
+ [[ "$CASE" == deleted ]] && author=
  printf '{"url":"https://github.com/acme/web/pull/910","author":{"login":"%s"},"isDraft":%s,"state":"%s"}\n' "$author" "$draft" "$state"
 }
 """
-            result=subprocess.run(['bash','-c',script+functions+'\nreview_queue\n'],env=dict(os.environ,BRAIN_STATE=tmp,CASE=kind),capture_output=True,text=True)
-            self.assertEqual(result.returncode,0,result.stderr)
+            result=subprocess.run(['bash','-c',script+functions+'\nreview_queue\n'],env=dict(os.environ,BRAIN_STATE=tmp,BRAIN_DIR=tmp,CASE=kind),capture_output=True,text=True)
+            self.assertEqual(result.returncode,1 if kind=='failure' else 0,result.stderr)
             return result.stdout.strip(), (state/'calls').exists(), Path(str(meta)+'.closed').exists()
+
+    def test_helper_failure_emits_no_partial_chat_queue(self):
+        self.assertEqual(self.queue('failure'), ('', False, False))
+
+    def test_deleted_author_does_not_break_queue(self):
+        self.assertEqual(self.queue('deleted')[0], 'https://github.com/acme/web/pull/910')
 
     def test_slack_request_does_not_require_github_reviewer_request(self):
         self.assertEqual(self.queue('open')[0],'https://github.com/acme/web/pull/910')
