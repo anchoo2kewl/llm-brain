@@ -40,7 +40,7 @@ func (s *Server) reviewAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	for key, value := range in.Counts {
 		switch key {
-		case "discovered", "eligible", "queued", "running", "completed", "failed", "blocked", "missing":
+		case "discovered", "eligible", "queued", "running", "completed", "failed", "blocked", "missing", "reviewed":
 		default:
 			http.Error(w, "invalid review count", 400)
 			return
@@ -73,7 +73,7 @@ func (s *Server) reviewAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Counts != nil {
 		parts := []string{}
-		for _, key := range []string{"discovered", "eligible", "queued", "running", "completed", "failed", "blocked", "missing"} {
+		for _, key := range []string{"discovered", "eligible", "queued", "running", "completed", "failed", "blocked", "missing", "reviewed"} {
 			parts = append(parts, fmt.Sprintf("%s=%d", key, in.Counts[key]))
 		}
 		text += "\nLatest metrics: " + strings.Join(parts, ", ")

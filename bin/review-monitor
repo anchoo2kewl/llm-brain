@@ -54,13 +54,17 @@ def summary(data, now):
     for item in data['items'].values():
         if item.get('eligible'):
             eligible += 1
-            counts[item['status']] += 1
             receipt = item.get('receipt', {})
-            if receipt.get('head') == item.get('head') and item.get('head_verified', False):
+            verified = receipt.get('head') == item.get('head') and item.get('head_verified', False)
+            state = item['status']
+            if state == 'completed' and not verified:
+                state = 'blocked'
+            counts[state] += 1
+            if verified:
                 reviewed += 1
-    counts['completed'] = reviewed
     return dict(counts, discovered=data.get('discovered', 0),
                 eligible=eligible, reviewed=reviewed,
+                notification_failed=sum(bool(row.get('error')) for row in data.get('alert_delivery', {}).values()),
                 heartbeat=data.get('heartbeat'), inventory_at=data.get('inventory_at'),
                 discovery_ok=data.get('discovery_ok'), updated_at=now,
                 monitoring_expected=data.get('expected', False),
@@ -155,10 +159,19 @@ def run_worker(root, args):
             status, reason = ('completed', 'verified') if receipt else ('failed', 'unverified_result')
         except (subprocess.SubprocessError, ValueError, KeyError):
             status, reason = 'blocked', 'verification_failed'
+    verified_head = bool(receipt)
+    if not verified_head:
+        try:
+            latest = current(url)
+            verified_head = latest['state'] == 'OPEN' and latest['headRefOid'] == sha
+        except (subprocess.SubprocessError, ValueError, KeyError):
+            pass  # The unsuccessful verification remains visible as unverified metrics.
     with ledger(root) as data:
         item = data['items'][url]
         if item.get('head') == sha and item.get('pid') == os.getpid():
-            item.update(status=status, reason=reason, finished=time.time(), head_verified_at=time.time(), head_verified=bool(receipt) or (item.get('head_verified', False) and item.get('receipt', {}).get('head') == sha))
+            item.update(status=status, reason=reason, finished=time.time(), head_verified=verified_head)
+            if verified_head:
+                item['head_verified_at'] = time.time()
             if code == 0 and re.search(r'^REVIEWED ' + re.escape(url) + r' (APPROVE|COMMENT) ', text, re.M):
                 item['candidate'] = {'head': sha, 'started': started}
             if receipt:
@@ -183,7 +196,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def deliver(config, incident, active, counts):
     hub = config.get('memory', {}).get('hub_url') or config.get('hub_url') or 'http://127.0.0.1:8787'
-    body = json.dumps({'incident': incident, 'active': active, 'counts': {key: counts[key] for key in (*STATES, 'discovered', 'eligible')}}).encode()
+    body = json.dumps({'incident': incident, 'active': active, 'counts': {key: counts[key] for key in (*STATES, 'discovered', 'eligible', 'reviewed')}}).encode()
     request = urllib.request.Request(hub.rstrip('/')+'/api/reviews/alert', data=body,
                                      headers={'Content-Type': 'application/json'}, method='POST')
     with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
@@ -224,7 +237,10 @@ def watch(root, config, now=None, send=deliver):
         if snapshot.get('discovery_ok') is False:
             conditions.add('discovery_failed')
         for url, item in snapshot['items'].items():
-            if not item.get('eligible') or me is None:
+            if not item.get('eligible'):
+                continue
+            if me is None:
+                item.update(head_verified=False, status='blocked', reason='invalid_owner')
                 continue
             try:
                 live = current(url)
@@ -307,17 +323,51 @@ def watch(root, config, now=None, send=deliver):
                 data.setdefault('receipts', {})[url + '@' + item['receipt']['head']] = item['receipt']
         data.update(conditions=sorted(conditions), expected=expected, watch_at=now)
         data['summary'] = summary(data, now)
+        for condition, delivery in data.get('alert_delivery', {}).items():
+            if condition not in conditions and not data['alerts'].get(condition, False):
+                delivery.update(error=None, next_retry=0, attempts=0)
         pending = [(condition, condition in conditions) for condition in set(conditions) | set(data['alerts'])
                    if data['alerts'].get(condition, False) != (condition in conditions)]
-    # Keep notification I/O outside the ledger lock. A separate watchdog flock
-    # serializes watches; update delivery receipts only after actual success.
+    # Keep notification I/O outside the ledger lock. The independent watchdog
+    # lock serializes watches. A failed incident must not starve other alerts.
     if not expected or paused or not enabled:
         pending = []
     for condition, active in sorted(pending):
-        send(config, condition, active, data['summary'])
+        with ledger(root) as data:
+            desired = condition in data['conditions']
+            # Events may resolve a condition while the network reads run.
+            if condition == 'discovery_failed':
+                desired = data.get('discovery_ok') is False or me is None
+            elif condition == 'scheduler_stale':
+                desired = now - data.get('heartbeat', 0) > monitor.get('heartbeat_seconds', 900)
+            elif condition == 'eligible_missing':
+                desired = any(i.get('eligible') and i['status'] == 'missing' for i in data['items'].values())
+            elif condition == 'review_failed':
+                desired = any(i.get('eligible') and i['status'] == 'failed' for i in data['items'].values())
+            elif condition in ('worker_stuck', 'verification_failed'):
+                reason = 'stale_worker' if condition == 'worker_stuck' else 'verification_failed'
+                desired = any(i.get('eligible') and i.get('reason') == reason for i in data['items'].values())
+            if desired != active:
+                continue
+            delivery = data.setdefault('alert_delivery', {}).get(condition, {})
+            if delivery.get('desired') == active and delivery.get('next_retry', 0) > now:
+                continue
+            counts = summary(data, now)
+        try:
+            send(config, condition, active, counts)
+        except (OSError, ValueError, RuntimeError) as error:
+            with ledger(root) as data:
+                attempts = delivery.get('attempts', 0) + 1 if delivery.get('desired') == active else 1
+                data['alert_delivery'][condition] = dict(desired=active, attempts=attempts,
+                    error=type(error).__name__, failed_at=now,
+                    next_retry=now + min(3600, 300 * 2**min(attempts-1, 4)))
+            continue
         with ledger(root) as data:
             data['alerts'][condition] = active
+            data['alert_delivery'][condition] = dict(desired=active, attempts=0,
+                delivered_at=now, next_retry=0, error=None)
     with ledger(root) as data:
+        data['summary'] = summary(data, now)
         return data['summary']
 
 

@@ -25,6 +25,9 @@ class Monitor(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        local = patch.dict(os.environ, BRAIN_LOCAL=str(self.root/'local'))
+        local.start()
+        self.addCleanup(local.stop)
         self.sent = []
         self.send = lambda config, incident, active, counts: self.sent.append((incident, active))
         scheduler = patch.object(m, 'scheduler_present', return_value=True)
@@ -116,13 +119,38 @@ class Monitor(unittest.TestCase):
             self.assertEqual(self.watch(1105)['failed'], 1)
         self.assertIn(('review_failed', True), self.sent)
 
-    def test_alert_delivery_failure_is_not_acknowledged(self):
+    def test_alert_delivery_failure_is_persisted_backed_off_and_not_acknowledged(self):
         m.event(self.root, 'discovery-failed', [], now=1000)
-        with self.assertRaises(RuntimeError):
-            m.watch(self.root, CONFIG, now=1001, send=lambda *a: (_ for _ in ()).throw(RuntimeError('offline')))
+        counts = m.watch(self.root, CONFIG, now=1001,
+            send=lambda *a: (_ for _ in ()).throw(RuntimeError('offline')))
+        self.assertEqual(counts['notification_failed'], 1)
         self.assertEqual(self.data()['alerts'], {})
-        self.watch()
+        self.assertEqual(self.data()['alert_delivery']['discovery_failed']['next_retry'], 1301)
+        self.watch(1002)
+        self.assertEqual(self.sent, [])
+        m.event(self.root, 'begin', [], CONFIG, now=1302)
+        m.event(self.root, 'wait', ['capacity'], now=1302)
+        counts = self.watch(1303)
         self.assertEqual(self.sent, [('discovery_failed', True)])
+        self.assertEqual(counts['notification_failed'], 0)
+
+    def test_undelivered_incident_resolving_drops_obsolete_delivery_error(self):
+        m.event(self.root, 'discovery-failed', [], now=1000)
+        m.watch(self.root, CONFIG, now=1001, send=lambda *a: (_ for _ in ()).throw(RuntimeError('offline')))
+        m.event(self.root, 'inventory', ['1'], [{'url': URL}], now=1002)
+        self.assertEqual(self.watch(1003)['notification_failed'], 0)
+        self.assertEqual(self.sent, [])
+
+    def test_failed_delivery_does_not_starve_other_incidents(self):
+        m.event(self.root, 'discovery-failed', [], now=1000)
+        def send(config, condition, active, counts):
+            if condition == 'discovery_failed':
+                raise RuntimeError('offline')
+            self.sent.append((condition, active))
+        m.watch(self.root, CONFIG, now=1101, send=send)
+        self.assertIn(('eligible_missing', True), self.sent)
+        self.assertIn(('scheduler_stale', True), self.sent)
+
 
     def test_completion_requires_success_marker_and_actual_review(self):
         log = self.root/'run.log'
@@ -157,9 +185,21 @@ class Monitor(unittest.TestCase):
         with patch.object(m.subprocess, 'call', return_value=1):
             m.run_worker(self.root, [URL, 'head-a', 'owner', str(log), 'fake'])
         counts = m.summary(self.data(), 1001)
-        self.assertEqual(counts['completed'], 1)
+        self.assertEqual(counts['completed'], 0)
+        self.assertEqual(counts['reviewed'], 1)
+        self.assertEqual(sum(counts[s] for s in m.STATES), counts['eligible'])
         self.assertEqual(counts['failed'], 1)
         self.assertEqual(counts['completed_unique_heads'], 1)
+
+    def test_failed_retry_rechecks_live_head_and_never_refreshes_stale_receipt(self):
+        log = self.root/'run.log'
+        log.write_text('failed feedback retry\n')
+        with m.ledger(self.root) as data:
+            data['items'][URL].update(receipt={'head':'head-a', 'review_id':42}, head_verified=True, head_verified_at=999)
+        with patch.object(m.subprocess, 'call', return_value=1), patch.object(m, 'current', return_value=dict(LIVE, headRefOid='head-b')):
+            m.run_worker(self.root, [URL, 'head-a', 'owner', str(log), 'fake'])
+        self.assertEqual(m.summary(self.data(), 1001)['reviewed'], 0)
+        self.assertEqual(self.data()['items'][URL]['head_verified_at'], 999)
 
     def test_retry_at_same_head_counts_once(self):
         log = self.root/'run.log'
