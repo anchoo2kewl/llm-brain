@@ -2,6 +2,7 @@
 """Read-only, complete GitHub review candidate discovery. No worker side effects."""
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import time
@@ -63,7 +64,7 @@ def search(query, low=0, high=None):
 
 def discover(config):
     me = config['owner']['github']
-    if not me or me == '@me':
+    if not isinstance(me, str) or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?', me) or '--' in me:
         raise ValueError('owner.github must name the review owner explicitly')
     review = config['pr_review']
     owners = review['owners']

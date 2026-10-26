@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Independent, opt-in health check. Never dispatches work or changes pause state.
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+cfg -o=json '.' | "$BRAIN_DIR/bin/review-monitor" watch

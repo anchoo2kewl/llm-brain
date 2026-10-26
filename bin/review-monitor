@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Durable review-head metrics and an opt-in watchdog; never starts review work."""
+import argparse
+from contextlib import contextmanager
+import datetime as dt
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+STATES = ('queued', 'running', 'completed', 'failed', 'blocked', 'missing')
+LOGIN = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z')
+
+
+def owner(config):
+    value = config.get('owner', {}).get('github')
+    if not isinstance(value, str) or not LOGIN.fullmatch(value) or '--' in value:
+        raise ValueError('owner.github must be a valid explicit GitHub login')
+    return value.lower()
+
+
+@contextmanager
+def ledger(root):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root/'review-health.lock').open('a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = root/'review-health.json'
+        data = json.loads(path.read_text()) if path.exists() else {'items': {}, 'alerts': {}}
+        yield data
+        tmp = root/f'.review-health.{os.getpid()}.tmp'
+        tmp.write_text(json.dumps(data, sort_keys=True) + '\n')
+        tmp.chmod(0o600)
+        tmp.replace(path)
+
+
+def gh(*args):
+    return json.loads(subprocess.check_output(['gh', *args], text=True, timeout=60))
+
+
+def current(url):
+    return gh('pr', 'view', url, '--json', 'headRefOid,state,author,isDraft')
+
+
+def summary(data, now):
+    counts = {state: 0 for state in STATES}
+    eligible = 0
+    reviewed = 0
+    for item in data['items'].values():
+        if item.get('eligible'):
+            eligible += 1
+            counts[item['status']] += 1
+            receipt = item.get('receipt', {})
+            if receipt.get('head') == item.get('head') and item.get('head_verified', False):
+                reviewed += 1
+    counts['completed'] = reviewed
+    return dict(counts, discovered=data.get('discovered', 0),
+                eligible=eligible, reviewed=reviewed,
+                heartbeat=data.get('heartbeat'), inventory_at=data.get('inventory_at'),
+                discovery_ok=data.get('discovery_ok'), updated_at=now,
+                monitoring_expected=data.get('expected', False),
+                head_verification_at=max((item.get('head_verified_at', 0) for item in data['items'].values()), default=0),
+                completed_unique_heads=len(data.get('receipts', {})),
+                alerts=sorted(data.get('conditions', [])))
+
+
+def event(root, kind, args, payload=None, now=None):
+    now = time.time() if now is None else now
+    with ledger(root) as data:
+        if kind == 'begin':
+            configured_owner = owner(payload)
+            if data.get('owner', configured_owner) != configured_owner:
+                for item in data['items'].values():
+                    item.pop('receipt', None)
+                    item.update(status='queued', reason='owner_changed', since=now, head_verified=False)
+            data.update(owner=configured_owner, heartbeat=now, paused=bool(payload.get('paused')),
+                        enabled=payload.get('pr_review', {}).get('enabled', False),
+                        expected=payload.get('pr_review', {}).get('monitoring', {}).get('expected', False))
+        elif kind == 'inventory':
+            for item in data['items'].values():
+                item['eligible'] = False
+            for row in payload:
+                url = row['url']
+                item = data['items'].setdefault(url, {'status': 'queued', 'since': now})
+                item.update(eligible=True, seen_at=now)
+            data.update(discovered=int(args[0]), inventory_at=now, discovery_ok=True)
+        elif kind == 'discovery-failed':
+            data.update(discovery_ok=False, discovery_failed_at=now)
+        elif kind == 'wait':
+            for item in data['items'].values():
+                if item.get('eligible') and item['status'] in ('queued', 'missing'):
+                    item.update(status='queued', reason=args[0], wait_at=now)
+        elif kind == 'head':
+            url, sha = args
+            item = data['items'].setdefault(url, {'eligible': True, 'since': now})
+            if item.get('head') != sha:
+                item.update(head=sha, status='queued', reason='awaiting_dispatch', since=now, head_verified=False)
+            elif item.get('reason') == 'capacity':
+                item['reason'] = 'awaiting_dispatch'
+            item['processed_at'] = now
+        elif kind == 'failure':
+            url, reason = args
+            item = data['items'].setdefault(url, {'eligible': True, 'since': now})
+            item.update(status='failed', reason=reason)
+        elif kind == 'budget':
+            url = args[0]
+            item = data['items'].setdefault(url, {'eligible': True, 'since': now})
+            item.update(status='blocked', reason='quota')
+        data['summary'] = summary(data, now)
+
+
+def verify(url, sha, me, started):
+    live = current(url)
+    if live['state'] != 'OPEN' or live['headRefOid'] != sha:
+        return None
+    nwo = url.split('github.com/', 1)[1].split('/pull/', 1)[0]
+    number = url.rsplit('/', 1)[1]
+    # Slurping is necessary: gh --paginate otherwise emits concatenated arrays.
+    pages = gh('api', f'repos/{nwo}/pulls/{number}/reviews', '--paginate', '--slurp')
+    for page in pages:
+        for row in page:
+            stamp = row.get('submitted_at')
+            if (row.get('user') or {}).get('login', '').lower() != me:
+                continue
+            if row.get('commit_id') != sha or row.get('state') not in ('APPROVED', 'COMMENTED', 'CHANGES_REQUESTED') or not stamp:
+                continue
+            submitted = dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')).timestamp()
+            if submitted >= int(started):
+                return row['id']
+    return None
+
+
+def run_worker(root, args):
+    url, sha, me, log, *command = args
+    if not LOGIN.fullmatch(me) or '--' in me:
+        raise ValueError('invalid review owner')
+    started = time.time()
+    with ledger(root) as data:
+        item = data['items'].setdefault(url, {'eligible': True})
+        item.update(head=sha, status='running', reason='worker', since=started,
+                    pid=os.getpid(), log=log, started=started)
+    code = subprocess.call(command)
+    text = Path(log).read_text(errors='replace') if Path(log).exists() else ''
+    status, reason, receipt = 'failed', 'worker_failed', None
+    if re.search(r'^BUDGET_STOPPED ', text, re.M):
+        status, reason = 'blocked', 'quota'
+    elif code == 0 and re.search(r'^REVIEWED ' + re.escape(url) + r' (APPROVE|COMMENT) ', text, re.M):
+        try:
+            receipt = verify(url, sha, me.lower(), started)
+            status, reason = ('completed', 'verified') if receipt else ('failed', 'unverified_result')
+        except (subprocess.SubprocessError, ValueError, KeyError):
+            status, reason = 'blocked', 'verification_failed'
+    with ledger(root) as data:
+        item = data['items'][url]
+        if item.get('head') == sha and item.get('pid') == os.getpid():
+            item.update(status=status, reason=reason, finished=time.time(), head_verified_at=time.time(), head_verified=bool(receipt) or (item.get('head_verified', False) and item.get('receipt', {}).get('head') == sha))
+            if code == 0 and re.search(r'^REVIEWED ' + re.escape(url) + r' (APPROVE|COMMENT) ', text, re.M):
+                item['candidate'] = {'head': sha, 'started': started}
+            if receipt:
+                item['receipt'] = {'head': sha, 'review_id': receipt, 'started': started}
+                data.setdefault('receipts', {})[url + '@' + sha] = item['receipt']
+            data['summary'] = summary(data, time.time())
+    return code
+
+
+def live_worker(item):
+    try:
+        command = subprocess.check_output(['ps', '-p', str(item['pid']), '-o', 'command='], text=True, timeout=5)
+        return 'review-monitor' in command and ' run ' in command
+    except (KeyError, subprocess.SubprocessError):
+        return False
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def deliver(config, incident, active, counts):
+    hub = config.get('memory', {}).get('hub_url') or config.get('hub_url') or 'http://127.0.0.1:8787'
+    body = json.dumps({'incident': incident, 'active': active, 'counts': {key: counts[key] for key in (*STATES, 'discovered', 'eligible')}}).encode()
+    request = urllib.request.Request(hub.rstrip('/')+'/api/reviews/alert', data=body,
+                                     headers={'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+        if not json.load(response).get('delivered'):
+            raise RuntimeError('review alert not delivered')
+
+
+def scheduler_present():
+    try:
+        return subprocess.run(['launchctl', 'print', f'gui/{os.getuid()}/com.llm-brain.reviews'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def watch(root, config, now=None, send=deliver):
+    now = time.time() if now is None else now
+    try:
+        me = owner(config)
+    except ValueError:
+        me = None
+    monitor = config.get('pr_review', {}).get('monitoring', {})
+    expected = monitor.get('expected', False)
+    with ledger(root) as data:
+        snapshot = json.loads(json.dumps(data))
+        original = json.loads(json.dumps(data['items']))
+    conditions = set()
+    paused = bool(config.get('paused')) or (Path(os.environ.get('BRAIN_LOCAL', str(Path.home()/'.config/llm-brain')))/'PAUSE').exists()
+    enabled = config.get('pr_review', {}).get('enabled', False)
+    heartbeat_age = now - snapshot.get('heartbeat', 0)
+    if expected and not paused and enabled:
+        if not scheduler_present():
+            conditions.add('scheduler_absent')
+        if me is None:
+            conditions.add('discovery_failed')
+        if heartbeat_age > monitor.get('heartbeat_seconds', 900):
+            conditions.add('scheduler_stale')
+        if snapshot.get('discovery_ok') is False:
+            conditions.add('discovery_failed')
+        for url, item in snapshot['items'].items():
+            if not item.get('eligible') or me is None:
+                continue
+            try:
+                live = current(url)
+                if live['state'] != 'OPEN' or live.get('isDraft') or (live.get('author') or {}).get('login', '').lower() == me:
+                    item['eligible'] = False
+                    continue
+                item['head_verified'] = True
+                item['head_verified_at'] = now
+                if item.get('head') != live['headRefOid']:
+                    item.update(head=live['headRefOid'], status='queued', reason='awaiting_dispatch', since=now)
+                candidate = item.get('candidate', {})
+                if candidate.get('head') != item['head']:
+                    repo, number = url.split('/pull/')
+                    key = 'review-' + repo.rsplit('/', 1)[-1] + '-' + number
+                    marker = root/'prs'/f'{key}.reviewed'
+                    logs = sorted((root/'logs').glob(f'{key}.*.log'), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if marker.is_file() and marker.read_text().strip() == item['head'] and logs:
+                        text = logs[0].read_text(errors='replace')
+                        if re.search(r'^REVIEWED ' + re.escape(url) + r' (APPROVE|COMMENT) ', text, re.M):
+                            candidate = {'head': item['head'], 'started': marker.stat().st_mtime}
+                if candidate.get('head') == item['head'] and item.get('receipt', {}).get('head') != item['head']:
+                    receipt = verify(url, item['head'], me, candidate['started'])
+                    if receipt:
+                        item['receipt'] = dict(candidate, review_id=receipt)
+                        item.update(status='completed', reason='verified')
+                    else:
+                        item.update(status='failed', reason='unverified_result')
+                elif item.get('reason') == 'verification_failed':
+                    if item.get('receipt', {}).get('head') == item['head']:
+                        item.update(status='completed', reason='verified')
+                    elif live_worker(item):
+                        item.update(status='running', reason='worker')
+                    else:
+                        item.update(status='queued', reason='awaiting_dispatch')
+            except (subprocess.SubprocessError, ValueError, KeyError):
+                item.update(status='blocked', reason='verification_failed', head_verified=False)
+                conditions.add('verification_failed')
+                continue
+            if item['status'] == 'running' or item.get('reason') == 'stale_worker':
+                if not live_worker(item):
+                    item.update(status='failed', reason='worker_lost')
+                else:
+                    path = Path(item.get('log', ''))
+                    progress = path.stat().st_mtime if path.is_file() else item.get('started', now)
+                    if now - progress > monitor.get('stale_worker_seconds', 1800):
+                        item.update(status='blocked', reason='stale_worker')
+                        conditions.add('worker_stuck')
+                    else:
+                        item.update(status='running', reason='worker')
+            if item['status'] in ('queued', 'missing'):
+                capacity_wait = item.get('reason') == 'capacity' and now - item.get('wait_at', 0) < monitor.get('heartbeat_seconds', 900)
+                if not capacity_wait and now - item.get('since', now) > monitor.get('missing_seconds', 900):
+                    item.update(status='missing', reason='not_processing')
+                    conditions.add('eligible_missing')
+            if item['status'] == 'failed':
+                conditions.add('review_failed')
+            if item.get('reason') == 'verification_failed':
+                conditions.add('verification_failed')
+        # Merge only unchanged worker records; a worker finishing during network
+        # reads must not have its completion receipt overwritten by this snapshot.
+    with ledger(root) as data:
+        for url, item in snapshot['items'].items():
+            live = data['items'].get(url)
+            if live == original.get(url):
+                data['items'][url] = item
+        conditions -= {'worker_stuck', 'review_failed', 'eligible_missing', 'verification_failed'}
+        for item in data['items'].values():
+            if not item.get('eligible'):
+                continue
+            if item.get('reason') == 'stale_worker':
+                conditions.add('worker_stuck')
+            if item['status'] == 'failed':
+                conditions.add('review_failed')
+            if item['status'] == 'missing':
+                conditions.add('eligible_missing')
+            if item.get('reason') == 'verification_failed':
+                conditions.add('verification_failed')
+        for url, item in data['items'].items():
+            if item.get('receipt'):
+                data.setdefault('receipts', {})[url + '@' + item['receipt']['head']] = item['receipt']
+        data.update(conditions=sorted(conditions), expected=expected, watch_at=now)
+        data['summary'] = summary(data, now)
+        pending = [(condition, condition in conditions) for condition in set(conditions) | set(data['alerts'])
+                   if data['alerts'].get(condition, False) != (condition in conditions)]
+    # Keep notification I/O outside the ledger lock. A separate watchdog flock
+    # serializes watches; update delivery receipts only after actual success.
+    if not expected or paused or not enabled:
+        pending = []
+    for condition, active in sorted(pending):
+        send(config, condition, active, data['summary'])
+        with ledger(root) as data:
+            data['alerts'][condition] = active
+    with ledger(root) as data:
+        return data['summary']
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=['begin', 'inventory', 'discovery-failed', 'wait', 'head', 'failure', 'budget', 'run', 'watch', 'status'])
+    parser.add_argument('args', nargs='*')
+    args = parser.parse_args()
+    root = Path(os.environ.get('BRAIN_STATE', str(Path.home()/'.local/state/llm-brain')))
+    if args.command == 'run':
+        return run_worker(root, args.args)
+    if args.command == 'status':
+        with ledger(root) as data:
+            print(json.dumps(summary(data, time.time()), indent=2))
+    elif args.command == 'watch':
+        root.mkdir(parents=True, exist_ok=True)
+        with (root/'review-watch.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            print(json.dumps(watch(root, json.load(sys.stdin))))
+    else:
+        payload = json.load(sys.stdin) if args.command in ('begin', 'inventory') else None
+        event(root, args.command, args.args, payload)
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError, RuntimeError) as error:
+        print(f'review monitoring failed: {type(error).__name__}', file=sys.stderr)
+        sys.exit(1)

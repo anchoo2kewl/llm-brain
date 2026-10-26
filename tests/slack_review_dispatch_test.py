@@ -7,7 +7,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-FUNCTION = 'cmd_review_prs() {' + (ROOT/'bin/fleet').read_text().split('cmd_review_prs() {',1)[1].split('\n}\n',1)[0] + '\n}\n'
+OWNER = 'review_owner() {' + (ROOT/'bin/fleet').read_text().split('review_owner() {',1)[1].split('\n}\n',1)[0] + '\n}\n'
+FUNCTION = OWNER + 'cmd_review_prs() {' + (ROOT/'bin/fleet').read_text().split('cmd_review_prs() {',1)[1].split('\n}\n',1)[0] + '\n}\n'
 
 
 class SlackReviewDispatch(unittest.TestCase):
@@ -23,6 +24,7 @@ class SlackReviewDispatch(unittest.TestCase):
             if mode=='seen': (state/f'prs/{key}.chat-reviewed').write_text('new-request\n')
             script=r'''
 set -euo pipefail
+review_metric() { [[ "$1" != begin ]] || cat >/dev/null; return 0; }
 paused() { return 1; }
 worker_running() { return 1; }
 review_queue() { echo https://github.com/acme/web/pull/910; }
@@ -34,7 +36,7 @@ cfg() {
   '.slop.backfill_per_tick // 3') echo 0;;
   .pr_review.provider) echo claude;;
   .limits.review_timeout) echo 10m;;
-  *) echo '';;
+  *) if [[ "$*" == '-o=json .owner.github' ]]; then echo '"owner"'; elif [[ "$*" == '-o=json .' ]]; then echo '{}'; else echo ''; fi;;
  esac
 }
 gh() {
@@ -55,6 +57,7 @@ render() { printf 'BASE=%s\nPRIOR=%s\nNOTES=%s\n' "$REVIEW_BASE" "$PRIOR" "$NOTE
 spawn() { cat "$BRAIN_STATE/reviews/review-web-910/prompt.md" >> "$BRAIN_STATE/launched"; }
 log() { :; }
 '''
+            if mode=='own': script=script.replace("echo naj;;", "echo OWNER;;")
             script+=FUNCTION+'\ncmd_review_prs\ncmd_review_prs\n'
             result=subprocess.run(['bash','-c',script],env=dict(os.environ,BRAIN_STATE=tmp,BRAIN_DIR=str(ROOT),HOST_NAME='test'),capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
@@ -67,6 +70,9 @@ log() { :; }
         self.assertIn('SAME-HEAD SLACK FOLLOW-UP',output)
         self.assertIn('Naj: check the tenant filter',output)
 
+    def test_direct_self_review_guard_is_case_insensitive(self):
+        self.assertEqual(self.run_case('own'), '')
+
     def test_consumed_feedback_does_not_restart_review(self):
         self.assertEqual(self.run_case('seen'),'')
 
@@ -76,14 +82,30 @@ log() { :; }
     def test_discovery_failure_returns_error_before_any_dispatch(self):
         script = """
 set -euo pipefail
+review_metric() { [[ "$1" != begin ]] || cat >/dev/null; return 0; }
 paused() { return 1; }
-cfg() { echo true; }
+cfg() { if [[ "$*" == '-o=json .owner.github' ]]; then echo '"owner"'; elif [[ "$*" == '-o=json .' ]]; then echo '{}'; else echo true; fi; }
+log() { :; }
 review_queue() { echo https://github.com/acme/web/pull/1; return 1; }
 gh() { echo 'unexpected dispatch' >&2; exit 99; }
 """ + FUNCTION + '\ncmd_review_prs\n'
         result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertNotIn('unexpected dispatch', result.stderr)
+
+    def test_direct_review_rejects_invalid_configured_owner_before_github(self):
+        import json
+        for invalid in [None, '', '@me', 'bad owner', '-owner', 'owner--name', 42, ['owner']]:
+            script = r"""
+set -euo pipefail
+cfg() { printf '%s\n' "$IDENTITY"; }
+log() { :; }
+gh() { echo unexpected-github >&2; exit 99; }
+review_metric() { return 0; }
+""" + FUNCTION + '\nONLY_PR=https://github.com/acme/web/pull/1 cmd_review_prs\n'
+            result = subprocess.run(['bash','-c',script], env=dict(os.environ, IDENTITY=json.dumps(invalid)), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertNotIn('unexpected-github', result.stderr)
 
 
 class SlackQueue(unittest.TestCase):
@@ -95,7 +117,7 @@ class SlackQueue(unittest.TestCase):
             meta=state/'chat/review-requests/acme__web__910.json'
             meta.write_text(json.dumps({'url':f'https://github.com/{owner}/web/pull/910','token':'request'}))
             if kind=='seen': (state/'prs/review-web-910.chat-reviewed').write_text('request\n')
-            functions=''
+            functions=OWNER
             (state/'bin').mkdir()
             helper=state/'bin/review-discovery'
             helper.write_text("#!/bin/sh\ncat >/dev/null\necho '[]'\n")
@@ -105,8 +127,10 @@ class SlackQueue(unittest.TestCase):
                 functions+=name+'() {'+(ROOT/'bin/fleet').read_text().split('\n'+name+'() {',1)[1].split('\n}\n',1)[0]+'\n}\n'
             script=r"""
 set -euo pipefail
+review_metric() { [[ "$1" != inventory ]] || cat >/dev/null; return 0; }
 cfg() {
  case "$*" in
+  '-o=json .owner.github') echo '"OwNeR"';;
   '-o=json .pr_review.owners') echo '["acme"]';;
   '.pr_review.owners[]') echo acme;;
   '.pr_review.repo_regex') echo '^web$';;
@@ -121,12 +145,16 @@ gh() {
  [[ "$CASE" == draft ]] && draft=true
  [[ "$CASE" == closed ]] && state=MERGED
  [[ "$CASE" == own ]] && author=OWNER
- [[ "$CASE" == deleted ]] && author=
+ if [[ "$CASE" == deleted ]]; then
+  echo '{"url":"https://github.com/acme/web/pull/910","author":null,"isDraft":false,"state":"OPEN"}'
+  return
+ fi
  printf '{"url":"https://github.com/acme/web/pull/910","author":{"login":"%s"},"isDraft":%s,"state":"%s"}\n' "$author" "$draft" "$state"
 }
 """
             result=subprocess.run(['bash','-c',script+functions+'\nreview_queue\n'],env=dict(os.environ,BRAIN_STATE=tmp,BRAIN_DIR=tmp,CASE=kind),capture_output=True,text=True)
             self.assertEqual(result.returncode,1 if kind=='failure' else 0,result.stderr)
+            if kind=='own': self.assertTrue(Path(str(meta)+'.owned').exists())
             return result.stdout.strip(), (state/'calls').exists(), Path(str(meta)+'.closed').exists()
 
     def test_helper_failure_emits_no_partial_chat_queue(self):
