@@ -80,7 +80,14 @@ pr_review:
   model: ""                     # optional override; otherwise providers.<provider>.model
   owners: []                    # orgs to watch, e.g. [acme]
   repo_regex: ".*"              # narrow to some repos
-  updated_since: "1970-01-01"   # skip stale review requests
+  # No updated_since cutoff: old open requests remain eligible.
+  discover_teams: true          # authenticated owner teams (requires read:org); failure stops discovery
+  teams: []                     # extra org/team slugs; with discover_teams:false supply all owner teams
+  monitoring:
+    expected: false             # arm only when review automation is authorized to run
+    heartbeat_seconds: 900
+    missing_seconds: 900
+    stale_worker_seconds: 1800
   post: true                    # false = dry run (write the review to a file)
   # Rules are a UNION over modules; each module decides by itself whether it applies
   # (fuzzy "when": repo globs, file globs, keywords in the diff). Plug-and-play:
