@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Read-only, complete GitHub review candidate discovery. No worker side effects."""
+import datetime as dt
+import json
+import subprocess
+import sys
+import time
+
+LAST_SEARCH = None
+
+
+def api(endpoint, **params):
+    global LAST_SEARCH
+    if endpoint == 'search/issues':
+        # Search has a separate 30 requests/minute limit. Pace before every page
+        # and partition so a large backlog can finish rather than fail each tick.
+        now = time.monotonic()
+        if LAST_SEARCH is not None:
+            time.sleep(max(0, 2.1 - (now - LAST_SEARCH)))
+        LAST_SEARCH = time.monotonic()
+    args = ['gh', 'api', '--method', 'GET', endpoint]
+    for key, value in params.items():
+        args += ['-f', f'{key}={value}']
+    return json.loads(subprocess.check_output(args, text=True, timeout=60))
+
+
+def pages(endpoint):
+    page = 1
+    while True:
+        rows = api(endpoint, per_page=100, page=page)
+        yield from rows
+        if len(rows) < 100:
+            return
+        page += 1
+
+
+def stamp(second):
+    return dt.datetime.fromtimestamp(second, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def search(query, low=0, high=None):
+    if high is None:
+        high = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    scoped = f'{query} created:{stamp(low)}..{stamp(high)}'
+    first = api('search/issues', q=scoped, per_page=100, page=1)
+    if first.get('incomplete_results'):
+        raise RuntimeError('GitHub returned incomplete search results; retry discovery')
+    if first['total_count'] > 1000:
+        if low == high:
+            raise RuntimeError('Search exceeds GitHub cap within one second')
+        mid = (low + high) // 2
+        return search(query, low, mid) + search(query, mid + 1, high)
+    rows = first['items']
+    for page in range(2, (first['total_count'] + 99) // 100 + 1):
+        result = api('search/issues', q=scoped, per_page=100, page=page)
+        if result.get('incomplete_results'):
+            raise RuntimeError('GitHub returned incomplete search results; retry discovery')
+        rows += result['items']
+    if len(rows) != first['total_count']:
+        raise RuntimeError('Search changed during pagination; retry discovery')
+    return rows
+
+
+def discover(config):
+    me = config['owner']['github']
+    if not me or me == '@me':
+        raise ValueError('owner.github must name the review owner explicitly')
+    review = config['pr_review']
+    owners = review['owners']
+    if not owners:
+        return []
+    teams = list(review.get('teams') or [])
+    if review.get('discover_teams', True):
+        if api('user')['login'].lower() != me.lower():
+            raise ValueError('Team discovery requires authentication as owner.github; configure teams explicitly and disable discover_teams otherwise')
+        teams += [f"{t['organization']['login']}/{t['slug']}" for t in pages('user/teams')]
+    found = {}
+    for owner in owners:
+        signals = [f'assignee:{me}', f'review-requested:{me}', f'mentions:{me}']
+        signals += [f'team-review-requested:{team}' for team in sorted(set(teams))
+                    if team.split('/')[0].lower() == owner.lower()]
+        for signal in signals:
+            for row in search(f'is:pr is:open user:{owner} {signal}'):
+                # Search issues includes PR metadata, but never accept an issue as a PR.
+                if 'pull_request' not in row:
+                    continue
+                url = row['html_url']
+                repo = row['repository_url'].rsplit('/', 1)[-1]
+                found[url] = dict(url=url, author={'login': row['user']['login']},
+                                  repository={'name': repo}, isDraft=row.get('draft', False))
+    return list(found.values())
+
+
+if __name__ == '__main__':
+    try:
+        print(json.dumps(discover(json.load(sys.stdin))))
+    except (ValueError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError, TypeError) as error:
+        print(f'review discovery failed: {error}', file=sys.stderr)
+        sys.exit(1)
