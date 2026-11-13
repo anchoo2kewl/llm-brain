@@ -1,0 +1,31 @@
+main { padding: 18px 22px 28px; max-width: 640px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h2 { font-size: 13px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+#status { min-height: 1.4em; margin: 8px 0; }
+#hubs { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
+#hubs li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#hubs li.selected { border-color: var(--accent); background: var(--sel); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--bad); }
+.info { min-width: 0; }
+.hname { font-weight: 600; }
+.hurl { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hstat { font-size: 12px; }
+.actions { display: flex; gap: 6px; }
+.actions button { padding: 3px 8px; }
+#add, .row { display: flex; gap: 8px; }
+#add input { flex: 1; min-width: 0; }
+#name { max-width: 150px; }
+#hotkey { width: 180px; text-align: center; }
+#hotkey.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--sel); }
+#hkmsg { margin-top: 6px; min-height: 1.4em; }
+.rename { width: 100%; }

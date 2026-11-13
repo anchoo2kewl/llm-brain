@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hubs</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="hubs.css">
+</head>
+<body>
+<main>
+  <h1>Hubs</h1>
+  <p class="muted" id="intro">Pick the hub to show. The hub must be on this Mac (127.0.0.1) or on your tailnet (100.64.0.0/10 or a *.ts.net name).</p>
+  <div id="status" role="status"></div>
+  <ul id="hubs"></ul>
+
+  <h2>Add a hub</h2>
+  <form id="add" autocomplete="off">
+    <input id="name" type="text" placeholder="Name, for example Studio" maxlength="64">
+    <input id="url" type="text" placeholder="URL, for example http://127.0.0.1:8787" spellcheck="false" autocapitalize="off" required>
+    <button class="primary" type="submit">Add</button>
+  </form>
+
+  <h2>Quick-search hotkey</h2>
+  <div class="row">
+    <input id="hotkey" type="text" readonly value="" aria-label="Quick-search hotkey">
+    <button id="record" type="button">Change</button>
+    <button id="reset" type="button">Reset</button>
+  </div>
+  <div id="hkmsg" class="muted"></div>
+</main>
+<script src="hubs.js"></script>
+</body>
+</html>

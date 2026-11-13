@@ -1,0 +1,27 @@
+[package]
+name = "brain-hub"
+version = "0.1.0"
+description = "Native macOS client for the llm-brain hub"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "=2.4.1"
+tauri-plugin-notification = "=2.7.0"
+tauri-plugin-window-state = "=2.5.0"
+ureq = { version = "=3.5.0", default-features = false, features = ["rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
