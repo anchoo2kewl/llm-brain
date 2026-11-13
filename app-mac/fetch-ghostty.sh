@@ -17,6 +17,9 @@ if xcode-select -p 2>/dev/null | grep -q Xcode.app && command -v zig >/dev/null;
     -Demit-macos-app=false -Di18n=false -Demit-terminfo=true -Demit-themes=true)
   mkdir Vendor/share
   cp -R "$src/macos/GhosttyKit.xcframework" Vendor/
+  # SwiftPM takes a static library only as lib*.a.
+  mv Vendor/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a Vendor/GhosttyKit.xcframework/macos-arm64_x86_64/libghostty.a
+  plutil -replace AvailableLibraries.0.LibraryPath -string libghostty.a Vendor/GhosttyKit.xcframework/Info.plist
   cp -R "$src/zig-out/share/terminfo" "$src/zig-out/share/ghostty" Vendor/share/
   rm -rf "$src"
 else

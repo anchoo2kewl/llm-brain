@@ -54,8 +54,15 @@ jobs:
           cp -R macos/GhosttyKit.xcframework ../GhosttyKit/
           # terminfo and themes, copied into the app's Resources so the user's `theme =` works.
           cp -R zig-out/share/terminfo zig-out/share/ghostty ../GhosttyKit/share/
-      # A tarball: some theme names have a colon, which an artifact cannot hold.
-      - run: tar -czf GhosttyKit.tgz GhosttyKit
+      # SwiftPM takes a static library only as lib*.a. A tarball: some theme names have a colon, which an artifact
+      # cannot hold.
+      - run: |
+          x=GhosttyKit/GhosttyKit.xcframework
+          if [ -f $x/macos-arm64_x86_64/ghostty-internal.a ]; then
+            mv $x/macos-arm64_x86_64/ghostty-internal.a $x/macos-arm64_x86_64/libghostty.a
+            plutil -replace AvailableLibraries.0.LibraryPath -string libghostty.a $x/Info.plist
+          fi
+          tar -czf GhosttyKit.tgz GhosttyKit
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: GhosttyKit-${{ steps.pin.outputs.commit }}

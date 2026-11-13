@@ -19,6 +19,7 @@ final class TerminalEngine {
 
     /// Run `command` (a /bin/sh command line) in a new surface, replacing the current one.
     func start(command: String) {
+        let focused = surface.map { $0.window?.firstResponder === $0 } ?? false
         stop()
         let s = SurfaceView(command: command, frame: view.bounds)
         s.autoresizingMask = [.width, .height]
@@ -30,6 +31,7 @@ final class TerminalEngine {
         }
         view.addSubview(s)
         surface = s
+        if focused { s.window?.makeFirstResponder(s) }
     }
 
     func stop() {
@@ -77,6 +79,8 @@ final class Ghostty {
             clipboard-paste-protection = false
             clipboard-read = deny
             shell-integration = none
+            # brain-attach exits at once when it cannot connect: close the surface so the app can retry.
+            abnormal-command-exit-runtime = 0
             """.write(to: own, atomically: true, encoding: .utf8)
         ghostty_config_load_file(config, own.path)
         ghostty_config_finalize(config)
