@@ -127,6 +127,62 @@ fn build_main(app: &AppHandle, url: WebviewUrl) -> tauri::Result<WebviewWindow> 
     Ok(win)
 }
 
+/// A terminal window: the selected hub's Workspace with its own layout (`?w=`), so terminals can be spread
+/// over several windows and screens. It follows the main window's navigation rule and gets no app commands
+/// (capabilities list only the app's own windows). Closing it closes it; the terminals keep running.
+fn open_terminal_window(app: &AppHandle) {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let state = app.state::<AppState>();
+    let Some(base) = selected_url(&state) else {
+        open_hubs_window(app);
+        return;
+    };
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let label = format!("terms-{n}");
+    let Ok(url) = Url::parse(&format!("{}/workspace?w=win{n}", base.trim_end_matches('/'))) else { return };
+    if !allow::url_allowed(&url) {
+        return;
+    }
+    let handle = app.clone();
+    let own = label.clone();
+    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        .title(format!("{APP_TITLE} · Terminals {n}"))
+        .inner_size(1440.0, 900.0)
+        .min_inner_size(640.0, 400.0)
+        .on_navigation(navigation_allowed)
+        .on_new_window(move |url, _| {
+            if allow::url_allowed(&url) {
+                if let Some(w) = handle.get_webview_window(&own) {
+                    let _ = w.navigate(url);
+                }
+            } else {
+                open_external(&url);
+            }
+            NewWindowResponse::Deny
+        })
+        .on_document_title_changed(move |w, title| {
+            let _ = w.set_title(&format!("{} · Terminals {n}", if title.trim().is_empty() { APP_TITLE } else { title.as_str() }));
+        })
+        .build();
+    match built {
+        Ok(w) => {
+            let _ = w.set_focus();
+        }
+        Err(e) => eprintln!("terminal window: {e}"),
+    }
+}
+
+/// eval in the window in front (main or a terminal window), for Reload, Back and Forward.
+fn focused_eval(app: &AppHandle, js: &str) {
+    let front = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false) && (w.label() == "main" || w.label().starts_with("terms-")));
+    match front {
+        Some(w) => {
+            let _ = w.eval(js);
+        }
+        None => main_eval(app, js),
+    }
+}
+
 fn show_main(app: &AppHandle) {
     let win = match app.get_webview_window("main") {
         Some(w) => w,
@@ -215,6 +271,8 @@ fn toggle_search(app: &AppHandle) {
 
 fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let hubs = MenuItemBuilder::with_id("hubs", "Hubs...").accelerator("CmdOrCtrl+Shift+H").build(app)?;
+    let terms = MenuItemBuilder::with_id("terms", "New Terminal Window").accelerator("CmdOrCtrl+N").build(app)?;
+    let terms2 = MenuItemBuilder::with_id("terms", "New Terminal Window").build(app)?;
     let quick = MenuItemBuilder::with_id("search", "Quick Search").build(app)?;
     let reload = MenuItemBuilder::with_id("reload", "Reload").accelerator("CmdOrCtrl+R").build(app)?;
     let back = MenuItemBuilder::with_id("back", "Back").accelerator("CmdOrCtrl+[").build(app)?;
@@ -225,6 +283,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .item(&hubs)
         .item(&quick)
+        .item(&terms)
         .separator()
         .services()
         .separator()
@@ -244,7 +303,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .select_all()
         .build()?;
     let view = SubmenuBuilder::new(app, "View").item(&reload).item(&back).item(&forward).separator().fullscreen().build()?;
-    let window = SubmenuBuilder::new(app, "Window").minimize().maximize().separator().close_window().build()?;
+    let window = SubmenuBuilder::new(app, "Window").item(&terms2).separator().minimize().maximize().separator().close_window().build()?;
     MenuBuilder::new(app).items(&[&app_menu, &edit, &view, &window]).build()
 }
 
@@ -252,6 +311,7 @@ fn build_tray_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::W
     let mut b = MenuBuilder::new(app)
         .item(&MenuItem::with_id(app, "open", "Open", true, None::<&str>)?)
         .item(&MenuItem::with_id(app, "search", "Quick search", true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "terms", "New terminal window", true, None::<&str>)?)
         .separator()
         .item(&MenuItem::with_id(app, "hdr", "Hubs", false, None::<&str>)?);
     for h in &cfg.hubs {
@@ -282,9 +342,10 @@ fn on_menu(app: &AppHandle, id: &str) {
         "open" => show_main(app),
         "search" => show_search(app),
         "hubs" => open_hubs_window(app),
-        "reload" => main_eval(app, "location.reload()"),
-        "back" => main_eval(app, "history.back()"),
-        "forward" => main_eval(app, "history.forward()"),
+        "terms" => open_terminal_window(app),
+        "reload" => focused_eval(app, "location.reload()"),
+        "back" => focused_eval(app, "history.back()"),
+        "forward" => focused_eval(app, "history.forward()"),
         "quit" => app.exit(0),
         other => {
             if let Some(url) = other.strip_prefix("hub:") {

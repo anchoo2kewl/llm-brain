@@ -90,6 +90,15 @@ The list is saved as JSON in the app config folder: `~/Library/Application Suppo
 
 The tray icon also lists the hubs. Choose one to switch.
 
+## Terminal windows
+
+Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Windows and Linux) in the app menu, the Window menu or the tray icon. A new window opens the selected hub's Workspace: all its terminals, with layouts of 1 to 9 panes and zoom (Ctrl+Shift+Enter).
+
+- Open as many windows as you need, for example one per screen. Each window keeps its own layout, so you can put different terminals in each.
+- Closing a terminal window closes only the window. The terminals keep running on their machines.
+- Herdr programs open in the Workspace too. Detach from one with Ctrl+\; the program keeps running.
+- Reload, Back and Forward act on the window in front.
+
 ## Quick search
 
 Press **Option+Space** on macOS, or **Ctrl+Alt+Space** on Windows and Linux, in any app. A small search window opens on top of other windows.
@@ -131,6 +140,7 @@ On Windows and Linux, use Ctrl where this table says Cmd.
 | Cmd+R | Reloads the page. |
 | Cmd+[ and Cmd+] | Back and forward. |
 | Cmd+Shift+H | Opens the hub list. |
+| Cmd+N | Opens a new terminal window (the Workspace). |
 | Cmd+W | Hides the window. The app keeps running. |
 | Cmd+Q | Quits the app. |
 
