@@ -1,6 +1,6 @@
 [package]
 name = "brain-hub"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native macOS client for the llm-brain hub"
 edition = "2021"
 rust-version = "1.77"

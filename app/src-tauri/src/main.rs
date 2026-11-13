@@ -22,7 +22,7 @@ use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, MenuItemBuilder, S
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::NewWindowResponse;
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalSize, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -679,10 +679,12 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("cannot build the app");
 
-    app.run(|app, event| {
-        // A click on the Dock icon brings the hidden main window back.
-        if let RunEvent::Reopen { .. } = event {
-            show_main(app);
+    app.run(|_app, _event| {
+        // macOS only: a click on the Dock icon brings the hidden main window back.
+        // Windows and Linux have no Dock; the tray icon does this there.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            show_main(_app);
         }
     });
 }
