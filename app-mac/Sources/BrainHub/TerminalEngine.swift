@@ -16,10 +16,11 @@ final class TerminalEngine {
     var onExit: (() -> Void)?
 
     private var surface: SurfaceView?
+    /// The last surface had the keyboard: the next one takes it, unless something else has it by then.
+    private var refocus = false
 
     /// Run `command` (a /bin/sh command line) in a new surface, replacing the current one.
     func start(command: String) {
-        let focused = surface.map { $0.window?.firstResponder === $0 } ?? false
         stop()
         let s = SurfaceView(command: command, frame: view.bounds)
         s.autoresizingMask = [.width, .height]
@@ -31,16 +32,16 @@ final class TerminalEngine {
         }
         view.addSubview(s)
         surface = s
-        if focused { s.window?.makeFirstResponder(s) }
+        if refocus, let w = s.window, w.firstResponder == nil || w.firstResponder === w { w.makeFirstResponder(s) }
     }
 
     func stop() {
         guard let s = surface else { return }
         surface = nil
-        let had = s.window?.firstResponder === s
+        refocus = s.window?.firstResponder === s
         s.removeFromSuperview()
         s.free()
-        if had { view.window?.makeFirstResponder(nil) }
+        if refocus { view.window?.makeFirstResponder(nil) }
     }
 
     /// Make it the window's first responder.
@@ -79,8 +80,6 @@ final class Ghostty {
             clipboard-paste-protection = false
             clipboard-read = deny
             shell-integration = none
-            # brain-attach exits at once when it cannot connect: close the surface so the app can retry.
-            abnormal-command-exit-runtime = 0
             """.write(to: own, atomically: true, encoding: .utf8)
         ghostty_config_load_file(config, own.path)
         ghostty_config_finalize(config)
@@ -115,13 +114,7 @@ final class Ghostty {
                     }
                 }
             },
-            close_surface_cb: { ud, _ in
-                MainActor.assumeIsolated {
-                    // Freeing the surface inside its own callback is not safe: close on the next turn.
-                    let view = SurfaceView.from(ud)
-                    DispatchQueue.main.async { MainActor.assumeIsolated { view?.onClose?() } }
-                }
-            })
+            close_surface_cb: { ud, _ in MainActor.assumeIsolated { SurfaceView.from(ud)?.closeSoon() } })
         app = ghostty_app_new(&runtime, config)
         guard let app else { return }
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -145,6 +138,10 @@ final class Ghostty {
         let view = target.tag == GHOSTTY_TARGET_SURFACE
             ? target.target.surface.flatMap { SurfaceView.from(ghostty_surface_userdata($0)) } : nil
         switch action.tag {
+        case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+            // A surface with its own command waits after it exits (libghostty sets wait-after-command): brain-attach
+            // exited, and the app decides what comes next.
+            view?.closeSoon()
         case GHOSTTY_ACTION_RING_BELL:
             view?.onBell?()
         case GHOSTTY_ACTION_OPEN_URL:
@@ -220,6 +217,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    /// Freeing a surface inside one of its own callbacks is not safe: close on the next turn.
+    func closeSoon() { DispatchQueue.main.async { MainActor.assumeIsolated { self.onClose?() } } }
+
     /// Stop the command and release the surface. The view does nothing after this.
     func free() {
         guard let s = surface else { return }
@@ -278,7 +278,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             },
         ]
         updateScreen()
-        updateVisibility()
+        // The occlusion state is not settled while the window is still being put on screen: start visible and
+        // follow the notifications, as Ghostty's own app does.
+        ghostty_surface_set_occlusion(surface, true)
         viewDidChangeBackingProperties()
     }
 

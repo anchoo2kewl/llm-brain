@@ -86,7 +86,8 @@ enum KeyRouter {
     private static func key(_ event: NSEvent) -> Bool {
         let model = AppModel.shared
         // Menus keep Cmd keys; text fields (sheets, Settings, the sidebar's rename) keep everything.
-        guard !event.modifierFlags.contains(.command), let panes = model.keyPanes,
+        guard !event.modifierFlags.contains(.command),
+              let panes = model.windows.lazy.compactMap(\.value).first(where: { $0.window != nil && $0.window === event.window }),
               !(event.window?.firstResponder is NSTextView), let key = Key(event: event) else { return true }
         let keys = model.keys
         if model.prefixArmed {

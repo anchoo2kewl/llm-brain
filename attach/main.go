@@ -72,7 +72,7 @@ func run(base *url.URL, id int64) int {
 	}()
 	resized := watchResize()
 
-	tries, connected := 0, false
+	tries, connected, shown := 0, false, ""
 	for {
 		cols, rows := size()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -92,11 +92,14 @@ func run(base *url.URL, id int64) int {
 				return 0
 			}
 			if got {
-				tries = 0
+				tries, shown = 0, ""
 			}
 		}
 		msg, wait, ended := afterClose(code, reason, terminalStatus(base, id), tries)
-		note(msg)
+		if msg != shown { // once per change, not on every retry
+			note(msg)
+			shown = msg
+		}
 		if ended {
 			return 0
 		}
