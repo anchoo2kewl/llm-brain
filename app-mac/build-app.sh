@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build "Brain Hub.app" (the native Mac client) and a zip of it in app-mac/dist/.
 # Extra arguments go to `swift build`, for example `--arch arm64 --arch x86_64` for a universal app (needs Xcode).
+# Needs Vendor/GhosttyKit.xcframework (./fetch-ghostty.sh) and Go (for brain-attach, built universal).
 # The version is the desktop client's, from app/src-tauri/tauri.conf.json, so one client-v* tag covers both apps.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,6 +14,14 @@ app="dist/Brain Hub.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/BrainHub" "$app/Contents/MacOS/BrainHub"
+# brain-attach runs in each terminal pane and holds the hub connection.
+for arch in arm64 amd64; do
+  (cd ../attach && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags=-s -o "$OLDPWD/.build/brain-attach-$arch" .)
+done
+lipo -create -output "$app/Contents/MacOS/brain-attach" .build/brain-attach-arm64 .build/brain-attach-amd64
+codesign --force --sign - "$app/Contents/MacOS/brain-attach"
+# Ghostty's terminfo and themes: libghostty finds them next to the executable, so a `theme =` line works.
+if [ -d Vendor/share ]; then cp -R Vendor/share/terminfo Vendor/share/ghostty "$app/Contents/Resources/"; fi
 cp ../app/src-tauri/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

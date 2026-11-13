@@ -4,13 +4,22 @@ import PackageDescription
 let package = Package(
     name: "BrainHub",
     platforms: [.macOS(.v14)],
-    dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.99.3"),
-    ],
     targets: [
         // Everything that is not UI: hub URLs, the API, websocket frames, the saved hub list.
         .target(name: "BrainHubCore"),
-        .executableTarget(name: "BrainHub", dependencies: ["BrainHubCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
+        // libghostty, built from the commit in ghostty.commit by CI; ./fetch-ghostty.sh puts it here.
+        .binaryTarget(name: "GhosttyKit", path: "Vendor/GhosttyKit.xcframework"),
+        .executableTarget(
+            name: "BrainHub",
+            dependencies: ["BrainHubCore", "GhosttyKit"],
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("Carbon"),
+                .linkedFramework("Metal"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("CoreText"),
+                .linkedFramework("IOSurface"),
+            ]),
         .testTarget(name: "BrainHubCoreTests", dependencies: ["BrainHubCore"]),
     ]
 )

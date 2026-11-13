@@ -1,7 +1,7 @@
 # Mac app
 
-Brain Hub for macOS is a native app (SwiftUI and AppKit, no web view). It shows the hub's terminals as real terminals,
-with panes like tmux. The source is in `app-mac/`. Linux uses the Tauri app in `app/` ([desktop-app.md](desktop-app.md)).
+Brain Hub for macOS is a native app (SwiftUI and AppKit, no web view). It shows the hub's terminals in
+[Ghostty](https://ghostty.org)'s terminal engine (libghostty), with panes like tmux. The source is in `app-mac/`. Linux uses the Tauri app in `app/` ([desktop-app.md](desktop-app.md)).
 
 ## Install
 
@@ -16,10 +16,17 @@ your hubs: `~/Library/Application Support/app.llmbrain.hub/hubs.json`.
 
 ## Build
 
-You need Swift 6 (the Command Line Tools are enough) or Xcode.
+You need Swift 6 (the Command Line Tools are enough) or Xcode, Go, and libghostty.
+
+libghostty (`GhosttyKit.xcframework`) is built from the Ghostty commit in `app-mac/ghostty.commit`, the one place that
+pins it. Building it needs Xcode (Metal shaders), so the `mac-app` workflow builds it on a GitHub runner with Zig and
+keeps it as the artifact `GhosttyKit-<commit>`. `./fetch-ghostty.sh` puts it in `app-mac/Vendor/` (git-ignored): with
+Xcode and Zig it builds it, otherwise it downloads that artifact with the GitHub CLI. To move to another Ghostty
+commit, change `ghostty.commit` and push; the workflow builds the new one.
 
 ```sh
 cd app-mac
+./fetch-ghostty.sh      # once, and after ghostty.commit changes
 swift test              # the non-UI logic
 ./build-app.sh          # dist/Brain Hub.app and dist/BrainHub-mac-<version>.zip
 ./build-app.sh --arch arm64 --arch x86_64   # universal (needs Xcode)
@@ -46,7 +53,22 @@ their first lines).
   **Move** moves the conversation, with its context, to another machine.
 - The terminal reconnects by itself after a network drop or sleep, and says why when the hub or the machine is offline.
 - Copy and paste: the hub's tmux has the mouse on, so a drag selects in tmux and copies to the Mac clipboard, and the
-  wheel scrolls tmux's history. Shift-drag selects locally; then ⌘C. Option is Meta.
+  wheel scrolls tmux's history. Shift-drag selects locally; then ⌘C. ⌘V pastes. Option is Meta.
+- Font, theme and colors come from your Ghostty config (`~/.config/ghostty/config`), if you have one. The app's own
+  rules win over it: its menus and tmux keys own the shortcuts (Ghostty key bindings are off), Option is Meta, and
+  a remote program cannot read the clipboard.
+
+## From any terminal
+
+`brain-attach` is the small program each pane runs. It also works on its own, in any terminal (Ghostty, iTerm,
+Terminal):
+
+```sh
+"/Applications/Brain Hub.app/Contents/MacOS/brain-attach" --hub https://hub.<tailnet>.ts.net 42
+```
+
+42 is the terminal's number (the hub shows it). It reconnects after a network drop, follows the window size, and exits
+when the terminal ends, saying why. Build it from `attach/` with `go build`.
 
 ## Notifications
 
@@ -92,12 +114,13 @@ send it to the terminal. Settings, Keys shows every binding and the line it came
 | File | What |
 | --- | --- |
 | `Sources/BrainHubCore/` | The non-UI logic, with tests: hub URL allow-list, API types, websocket frames, hub list, panes, tmux config |
-| `Sources/BrainHub/TerminalEngine.swift` | The terminal emulator behind one small protocol (bytes in; input, resize, bell and title out; focus). SwiftTerm today; the only file that imports it, so another engine (libghostty) can replace it |
-| `Sources/BrainHub/TerminalSession.swift` | One terminal's websocket: reconnect, keep-alive pings, offline messages |
+| `Sources/BrainHub/TerminalEngine.swift` | libghostty: the Ghostty app, and one surface (an NSView) per pane with keys, IME, mouse and clipboard. The only file that imports GhosttyKit |
+| `Sources/BrainHub/TerminalSession.swift` | One terminal: runs `brain-attach` in the surface, and when it exits asks the hub whether the terminal ended or it should start again |
+| `../attach/` | `brain-attach`, bundled in `Contents/MacOS`: the websocket, resize, keep-alive pings and reconnect |
 | `Sources/BrainHub/Panes.swift` | Panes of a window and the tmux key handling |
 
 The hub API it uses: `GET /api/terminals`, `/api/live-sessions`, `/api/inbox`, `/api/cluster/nodes`, `/api/search`,
 `/terminals/{id}/status`; `POST /terminals/new`, `/terminals/{id}/rename`, `/api/terminals/{id}/close`,
-`/api/sessions/{id}/continue`, `/api/sessions/{id}/move`; and the websocket `/terminals/{id}/ws` (binary frames are
+`/api/sessions/{id}/continue`, `/api/sessions/{id}/move`; and, through `brain-attach`, the websocket `/terminals/{id}/ws` (binary frames are
 terminal bytes, a text frame `{"t":"resize","cols":N,"rows":N}` resizes, close code 4000 carries the reason). Like the
 Tauri app, it talks only to loopback and tailnet hosts.

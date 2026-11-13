@@ -35,13 +35,6 @@ import BrainHubCore
         }
         #expect(throws: HubError.self) { try HubURL.join("https://example.com", "/x") }
     }
-
-    @Test func terminalSocketURL() throws {
-        #expect(try HubURL.terminalSocket("https://hub.tail1.ts.net", id: 42, cols: 120, rows: 40).absoluteString
-            == "wss://hub.tail1.ts.net/terminals/42/ws?cols=120&rows=40")
-        #expect(try HubURL.terminalSocket("http://127.0.0.1:8787", id: 7, cols: 80, rows: 24).absoluteString
-            == "ws://127.0.0.1:8787/terminals/7/ws?cols=80&rows=24")
-    }
 }
 
 @Suite struct Requests {
@@ -127,11 +120,11 @@ import BrainHubCore
 }
 
 @Suite struct Frames {
-    @Test func resizeFrame() throws {
-        let s = Wire.resize(cols: 132, rows: 43)
-        #expect(s == #"{"t":"resize","cols":132,"rows":43}"#)
-        let obj = try JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any]
-        #expect(obj?["t"] as? String == "resize")
+    @Test func shellWords() {
+        #expect(shellQuote("/Applications/Brain Hub.app/Contents/MacOS/brain-attach")
+            == "'/Applications/Brain Hub.app/Contents/MacOS/brain-attach'")
+        #expect(shellQuote("a'b; rm -rf ~") == #"'a'\''b; rm -rf ~'"#)
+        #expect(shellQuote("") == "''")
     }
 
     @Test func afterClose() {

@@ -5,9 +5,6 @@ import Foundation
 public enum Wire {
     public static let reasonCode = 4000
 
-    /// The text frame that tells tmux the window size.
-    public static func resize(cols: Int, rows: Int) -> String { #"{"t":"resize","cols":\#(cols),"rows":\#(rows)}"# }
-
     /// What to do after the socket closed, from the close reason and `/terminals/{id}/status`
     /// (nil when the hub did not answer). Mirrors the hub's own terminal page.
     public enum Next: Equatable, Sendable {
@@ -29,3 +26,6 @@ public enum Wire {
         return .retry(message: "\(why). Retrying…", after: wait)
     }
 }
+
+/// A word for /bin/sh: single quotes, with each ' written as '\''. Ghostty runs a surface's command with /bin/sh -c.
+public func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'" }

@@ -60,14 +60,6 @@ public enum HubURL {
         return url
     }
 
-    /// The terminal websocket: `ws(s)://<hub>/terminals/<id>/ws?cols=&rows=`.
-    public static func terminalSocket(_ base: String, id: Int64, cols: Int, rows: Int) throws -> URL {
-        let http = try join(base, "/terminals/\(id)/ws?cols=\(cols)&rows=\(rows)")
-        var c = URLComponents(url: http, resolvingAgainstBaseURL: false)!
-        c.scheme = c.scheme == "https" ? "wss" : "ws"
-        return c.url!
-    }
-
     static func origin(scheme: String, host: String, port: Int?) -> String {
         var h = host.lowercased()
         while h.hasSuffix(".") && !h.contains(":") { h.removeLast() }
