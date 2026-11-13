@@ -56,7 +56,7 @@
       li.addEventListener("mousedown", function (ev) {
         ev.preventDefault();
         sel = i;
-        open(ev.metaKey);
+        open(ev.metaKey || ev.ctrlKey);
       });
       list.appendChild(li);
     });
@@ -174,7 +174,7 @@
         run();
         return;
       }
-      open(ev.metaKey);
+      open(ev.metaKey || ev.ctrlKey);
     }
   });
 

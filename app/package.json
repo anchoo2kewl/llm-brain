@@ -2,12 +2,13 @@
   "name": "brain-hub-app",
   "private": true,
   "version": "0.1.0",
-  "description": "Native macOS client for the llm-brain hub. The npm package is a build tool only.",
+  "description": "Desktop client (macOS, Windows, Linux) for the llm-brain hub. The npm package is a build tool only.",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build --target aarch64-apple-darwin",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/*.test.mjs"
+    "build": "tauri build",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/*.test.mjs",
+    "build:mac": "tauri build --target aarch64-apple-darwin"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"

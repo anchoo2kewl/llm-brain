@@ -1,21 +1,44 @@
-# Mac app
+# Desktop app
 
-Brain Hub is a small native app for Apple Silicon Macs. It replaces the browser for the hub.
+Brain Hub is a small native app for macOS, Windows and Linux. It replaces the browser for the hub.
 
-The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WKWebView). The app is about 4.6 MB. It has no web framework and no runtime npm packages.
+The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit on macOS and Linux, WebView2 on Windows). The macOS app is about 4.6 MB. It has no web framework and no runtime npm packages.
 
 ## What it does
 
 - The main window shows the hub's own web pages. The app does not copy them.
 - A hub list lets you save many hubs and switch between them.
 - A global hotkey opens a quick-search window.
-- The app shows a macOS notification for each new inbox item.
-- A menu-bar icon gives you Open, Quick search, the hub list and Quit.
+- The app shows a system notification for each new inbox item.
+- A tray (menu-bar) icon gives you Open, Quick search, the hub list and Quit.
 - The window remembers its size and position.
+
+## Download
+
+Get the build for your system from the GitHub release page (tags `client-v<version>`):
+
+| System | File |
+| --- | --- |
+| macOS, Apple Silicon | `Brain.Hub_<version>_aarch64.dmg` |
+| macOS, Intel | `Brain.Hub_<version>_x64.dmg` |
+| Windows | `Brain.Hub_<version>_x64-setup.exe` or `.msi` |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
+
+The builds are not signed:
+
+- macOS: the first start can be blocked. Open System Settings, Privacy and Security, and press Open Anyway. Or run `xattr -dr com.apple.quarantine "/Applications/Brain Hub.app"`.
+- Windows: SmartScreen can warn. Press More info, then Run anyway.
+- Linux: make the AppImage executable (`chmod +x`), or install the `.deb`/`.rpm`. The app needs WebKitGTK 4.1 and an AppIndicator library for the tray icon.
+
+## Publish a release
+
+1. Set the new version in `app/src-tauri/tauri.conf.json` and `app/package.json`.
+2. Push a tag `client-v<version>` for that commit.
+3. The `client-release` workflow runs the tests, builds for macOS (Apple Silicon and Intel), Windows and Linux, and attaches the files to a draft release. It publishes the release only when every build succeeded.
 
 ## Build
 
-You need Rust (cargo) and Node.js. You do not need full Xcode. The Command Line Tools are enough.
+You need Rust (cargo) and Node.js. On macOS, the Command Line Tools are enough; you do not need full Xcode. On Linux, install `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev` and `librsvg2-dev`.
 
 ```sh
 cd app
@@ -23,7 +46,7 @@ npm install
 npm run build
 ```
 
-The build runs `tauri build --target aarch64-apple-darwin`. The npm package `@tauri-apps/cli` is a build tool only. You can use `cargo tauri build` instead if you have installed `cargo-tauri`.
+`npm run build` builds for this computer. `npm run build:mac` builds for Apple Silicon. The npm package `@tauri-apps/cli` is a build tool only. You can use `cargo tauri build` instead if you have installed `cargo-tauri`.
 
 The bundle is here:
 
@@ -41,9 +64,9 @@ Other commands:
 | `cd src-tauri && cargo clippy --all-targets -- -D warnings` | Lints the Rust code. |
 | `npm run dev` | Runs the app from source. |
 
-## Install
+## Install a local build
 
-Copy the app to `/Applications`:
+On macOS, copy the app to `/Applications`:
 
 ```sh
 cp -R "app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Brain Hub.app" /Applications/
@@ -51,11 +74,11 @@ cp -R "app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Brain Hub.
 
 The app has only an ad-hoc signature, so macOS can block the first start, mostly if you copy the app from another Mac. Then open System Settings, Privacy and Security, and press Open Anyway. You can also run `xattr -dr com.apple.quarantine "/Applications/Brain Hub.app"`.
 
-On the first start, the window shows the hub list. Add a hub, for example `http://127.0.0.1:8787`. Allow notifications for Brain Hub in System Settings when macOS asks.
+On the first start, the window shows the hub list. Add a hub, for example `http://127.0.0.1:8787`. Allow notifications for Brain Hub when the system asks.
 
 ## Hub list
 
-Open the list with Cmd+Shift+H, or choose **Manage hubs** in the menu-bar icon.
+Open the list with Cmd+Shift+H (Ctrl+Shift+H on Windows and Linux), or choose **Manage hubs** in the tray icon.
 
 - Add a hub with a name and a URL.
 - Rename or remove a hub with the buttons in its row.
@@ -63,19 +86,19 @@ Open the list with Cmd+Shift+H, or choose **Manage hubs** in the menu-bar icon.
 - A dot next to each hub shows if it answers. The app calls `GET /healthz` every 10 seconds while the list is open. A green dot means the hub answered `ok`.
 - If you select a hub that does not answer, the window does not change. The list shows the error.
 
-The list is saved as JSON in `~/Library/Application Support/app.llmbrain.hub/hubs.json`. You can edit this file by hand. The app drops any hub that fails the host check at start.
+The list is saved as JSON in the app config folder: `~/Library/Application Support/app.llmbrain.hub/hubs.json` on macOS, `%APPDATA%\app.llmbrain.hub\hubs.json` on Windows, `~/.config/app.llmbrain.hub/hubs.json` on Linux. You can edit this file by hand. The app drops any hub that fails the host check at start.
 
-The menu-bar icon also lists the hubs. Choose one to switch.
+The tray icon also lists the hubs. Choose one to switch.
 
 ## Quick search
 
-Press **Option+Space** in any app. A small search window opens on top of other windows.
+Press **Option+Space** on macOS, or **Ctrl+Alt+Space** on Windows and Linux, in any app. A small search window opens on top of other windows.
 
 1. Type your query. The app waits 120 ms after the last key, then calls `GET /api/search?q=<q>&scope=cluster&limit=20` on the selected hub.
 2. Each row shows the title, host, provider, time (for example `12m ago`), the folder name and a snippet.
 3. Press Up or Down to move in the list.
 4. Press Enter to open the session in the main window.
-5. Press Cmd+Enter to continue the session. The app sends `POST` to the row's `continue_url` with `{"mode":"auto"}`. A new terminal session starts with the old context. The app opens it in the main window.
+5. Press Cmd+Enter (Ctrl+Enter on Windows and Linux) to continue the session. The app sends `POST` to the row's `continue_url` with `{"mode":"auto"}`. A new terminal session starts with the old context. The app opens it in the main window.
 6. Press Esc to hide the window. The window also hides when you click outside it.
 
 A newer keystroke replaces an older request. The app drops the reply of the old request.
@@ -86,7 +109,7 @@ If some nodes did not answer, the window lists their names.
 
 ### Change the hotkey
 
-Open the hub list. In **Quick-search hotkey**, press **Change**, then press the new keys. You must use at least one modifier key. The app saves the hotkey in `hubs.json`. If another app uses the same hotkey, the app shows an error and keeps the old hotkey. **Reset** goes back to Option+Space. Tools such as Raycast and Alfred often use Option+Space too.
+Open the hub list. In **Quick-search hotkey**, press **Change**, then press the new keys. You must use at least one modifier key. The app saves the hotkey in `hubs.json`. If another app uses the same hotkey, the app shows an error and keeps the old hotkey. **Reset** goes back to the default for your system. Tools such as Raycast and Alfred often use Option+Space too.
 
 ## Notifications
 
@@ -95,21 +118,23 @@ The app calls `GET /api/inbox` on the selected hub every 30 seconds. It shows a 
 - An item is new when its key is new, or when its time changed. The hub brings an item back when something newer happens there.
 - The app keeps the list of seen items in memory only.
 - The first poll after a start, or after a hub switch, only records the items. It shows no notification. So the app does not announce your whole inbox each time you start it.
-- A notification does not open a page when you click it. Open the window from the menu-bar icon.
+- A notification does not open a page when you click it. Open the window from the tray icon.
 - The app polls only the selected hub.
 
 ## Keyboard shortcuts
 
+On Windows and Linux, use Ctrl where this table says Cmd.
+
 | Keys | Does |
 | --- | --- |
-| Option+Space | Opens quick search (global). |
+| Option+Space (macOS), Ctrl+Alt+Space (Windows, Linux) | Opens quick search (global). |
 | Cmd+R | Reloads the page. |
 | Cmd+[ and Cmd+] | Back and forward. |
 | Cmd+Shift+H | Opens the hub list. |
 | Cmd+W | Hides the window. The app keeps running. |
 | Cmd+Q | Quits the app. |
 
-Click the Dock icon to show the window again.
+On macOS, click the Dock icon to show the window again. On Windows and Linux, use the tray icon.
 
 ## Security notes
 
@@ -124,7 +149,7 @@ Click the Dock icon to show the window again.
 
 ## Limits
 
-- Apple Silicon only. The bundle is built for `aarch64-apple-darwin`.
-- The app is not notarised. See Install.
+- The builds are not signed or notarised. See Download.
+- Only the macOS build was run by hand. The Windows and Linux builds come from CI and were not run by hand yet.
 - The quick-search window is a normal always-on-top window, not a system panel. When it opens, macOS can bring the main window forward too.
 - The app cannot cancel an HTTP request that is already running. It starts no request for an old keystroke, and it drops the reply of an old request. A request ends after 5 seconds at most.

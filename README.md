@@ -14,7 +14,7 @@ It runs on one Mac you leave on, under launchd. Other Macs ship their sessions t
 | [AI Slop Score](docs/slop-score.md) | A taste and PR-hygiene score posted on every review; blocks approval above a threshold. |
 | [LLM roles and gateway](docs/llm-roles-and-gateway.md) | Implementer and a different reviewer LLM; personal accounts first, work only when personal runs out. |
 | [Hub](docs/hub.md) | Inbox, Now, History, search and insights for every agent on every Mac. |
-| [Mac app](docs/mac-app.md) | A small native Mac client for the hub: hub switcher, global quick search, inbox notifications, menu-bar icon. |
+| [Desktop app](docs/desktop-app.md) | Native client for macOS, Windows and Linux: hub switcher, global quick search, notifications. |
 | [Terminals and Workspace](docs/hub-terminals.md) | Claude Code, Codex, Gemini or a shell in tmux, live in the browser, many at once. |
 | [Tasks and model chats](docs/hub-tasks-and-chats.md) | Start, continue, stop and cross-review headless sessions; chat with any gateway model. |
 | [Files and editor](docs/hub-files-and-editor.md) | Browse a Mac, move files both ways, edit a folder in a Sublime-style Monaco editor. |

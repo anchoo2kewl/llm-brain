@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+/// The default quick-search hotkey. On Windows, Alt+Space opens the window menu, so Windows and Linux
+/// use Control+Alt+Space.
+#[cfg(target_os = "macos")]
 pub const DEFAULT_HOTKEY: &str = "Alt+Space";
+#[cfg(not(target_os = "macos"))]
+pub const DEFAULT_HOTKEY: &str = "Control+Alt+Space";
 const MAX_NAME: usize = 64;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -169,7 +174,7 @@ mod tests {
     fn missing_file_gives_default() {
         let c = Config::load(&tmp("missing"));
         assert_eq!(c, Config::default());
-        assert_eq!(c.hotkey, "Alt+Space");
+        assert_eq!(c.hotkey, DEFAULT_HOTKEY);
     }
 
     #[test]
