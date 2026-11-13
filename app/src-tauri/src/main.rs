@@ -1,6 +1,6 @@
 //! Brain Hub: a small native client for the llm-brain hub.
 //! The main window shows the hub's own web pages. This crate adds a hub switcher, a global quick-search
-//! window, inbox notifications and a menu-bar icon. See docs/mac-app.md.
+//! window, inbox notifications and a menu-bar icon. See docs/desktop-app.md.
 
 mod allow;
 mod config;

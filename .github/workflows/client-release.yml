@@ -1,4 +1,5 @@
-# Build the desktop client (app/) for macOS and Linux and publish the files on a GitHub release.
+# Build the desktop clients and publish the files on a GitHub release: the native Mac app (app-mac/) and the Tauri app
+# (app/) for Linux.
 # Push a tag `client-v<version>` (the version in app/src-tauri/tauri.conf.json) to start it.
 name: client-release
 
@@ -41,6 +42,12 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked
           cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
           node --test tests/*.test.mjs
+      - name: Mac app tests
+        working-directory: app-mac
+        # -O as well: an optimiser-only bug once broke the hub URL allow-list.
+        run: |
+          swift test
+          swift test -Xswiftc -O
 
   create-release:
     needs: test
@@ -72,12 +79,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: --target aarch64-apple-darwin
-            rust_targets: aarch64-apple-darwin
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
-            rust_targets: x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
             rust_targets: ""
@@ -110,8 +111,23 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.id }}
           args: ${{ matrix.args }}
 
+  build-mac:
+    needs: create-release
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the universal app
+        working-directory: app-mac
+        run: ./build-app.sh --arch arm64 --arch x86_64
+      - name: Attach the zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" app-mac/dist/BrainHub-mac-*.zip --clobber --repo "$GITHUB_REPOSITORY"
+
   publish:
-    needs: [create-release, build]
+    needs: [create-release, build, build-mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write

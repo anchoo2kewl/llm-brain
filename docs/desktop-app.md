@@ -1,8 +1,8 @@
 # Desktop app
 
-Brain Hub is a small native app for macOS and Linux. It replaces the browser for the hub.
+Brain Hub is a small native app for the hub. On macOS, use the native Mac app: see [mac-app.md](mac-app.md). This page is about the Tauri app for Linux, which also still builds on macOS.
 
-The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit). The macOS app is about 4.6 MB. It has no web framework and no runtime npm packages.
+The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit). It has no web framework and no runtime npm packages.
 
 ## What it does
 
@@ -19,8 +19,7 @@ Get the build for your system from the GitHub release page (tags `client-v<versi
 
 | System | File |
 | --- | --- |
-| macOS, Apple Silicon | `Brain.Hub_<version>_aarch64.dmg` |
-| macOS, Intel | `Brain.Hub_<version>_x64.dmg` |
+| macOS (native app, universal) | `BrainHub-mac-<version>.zip`, see [mac-app.md](mac-app.md) |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
 
 The builds are not signed:
@@ -32,7 +31,7 @@ The builds are not signed:
 
 1. Set the new version in `app/src-tauri/tauri.conf.json` and `app/package.json`.
 2. Push a tag `client-v<version>` for that commit.
-3. The `client-release` workflow runs the tests, builds for macOS (Apple Silicon and Intel) and Linux, and attaches the files to a draft release. It publishes the release only when every build succeeded.
+3. The `client-release` workflow runs the tests, builds the native Mac app and the Linux app, and attaches the files to a draft release. It publishes the release only when every build succeeded.
 
 ## Build
 
