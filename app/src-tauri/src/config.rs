@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-/// The default quick-search hotkey. On Windows, Alt+Space opens the window menu, so Windows and Linux
-/// use Control+Alt+Space.
+/// The default quick-search hotkey. Linux desktops often take Alt+Space for the window menu, so Linux uses
+/// Control+Alt+Space.
 #[cfg(target_os = "macos")]
 pub const DEFAULT_HOTKEY: &str = "Alt+Space";
 #[cfg(not(target_os = "macos"))]

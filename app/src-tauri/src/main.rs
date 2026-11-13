@@ -2,8 +2,6 @@
 //! The main window shows the hub's own web pages. This crate adds a hub switcher, a global quick-search
 //! window, inbox notifications and a menu-bar icon. See docs/mac-app.md.
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 mod allow;
 mod config;
 mod hub;
@@ -742,7 +740,7 @@ fn main() {
 
     app.run(|_app, _event| {
         // macOS only: a click on the Dock icon brings the hidden main window back.
-        // Windows and Linux have no Dock; the tray icon does this there.
+        // Linux has no Dock; the tray icon does this there.
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = _event {
             show_main(_app);

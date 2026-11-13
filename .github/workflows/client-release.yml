@@ -1,4 +1,4 @@
-# Build the desktop client (app/) for macOS, Windows and Linux and publish the files on a GitHub release.
+# Build the desktop client (app/) for macOS and Linux and publish the files on a GitHub release.
 # Push a tag `client-v<version>` (the version in app/src-tauri/tauri.conf.json) to start it.
 name: client-release
 
@@ -79,9 +79,6 @@ jobs:
             args: --target x86_64-apple-darwin
             rust_targets: x86_64-apple-darwin
           - platform: ubuntu-22.04
-            args: ""
-            rust_targets: ""
-          - platform: windows-latest
             args: ""
             rust_targets: ""
     runs-on: ${{ matrix.platform }}

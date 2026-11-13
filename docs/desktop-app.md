@@ -1,8 +1,8 @@
 # Desktop app
 
-Brain Hub is a small native app for macOS, Windows and Linux. It replaces the browser for the hub.
+Brain Hub is a small native app for macOS and Linux. It replaces the browser for the hub.
 
-The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit on macOS and Linux, WebView2 on Windows). The macOS app is about 4.6 MB. It has no web framework and no runtime npm packages.
+The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit). The macOS app is about 4.6 MB. It has no web framework and no runtime npm packages.
 
 ## What it does
 
@@ -21,20 +21,18 @@ Get the build for your system from the GitHub release page (tags `client-v<versi
 | --- | --- |
 | macOS, Apple Silicon | `Brain.Hub_<version>_aarch64.dmg` |
 | macOS, Intel | `Brain.Hub_<version>_x64.dmg` |
-| Windows | `Brain.Hub_<version>_x64-setup.exe` or `.msi` |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
 
 The builds are not signed:
 
 - macOS: the first start can be blocked. Open System Settings, Privacy and Security, and press Open Anyway. Or run `xattr -dr com.apple.quarantine "/Applications/Brain Hub.app"`.
-- Windows: SmartScreen can warn. Press More info, then Run anyway.
 - Linux: make the AppImage executable (`chmod +x`), or install the `.deb`/`.rpm`. The app needs WebKitGTK 4.1 and an AppIndicator library for the tray icon.
 
 ## Publish a release
 
 1. Set the new version in `app/src-tauri/tauri.conf.json` and `app/package.json`.
 2. Push a tag `client-v<version>` for that commit.
-3. The `client-release` workflow runs the tests, builds for macOS (Apple Silicon and Intel), Windows and Linux, and attaches the files to a draft release. It publishes the release only when every build succeeded.
+3. The `client-release` workflow runs the tests, builds for macOS (Apple Silicon and Intel) and Linux, and attaches the files to a draft release. It publishes the release only when every build succeeded.
 
 ## Build
 
@@ -78,7 +76,7 @@ On the first start, the window shows the hub list. Add a hub, for example `http:
 
 ## Hub list
 
-Open the list with Cmd+Shift+H (Ctrl+Shift+H on Windows and Linux), or choose **Manage hubs** in the tray icon.
+Open the list with Cmd+Shift+H (Ctrl+Shift+H on Linux), or choose **Manage hubs** in the tray icon.
 
 - Add a hub with a name and a URL.
 - Rename or remove a hub with the buttons in its row.
@@ -86,13 +84,13 @@ Open the list with Cmd+Shift+H (Ctrl+Shift+H on Windows and Linux), or choose **
 - A dot next to each hub shows if it answers. The app calls `GET /healthz` every 10 seconds while the list is open. A green dot means the hub answered `ok`.
 - If you select a hub that does not answer, the window does not change. The list shows the error.
 
-The list is saved as JSON in the app config folder: `~/Library/Application Support/app.llmbrain.hub/hubs.json` on macOS, `%APPDATA%\app.llmbrain.hub\hubs.json` on Windows, `~/.config/app.llmbrain.hub/hubs.json` on Linux. You can edit this file by hand. The app drops any hub that fails the host check at start.
+The list is saved as JSON in the app config folder: `~/Library/Application Support/app.llmbrain.hub/hubs.json` on macOS, `~/.config/app.llmbrain.hub/hubs.json` on Linux. You can edit this file by hand. The app drops any hub that fails the host check at start.
 
 The tray icon also lists the hubs. Choose one to switch.
 
 ## Terminal windows
 
-Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Windows and Linux) in the app menu, the Window menu or the tray icon. A new window opens the selected hub's Workspace: all its terminals, with layouts of 1 to 9 panes and zoom (Ctrl+Shift+Enter).
+Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Linux) in the app menu, the Window menu or the tray icon. A new window opens the selected hub's Workspace: all its terminals, with layouts of 1 to 9 panes and zoom (Ctrl+Shift+Enter).
 
 - Open as many windows as you need, for example one per screen. Each window keeps its own layout, so you can put different terminals in each.
 - Closing a terminal window closes only the window. The terminals keep running on their machines.
@@ -101,13 +99,13 @@ Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Windows and Linux) in 
 
 ## Quick search
 
-Press **Option+Space** on macOS, or **Ctrl+Alt+Space** on Windows and Linux, in any app. A small search window opens on top of other windows.
+Press **Option+Space** on macOS, or **Ctrl+Alt+Space** on Linux, in any app. A small search window opens on top of other windows.
 
 1. Type your query. The app waits 120 ms after the last key, then calls `GET /api/search?q=<q>&scope=cluster&limit=20` on the selected hub.
 2. Each row shows the title, host, provider, time (for example `12m ago`), the folder name and a snippet.
 3. Press Up or Down to move in the list.
 4. Press Enter to open the session in the main window.
-5. Press Cmd+Enter (Ctrl+Enter on Windows and Linux) to continue the session. The app sends `POST` to the row's `continue_url` with `{"mode":"auto"}`. A new terminal session starts with the old context. The app opens it in the main window.
+5. Press Cmd+Enter (Ctrl+Enter on Linux) to continue the session. The app sends `POST` to the row's `continue_url` with `{"mode":"auto"}`. A new terminal session starts with the old context. The app opens it in the main window.
 6. Press Esc to hide the window. The window also hides when you click outside it.
 
 A newer keystroke replaces an older request. The app drops the reply of the old request.
@@ -132,11 +130,11 @@ The app calls `GET /api/inbox` on the selected hub every 30 seconds. It shows a 
 
 ## Keyboard shortcuts
 
-On Windows and Linux, use Ctrl where this table says Cmd.
+On Linux, use Ctrl where this table says Cmd.
 
 | Keys | Does |
 | --- | --- |
-| Option+Space (macOS), Ctrl+Alt+Space (Windows, Linux) | Opens quick search (global). |
+| Option+Space (macOS), Ctrl+Alt+Space (Linux) | Opens quick search (global). |
 | Cmd+R | Reloads the page. |
 | Cmd+[ and Cmd+] | Back and forward. |
 | Cmd+Shift+H | Opens the hub list. |
@@ -144,7 +142,7 @@ On Windows and Linux, use Ctrl where this table says Cmd.
 | Cmd+W | Hides the window. The app keeps running. |
 | Cmd+Q | Quits the app. |
 
-On macOS, click the Dock icon to show the window again. On Windows and Linux, use the tray icon.
+On macOS, click the Dock icon to show the window again. On Linux, use the tray icon.
 
 ## Security notes
 
@@ -160,6 +158,6 @@ On macOS, click the Dock icon to show the window again. On Windows and Linux, us
 ## Limits
 
 - The builds are not signed or notarised. See Download.
-- Only the macOS build was run by hand. The Windows and Linux builds come from CI and were not run by hand yet.
+- Only the macOS build was run by hand. The Linux build comes from CI and was not run by hand yet.
 - The quick-search window is a normal always-on-top window, not a system panel. When it opens, macOS can bring the main window forward too.
 - The app cannot cancel an HTTP request that is already running. It starts no request for an old keystroke, and it drops the reply of an old request. A request ends after 5 seconds at most.
