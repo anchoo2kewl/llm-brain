@@ -238,6 +238,12 @@ struct TerminalPane: View {
                     .padding(.top, 8)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if let note = session.note {
+                    Text(note).font(.callout).padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule()).padding(.bottom, 10)
+                }
+            }
             .background(SwiftUI.Color(nsColor: session.engine.background))
     }
 }
@@ -247,28 +253,53 @@ struct TerminalHost: NSViewRepresentable {
     let engine: TerminalEngine
     let focused: Bool
 
-    func makeNSView(context: Context) -> NSView {
-        let box = NSView()
-        attach(to: box)
-        return box
-    }
+    func makeNSView(context: Context) -> HostBox { HostBox(engine: engine) }
 
-    func updateNSView(_ box: NSView, context: Context) {
-        if engine.view.superview !== box { attach(to: box) }
+    func updateNSView(_ box: HostBox, context: Context) {
+        box.claim()
         if focused { DispatchQueue.main.async { [engine] in engine.focus() } }
     }
+}
 
-    private func attach(to box: NSView) {
+/// The box a pane's terminal view sits in. SwiftUI can make a new box before it removes the old one, and the old
+/// box then takes the view last: the box on screen takes it back when it joins a window and when its window
+/// becomes key, so a pane is never left empty.
+final class HostBox: NSView {
+    let engine: TerminalEngine
+    private var keyObserver: NSObjectProtocol?
+
+    init(engine: TerminalEngine) {
+        self.engine = engine
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func claim() {
         let view = engine.view
+        guard view.superview !== self else { return }
         view.removeFromSuperview()
         view.translatesAutoresizingMaskIntoConstraints = false
-        box.addSubview(view)
+        addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 6),
-            view.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-            view.topAnchor.constraint(equalTo: box.topAnchor, constant: 4),
-            view.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        engine.redraw()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        keyObserver = nil
+        guard let window else { return }
+        claim()
+        keyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window,
+                                                             queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.claim() }
+        }
     }
 }
 

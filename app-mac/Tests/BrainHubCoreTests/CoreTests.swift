@@ -43,6 +43,13 @@ import BrainHubCore
         #expect(Paths.search("a b&c=d/é") == "/api/search?q=a%20b%26c%3Dd%2F%C3%A9&scope=cluster&limit=20")
     }
 
+    @Test func uploadPathAndPastedText() {
+        #expect(Paths.upload(host: "mac-1", terminal: 7) == "/hosts/mac-1/upload?into=t7")
+        #expect(Paths.upload(host: "a b/c", terminal: 7) == "/hosts/a%20b%2Fc/upload?into=t7")
+        #expect(pastedPaths(["/u/t7/a.png"]) == "/u/t7/a.png ")
+        #expect(pastedPaths(["/u/t7/a b.png", "/u/x.png"]) == "'/u/t7/a b.png' /u/x.png ")
+    }
+
     @Test func formBody() {
         #expect(formEncode([("host", "mac-1"), ("cli", "shell"), ("path", "~/my projects"), ("format", "json")])
             == "host=mac-1&cli=shell&path=~%2Fmy%20projects&format=json")

@@ -12,6 +12,8 @@ final class TerminalSession {
     /// What the pane shows over the terminal (offline, ended), or nil.
     private(set) var message: String?
     private(set) var ended = false
+    /// A short note at the bottom of the pane: a paste being copied to the machine, or why it failed.
+    private(set) var note: String?
 
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var retry: Task<Void, Never>?
@@ -24,6 +26,7 @@ final class TerminalSession {
         self.model = model
         engine.onBell = { [weak self] in if let self { self.model?.bell(self.ref) } }
         engine.onExit = { [weak self] in Task { await self?.exited() } }
+        engine.onFiles = { [weak self] files in self?.upload(files) }
         connect()
     }
 
@@ -73,6 +76,35 @@ final class TerminalSession {
         wanted = false
         retry?.cancel()
         engine.stop()
+    }
+
+    /// Put pasted or dropped files on the terminal's machine (the hub's uploads folder for this terminal), then paste
+    /// their paths there: Claude Code and Codex attach an image when its path is pasted.
+    private func upload(_ files: [PastedFile]) {
+        guard let host = model?.terminal(ref)?.host else {
+            show("The hub does not say which machine runs this terminal.")
+            return
+        }
+        note = files.count == 1 ? "Copying \(files[0].name) to \(host)…" : "Copying \(files.count) files to \(host)…"
+        Task {
+            do {
+                let client = try HubClient(base: ref.hub)
+                var paths: [String] = []
+                for f in files { paths.append(try await client.upload(Paths.upload(host: host, terminal: ref.id), name: f.name, data: f.data)) }
+                note = nil
+                engine.paste(pastedPaths(paths))
+            } catch {
+                show("Could not copy to \(host): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func show(_ text: String) {
+        note = text
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            if self?.note == text { self?.note = nil }
+        }
     }
 
     /// Bytes as if typed: send-prefix, copy-mode.

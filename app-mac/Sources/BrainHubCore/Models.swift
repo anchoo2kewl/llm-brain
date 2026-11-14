@@ -175,9 +175,19 @@ public enum Paths {
     public static func close(_ id: Int64) -> String { "/api/terminals/\(id)/close" }
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }
+    /// Put a file on a machine, in the hub's uploads folder for this terminal (`t<id>`, as the web terminal does).
+    public static func upload(host: String, terminal id: Int64) -> String {
+        "/hosts/\(host.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._"))) ?? host)/upload?into=t\(id)"
+    }
     public static func search(_ q: String) -> String {
         "/api/search?" + formEncode([("q", q), ("scope", "cluster"), ("limit", "20")])
     }
+}
+
+/// The text pasted after an upload: the paths on that machine, a path with a space in single quotes, then a space.
+/// Claude Code and Codex attach an image when its path is pasted.
+public func pastedPaths(_ paths: [String]) -> String {
+    paths.map { $0.contains(where: \.isWhitespace) ? shellQuote($0) : $0 }.joined(separator: " ") + " "
 }
 
 /// The CLIs a new terminal can run (`cli` form field of `POST /terminals/new`).

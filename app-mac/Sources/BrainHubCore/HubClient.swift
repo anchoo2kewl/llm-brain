@@ -33,6 +33,21 @@ public struct HubClient: Sendable {
                                          contentType: "application/x-www-form-urlencoded", timeout: timeout))
     }
 
+    /// Upload one file (`POST /hosts/{host}/upload`, multipart field "file"). Returns the path on that machine.
+    public func upload(_ path: String, name: String, data: Data, timeout: TimeInterval = 300) async throws -> String {
+        struct Put: Decodable { var path: String }
+        let boundary = "brainhub-" + UUID().uuidString
+        let safe = name.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_")
+            .replacingOccurrences(of: "\n", with: "_")
+        var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safe)\"\r\n".utf8)
+        body.append(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(data)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let reply: Put = try decode(try await send(path, method: "POST", body: body,
+                                                   contentType: "multipart/form-data; boundary=\(boundary)", timeout: timeout))
+        return reply.path
+    }
+
     func send(_ path: String, method: String, body: Data?, contentType: String?, timeout: TimeInterval) async throws -> Data {
         var req = URLRequest(url: try HubURL.join(base, path), timeoutInterval: timeout)
         req.httpMethod = method

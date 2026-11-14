@@ -14,6 +14,8 @@ final class TerminalEngine {
     var onBell: (() -> Void)?
     /// The command (brain-attach) exited and the surface closed.
     var onExit: (() -> Void)?
+    /// Files to put on the terminal's machine: an image or files on the clipboard (⌘V, ⌃V), or dropped files.
+    var onFiles: (([PastedFile]) -> Void)?
 
     private var surface: SurfaceView?
     /// The last surface had the keyboard: the next one takes it, unless something else has it by then.
@@ -25,6 +27,7 @@ final class TerminalEngine {
         let s = SurfaceView(command: command, frame: view.bounds)
         s.autoresizingMask = [.width, .height]
         s.onBell = { [weak self] in self?.onBell?() }
+        s.onFiles = { [weak self] files in self?.onFiles?(files) }
         s.onClose = { [weak self, weak s] in
             guard let self, let s, s === surface else { return }
             stop()
@@ -47,6 +50,15 @@ final class TerminalEngine {
     /// Make it the window's first responder.
     func focus() {
         if let s = surface, s.window?.firstResponder !== s { s.window?.makeFirstResponder(s) }
+    }
+
+    /// Draw again: the view moved to another box or window.
+    func redraw() { surface?.redraw() }
+
+    /// Text as a paste (bracketed when the program asks for it), as ⌘V would paste it.
+    func paste(_ text: String) {
+        guard let s = surface?.surface else { return }
+        text.withCString { ghostty_surface_paste_text(s, $0, UInt(text.utf8.count)) }
     }
 
     /// Bytes as if typed (tmux send-prefix, copy-mode). Ghostty's `text:` action writes them to the pty as they are,
@@ -187,6 +199,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     private(set) var surface: ghostty_surface_t?
     var onBell: (() -> Void)?
     var onClose: (() -> Void)?
+    var onFiles: (([PastedFile]) -> Void)?
     var cursorShape = GHOSTTY_MOUSE_SHAPE_TEXT {
         didSet { window?.invalidateCursorRects(for: self) }
     }
@@ -213,6 +226,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             cfg.command = cmd
             return ghostty_surface_new(app, &cfg)
         }
+        registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -282,6 +296,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         // follow the notifications, as Ghostty's own app does.
         ghostty_surface_set_occlusion(surface, true)
         viewDidChangeBackingProperties()
+    }
+
+    func redraw() {
+        guard let surface, window != nil else { return }
+        ghostty_surface_set_occlusion(surface, true)
+        viewDidChangeBackingProperties()
+        ghostty_surface_refresh(surface)
     }
 
     private func updateVisibility() {
@@ -394,6 +415,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: keys
 
     override func keyDown(with event: NSEvent) {
+        // ⌃V with an image or files on the clipboard: Claude Code's own ⌃V reads the clipboard of the machine it
+        // runs on, not this Mac's.
+        if event.modifierFlags.intersection([.control, .option, .command, .shift]) == .control,
+           event.charactersIgnoringModifiers == "v", let onFiles, let files = PastedFile.read(.general) {
+            onFiles(files)
+            return
+        }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -529,7 +557,20 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     @objc func copy(_ sender: Any?) { perform("copy_to_clipboard") }
-    @objc func paste(_ sender: Any?) { perform("paste_from_clipboard") }
+    @objc func paste(_ sender: Any?) {
+        if let onFiles, let files = PastedFile.read(.general) { onFiles(files) } else { perform("paste_from_clipboard") }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onFiles != nil && sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self],
+                                                                   options: [.urlReadingFileURLsOnly: true]) ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let onFiles, let files = PastedFile.read(sender.draggingPasteboard) else { return false }
+        onFiles(files)
+        return true
+    }
     @objc override func selectAll(_ sender: Any?) { perform("select_all") }
 
     // MARK: NSTextInputClient (input methods, dead keys, dictation)
@@ -578,4 +619,27 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     /// Unbound editing commands (C-a's moveToBeginningOfParagraph:, and so on) do nothing: keyDown sends the key.
     /// Without this, AppKit beeps.
     override func doCommand(by selector: Selector) {}
+}
+
+/// A file from the clipboard or a drop, to put on the terminal's machine.
+struct PastedFile: Sendable {
+    var name: String
+    var data: Data
+
+    /// Copied or dropped files (folders are skipped), else an image with no text (a screenshot, "Copy Image"), as
+    /// PNG. Nil means a normal text paste.
+    static func read(_ pb: NSPasteboard) -> [PastedFile]? {
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            let files = urls.compactMap { u in (try? Data(contentsOf: u)).map { PastedFile(name: u.lastPathComponent, data: $0) } }
+            return files.isEmpty ? nil : files
+        }
+        guard pb.string(forType: .string) == nil else { return nil }
+        let png = pb.data(forType: .png)
+            ?? pb.data(forType: .tiff).flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
+        guard let png else { return nil }
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
+            .replacingOccurrences(of: ":", with: "")
+        return [PastedFile(name: "pasted-\(stamp).png", data: png)]
+    }
 }
