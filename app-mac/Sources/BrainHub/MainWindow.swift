@@ -1,6 +1,7 @@
 import AppKit
 import BrainHubCore
 import SwiftUI
+import WebKit
 
 /// What the menu commands act on: the key window.
 struct WindowActions {
@@ -40,6 +41,8 @@ struct MainWindow: View {
     @ViewState private var newTitle = ""
     @ViewState private var closing: TerminalRef?
     @ViewState private var failure: String?
+    @SceneStorage("layout") private var layout = WindowLayout.terminal
+    @ViewState private var web = WKWebView()
 
     var body: some View {
         NavigationSplitView {
@@ -47,12 +50,26 @@ struct MainWindow: View {
                     rename: startRename, close: { closing = $0 }, openInWindow: { openWindow(value: $0) }, failure: $failure)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
-            PaneTreeView(panes: panes)
+            switch (layout, model.hub.flatMap(URL.init(string:))) {
+            case (.hub, let url?): HubPage(web: web, url: url)
+            case (.both, let url?): HSplitView { HubPage(web: web, url: url); PaneTreeView(panes: panes) }
+            default: PaneTreeView(panes: panes)
+            }
         }
         .background(WindowReader { w in panes.window = w })
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Picker("Show", selection: $layout) {
+                    ForEach(WindowLayout.allCases, id: \.self) { l in
+                        Label(l.title, systemImage: l.icon).help("Show \(l == .both ? "the hub and the terminal" : "the " + l.title.lowercased())")
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelStyle(.iconOnly)
+                .disabled(model.hub == nil)
+            }
             ToolbarItemGroup {
                 if model.config.hubs.count > 1 {
                     Menu {
@@ -104,6 +121,7 @@ struct MainWindow: View {
         }
         .onChange(of: panes.tree.focusedTerminal) {
             selection = panes.tree.focusedTerminal
+            if layout == .hub, panes.tree.focusedTerminal != nil { layout = .terminal } // a chosen terminal comes into view
             focus()
         }
         .onChange(of: active, initial: true) { focus() }
