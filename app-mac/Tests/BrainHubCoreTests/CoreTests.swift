@@ -211,3 +211,21 @@ import BrainHubCore
         #expect(ms[1].elsewhere.map(\.id) == [9])
     }
 }
+
+@Suite struct SidebarOrder {
+    func term(_ id: Int64, _ updated: String) -> Terminal {
+        Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated)
+    }
+
+    @Test func draggedOrderFirstThenNewest() {
+        let ts = [("h", term(1, "2026-01-01T00:00:01Z")), ("h", term(2, "2026-01-01T00:00:02Z")),
+                  ("h", term(3, "2026-01-01T00:00:03Z")), ("h", term(4, "2026-01-01T00:00:04Z"))]
+        let ids = { (o: [Int64]) in
+            machines(terminals: ts, live: [], nodes: ["m"], keep: [], order: o.map { TerminalRef(hub: "h", id: $0) })[0]
+                .terminals.map(\.ref.id)
+        }
+        #expect(ids([]) == [4, 3, 2, 1])
+        #expect(ids([1, 3]) == [1, 3, 4, 2])
+        #expect(ids([9, 2]) == [2, 4, 3, 1]) // a ref no longer open is ignored
+    }
+}

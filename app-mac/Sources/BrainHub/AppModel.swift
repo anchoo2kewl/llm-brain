@@ -22,6 +22,13 @@ final class AppModel {
     private(set) var hubError: String?
     private(set) var loaded = false
 
+    /// The sidebar order you dragged terminals to (and so ⌘1…9). Terminals not in it follow, newest first.
+    private(set) var order: [TerminalRef] = {
+        (try? JSONDecoder().decode([TerminalRef].self, from: UserDefaults.standard.data(forKey: "sidebarOrder") ?? Data())) ?? []
+    }() {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(order), forKey: "sidebarOrder") }
+    }
+
     /// Open connections, one per terminal, shared by every window.
     private(set) var sessions: [TerminalRef: TerminalSession] = [:]
     /// The terminal in the key window, when the app is active.
@@ -50,7 +57,24 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys))
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys), order: order)
+    }
+
+    /// Drag in the sidebar: the machine's terminals take the new order, ahead of the terminals not yet ordered.
+    func move(in machine: Machine, from: IndexSet, to: Int) {
+        var refs = machine.terminals.map(\.ref)
+        refs.move(fromOffsets: from, toOffset: to)
+        setOrder(refs)
+    }
+
+    func moveToTop(_ ref: TerminalRef, in machine: Machine) {
+        setOrder([ref] + machine.terminals.map(\.ref).filter { $0 != ref })
+    }
+
+    private func setOrder(_ refs: [TerminalRef]) {
+        let open = Set(terminals.map { TerminalRef(hub: $0.hub, id: $0.terminal.id) })
+        // Ended terminals leave the list, so it stays small.
+        order = refs + order.filter { !refs.contains($0) && open.contains($0) }
     }
     var machineNames: [String] { machines.map(\.name) }
 

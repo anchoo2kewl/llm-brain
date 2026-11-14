@@ -172,12 +172,14 @@ struct Sidebar: View {
                         row(e, number: index[e.ref])
                             .tag(e.ref)
                             .contextMenu {
+                                Button("Move to Top") { model.moveToTop(e.ref, in: m) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
                                 Divider()
                                 Button("End Terminal…", role: .destructive) { close(e.ref) }
                             }
                     }
+                    .onMove { from, to in model.move(in: m, from: from, to: to) }
                     if !m.elsewhere.isEmpty {
                         DisclosureGroup("Running elsewhere (\(m.elsewhere.count))") {
                             ForEach(m.elsewhere) { s in
