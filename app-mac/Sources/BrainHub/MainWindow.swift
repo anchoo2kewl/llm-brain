@@ -173,6 +173,7 @@ struct Sidebar: View {
     var close: (TerminalRef) -> Void
     var openInWindow: (TerminalRef) -> Void
     @Binding var failure: String?
+    @ViewState private var expanded: Set<TerminalRef> = []
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
@@ -187,7 +188,7 @@ struct Sidebar: View {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
                     }
                     ForEach(m.terminals) { e in
-                        row(e, number: index[e.ref])
+                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded)
                             .tag(e.ref)
                             .contextMenu {
                                 Button("Move to Top") { model.moveToTop(e.ref, in: m) }
@@ -219,31 +220,9 @@ struct Sidebar: View {
         }
     }
 
-    private func row(_ e: Machine.Entry, number: Int?) -> some View {
-        let t = e.terminal
-        return HStack(spacing: 8) {
-            Circle().fill(color(model.state(e.ref))).frame(width: 8, height: 8)
-                .help(help(model.state(e.ref)))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(t.title.isEmpty ? t.cli : t.title).lineLimit(1)
-                Text("\(t.cli) · \(t.cwd)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            if let number, number < 9 { Text("⌘\(number + 1)").font(.caption2).foregroundStyle(.tertiary) }
-        }
-    }
-
     private func continueLive(_ s: LiveSession) {
         Task {
             do { selection = try await model.continueLive(s) } catch { failure = error.localizedDescription }
         }
-    }
-
-    private func color(_ s: AppModel.DotState) -> SwiftUI.Color {
-        switch s { case .working: .green; case .waiting: .orange; case .ended: .gray }
-    }
-
-    private func help(_ s: AppModel.DotState) -> String {
-        switch s { case .working: "Running"; case .waiting: "Waiting for you"; case .ended: "Ended" }
     }
 }

@@ -2,7 +2,11 @@ import Foundation
 
 // The hub's JSON, field for field (hub/internal/web: terminals.go, find.go, inbox.go, cluster).
 
-/// One terminal from `GET /api/terminals`. `status` is starting | live | ended | failed.
+/// What a terminal's agent does now, as the hub decides it (hub/internal/web/termstate.go).
+public enum AgentState: String, Codable, Sendable { case working, waiting, blocked, idle, ended }
+
+/// One terminal from `GET /api/terminals`. `status` is starting | live | ended | failed. The fields after `updated`
+/// come from a hub that decides the agent's state; an older hub sends none of them.
 public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     public var id: Int64
     public var title: String
@@ -13,14 +17,75 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     public var status: String
     public var error: String?
     public var updated: String
+    public var state: AgentState?
+    /// What the agent asks or last said, in one line, and its kind: question | done | error.
+    public var ask: String?
+    public var askKind: String?
+    public var fix: String?
+    public var model: String?
+    public var branch: String?
+    /// Tokens in the newest request, and the model's limit.
+    public var contextUsed: Int?
+    public var contextWindow: Int?
+    /// Subagents that run now.
+    public var subagents: Int?
+    public var started: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
+        case contextUsed = "context_used", contextWindow = "context_window", subagents, started
+    }
 
     public init(id: Int64, title: String, host: String, cli: String, provider: String, cwd: String,
-                status: String, error: String? = nil, updated: String) {
+                status: String, error: String? = nil, updated: String, state: AgentState? = nil, ask: String? = nil,
+                askKind: String? = nil) {
         (self.id, self.title, self.host, self.cli, self.provider, self.cwd, self.status, self.error, self.updated) =
             (id, title, host, cli, provider, cwd, status, error, updated)
+        (self.state, self.ask, self.askKind) = (state, ask, askKind)
     }
 
     public var isOpen: Bool { status == "live" || status == "starting" }
+
+    /// The CLI's short name for a badge: the hub's raw `provider`, never its long label.
+    public var badge: String { CLI(rawValue: provider)?.label ?? cli }
+
+    /// How full the context is, 0…1; nil when the hub does not know.
+    public var contextFraction: Double? {
+        guard let used = contextUsed, let window = contextWindow, used > 0, window > 0 else { return nil }
+        return min(1, Double(used) / Double(window))
+    }
+
+    /// The agent needs an answer or hit an error: it stays marked until that changes. A finished turn is marked
+    /// only until you look at it.
+    public var needsAnswer: Bool { state == .blocked || (state == .waiting && askKind != "done") }
+}
+
+/// `GET /api/terminals/{id}/detail`: what an expanded row shows.
+public struct TerminalDetail: Decodable, Sendable {
+    public struct Agent: Decodable, Sendable, Hashable {
+        public var title: String
+        public var updated: String
+        public var messages: Int
+        public var live: Bool
+    }
+    public struct Stats: Decodable, Sendable {
+        public var dollars: Double
+        public var toolCalls: Int
+        public var toolErrors: Int
+        public var prompts: Int
+        enum CodingKeys: String, CodingKey { case dollars, toolCalls = "tool_calls", toolErrors = "tool_errors", prompts }
+    }
+    public var lastPrompt: String?
+    public var lastReply: String?
+    public var tool: String?
+    public var agents: [Agent]?
+    public var stats: Stats?
+    enum CodingKeys: String, CodingKey { case lastPrompt = "last_prompt", lastReply = "last_reply", tool, agents, stats }
+}
+
+/// 63499 → "63k", 1200000 → "1.2M".
+public func shortCount(_ n: Int) -> String {
+    n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1_000_000) : n >= 1000 ? "\(n / 1000)k" : "\(n)"
 }
 
 /// A Claude Code or Codex conversation running outside the hub's terminals (`GET /api/live-sessions`).
@@ -173,6 +238,8 @@ public enum Paths {
     public static func status(_ id: Int64) -> String { "/terminals/\(id)/status" }
     public static func rename(_ id: Int64) -> String { "/terminals/\(id)/rename" }
     public static func close(_ id: Int64) -> String { "/api/terminals/\(id)/close" }
+    public static func detail(_ id: Int64) -> String { "/api/terminals/\(id)/detail" }
+    public static func send(_ id: Int64) -> String { "/api/terminals/\(id)/send" }
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }
     /// Put a file on a machine, in the hub's uploads folder for this terminal (`t<id>`, as the web terminal does).

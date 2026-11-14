@@ -16,8 +16,11 @@ final class AppModel {
     private(set) var live: [LiveSession] = []
     /// The hub's inbox says these wait for you.
     private(set) var inboxWaiting: Set<TerminalRef> = []
-    /// Rang the bell since you last looked.
+    /// Rang the bell since you last looked. Only for a hub that does not send a terminal's state.
     private(set) var rang: Set<TerminalRef> = []
+    /// Terminals whose finished turn you looked at; a terminal leaves when its state changes.
+    private(set) var seen: Set<TerminalRef> = []
+    @ObservationIgnored private var lastState: [TerminalRef: String] = [:]
     /// Why the selected hub cannot be reached, or nil.
     private(set) var hubError: String?
     private(set) var loaded = false
@@ -32,7 +35,7 @@ final class AppModel {
     /// Open connections, one per terminal, shared by every window.
     private(set) var sessions: [TerminalRef: TerminalSession] = [:]
     /// The terminal in the key window, when the app is active.
-    var focused: TerminalRef? { didSet { if let focused { rang.remove(focused) }; updateBadge() } }
+    var focused: TerminalRef? { didSet { if let focused { rang.remove(focused); seen.insert(focused) }; updateBadge() } }
     /// A notification click asks the key window to show this terminal.
     var reveal: TerminalRef?
 
@@ -85,14 +88,23 @@ final class AppModel {
     /// Order of the sidebar, for Cmd+1…9.
     var orderedRefs: [TerminalRef] { machines.flatMap { $0.terminals.map(\.ref) } }
 
-    enum DotState { case working, waiting, ended }
-    func state(_ ref: TerminalRef) -> DotState {
-        if let t = terminal(ref), !t.isOpen { return .ended }
+    /// The agent's state: the hub's answer. A hub that sends none (an older one) is read from its inbox and the bell.
+    func state(_ ref: TerminalRef) -> AgentState {
+        let t = terminal(ref)
+        if let t, !t.isOpen { return .ended }
         if sessions[ref]?.ended == true { return .ended }
-        if rang.contains(ref) || (inboxWaiting.contains(ref) && focused != ref) { return .waiting }
-        return .working
+        if let s = t?.state { return s }
+        return rang.contains(ref) || (inboxWaiting.contains(ref) && focused != ref) ? .waiting : .working
     }
-    var waitingCount: Int { orderedRefs.filter { state($0) == .waiting }.count }
+
+    /// The row is marked and counted: the agent needs an answer, or it finished a turn you did not look at yet.
+    func wantsYou(_ ref: TerminalRef) -> Bool {
+        let s = state(ref)
+        guard s == .waiting || s == .blocked else { return false }
+        guard let t = terminal(ref), t.state != nil else { return true }
+        return t.needsAnswer || !seen.contains(ref)
+    }
+    var waitingCount: Int { orderedRefs.filter(wantsYou).count }
 
     static let prefixOverrideKey = "tmux.prefixOverride"
 
@@ -209,7 +221,18 @@ final class AppModel {
             guard client.base == hub else { return } // switched hubs meanwhile
             let fresh = waiting.subtracting(inboxWaiting)
             (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
-            if primed { for ref in fresh where sessions[ref] == nil { notify(ref) } }
+            let inFront = NSApp.isActive ? focused : nil
+            for (hub, t) in all {
+                let ref = TerminalRef(hub: hub, id: t.id)
+                guard let s = t.state else { // an older hub: its inbox says who waits
+                    if primed, fresh.contains(ref), sessions[ref] == nil { notify(ref) }
+                    continue
+                }
+                let key = "\(s.rawValue)/\(t.askKind ?? "")"
+                guard lastState.updateValue(key, forKey: ref) != key else { continue }
+                if ref == inFront { seen.insert(ref) } else { seen.remove(ref) }
+                if primed, ref != inFront, s == .waiting || s == .blocked { notify(ref) }
+            }
             primed = true
             updateBadge()
         } catch {
@@ -231,7 +254,7 @@ final class AppModel {
     /// The terminal rang the bell: its agent finished and waits for you.
     func bell(_ ref: TerminalRef) {
         let inFront = focused == ref && NSApp.isActive
-        if inFront { return }
+        if inFront || terminal(ref)?.state != nil { return } // the hub says when this one waits
         rang.insert(ref)
         updateBadge()
         notify(ref)
@@ -299,6 +322,9 @@ final class AppModel {
         guard Self.canNotify else { return }
         let c = UNUserNotificationCenter.current()
         c.delegate = NotificationDelegate.shared
+        let reply = UNTextInputNotificationAction(identifier: "reply", title: "Reply", options: [], textInputButtonTitle: "Send",
+                                                  textInputPlaceholder: "Type an answer for the agent")
+        c.setNotificationCategories([UNNotificationCategory(identifier: "ask", actions: [reply], intentIdentifiers: [])])
         c.requestAuthorization(options: [.alert, .sound, .badge]) { granted, err in
             if !granted { NSLog("Brain Hub: notifications are not allowed (%@)", err?.localizedDescription ?? "turned off in System Settings") }
         }
@@ -310,11 +336,35 @@ final class AppModel {
         let t = terminal(ref)
         let content = UNMutableNotificationContent()
         content.title = (t?.title.isEmpty == false ? t!.title : t?.cli) ?? "Terminal \(ref.id)"
-        content.body = "Waiting for you" + (t.map { " on \($0.host)" } ?? "")
+        content.subtitle = Self.headline(t) + (t.map { " · \($0.host)" } ?? "")
+        content.body = t?.ask ?? t?.fix ?? ""
+        content.categoryIdentifier = "ask"
         content.sound = .default
         content.userInfo = ["hub": ref.hub, "id": ref.id]
         let req = UNNotificationRequest(identifier: "\(ref.hub)#\(ref.id)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req) { err in if let err { NSLog("Brain Hub: notification failed: %@", err.localizedDescription) } }
+    }
+}
+
+extension AppModel {
+    /// Why a terminal wants you, in two or three words.
+    static func headline(_ t: Terminal?) -> String {
+        switch (t?.state, t?.askKind) {
+        case (.blocked, _): "Blocked"
+        case (_, "question"): "Needs an answer"
+        case (_, "error"): "Stopped on an error"
+        case (_, "done"): "Finished its turn"
+        default: "Waiting for you"
+        }
+    }
+
+    /// Type text into a terminal and press Enter (the reply to a notification).
+    func send(_ text: String, to ref: TerminalRef) async {
+        struct OK: Decodable {}
+        do {
+            _ = try await HubClient(base: ref.hub).post(Paths.send(ref.id), json: ["text": text, "keys": ["Enter"]], as: OK.self)
+            await refresh()
+        } catch { NSLog("Brain Hub: reply failed: %@", error.localizedDescription) }
     }
 }
 
@@ -324,9 +374,14 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate, Se
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         guard let hub = info["hub"] as? String, let id = (info["id"] as? NSNumber)?.int64Value else { return }
+        let ref = TerminalRef(hub: hub, id: id)
+        if let typed = response as? UNTextInputNotificationResponse {
+            await AppModel.shared.send(typed.userText, to: ref)
+            return
+        }
         await MainActor.run {
             NSApp.activate()
-            AppModel.shared.reveal = TerminalRef(hub: hub, id: id)
+            AppModel.shared.reveal = ref
         }
     }
 

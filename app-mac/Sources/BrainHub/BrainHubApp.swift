@@ -105,7 +105,7 @@ struct MenuBarContent: View {
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
-        let waiting = model.orderedRefs.filter { model.state($0) == .waiting }
+        let waiting = model.orderedRefs.filter(model.wantsYou)
         if waiting.isEmpty { Text("No agent is waiting for you") }
         ForEach(waiting, id: \.self) { ref in
             Button {
@@ -113,7 +113,8 @@ struct MenuBarContent: View {
                 openWindow(id: "main", value: ref)
             } label: {
                 let t = model.terminal(ref)
-                Text("\(t.map { $0.title.isEmpty ? $0.cli : $0.title } ?? "Terminal \(ref.id)") — \(t?.host ?? "")")
+                Text("\(t.map { $0.title.isEmpty ? $0.badge : $0.title } ?? "Terminal \(ref.id)") — \(AppModel.headline(t)) · \(t?.host ?? "")")
+                if let ask = t?.ask, !ask.isEmpty { Text(ask) }
             }
         }
         if let err = model.hubError { Divider(); Text("Hub offline: \(err)") }

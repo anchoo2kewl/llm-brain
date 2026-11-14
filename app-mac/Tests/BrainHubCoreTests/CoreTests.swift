@@ -77,6 +77,28 @@ import BrainHubCore
         #expect(ts[1].error == "exit 1")
     }
 
+    @Test func agentStateAndDetail() throws {
+        let ts: [Terminal] = try decode(#"""
+        [{"id":1,"title":"a","host":"m","cli":"Codex (OpenAI)","provider":"codex","cwd":"~","status":"live","updated":"",
+          "state":"waiting","ask":"Allow Bash?","ask_kind":"question","model":"gpt","branch":"main",
+          "context_used":150000,"context_window":200000,"subagents":2,"started":"2026-11-13T18:58:13.096Z"},
+         {"id":2,"title":"b","host":"m","cli":"Claude Code","provider":"claude","cwd":"~","status":"live","updated":"",
+          "state":"waiting","ask":"All done.","ask_kind":"done"},
+         {"id":3,"title":"c","host":"m","cli":"Zsh","provider":"other","cwd":"~","status":"live","updated":""}]
+        """#)
+        #expect(ts[0].badge == "Codex" && ts[1].badge == "Claude Code" && ts[2].badge == "Zsh") // never "(OpenAI)"
+        #expect(ts[0].state == .waiting && ts[0].needsAnswer && ts[0].contextFraction == 0.75 && ts[0].subagents == 2)
+        #expect(ts[1].needsAnswer == false) // a finished turn is marked only until you look
+        #expect(ts[2].state == nil && ts[2].contextFraction == nil) // an older hub
+        let d: TerminalDetail = try decode(#"""
+        {"id":1,"last_prompt":"fix it","last_reply":"done","tool":"Bash npm test",
+         "agents":[{"title":"explore","updated":"x","messages":4,"live":true}],
+         "stats":{"dollars":1.5,"tool_calls":7,"tool_errors":1,"prompts":3,"tokens":{}}}
+        """#)
+        #expect(d.tool == "Bash npm test" && d.agents?.first?.live == true && d.stats?.toolCalls == 7)
+        #expect(shortCount(63499) == "63k" && shortCount(1_200_000) == "1.2M" && shortCount(12) == "12")
+    }
+
     @Test func statusAndNodes() throws {
         let s: TerminalStatus = try decode(#"{"status":"live","error":"","cwd":"/x","host_live":false,"blocked":null}"#)
         #expect(s == TerminalStatus(status: "live", error: "", cwd: "/x", hostLive: false))
