@@ -77,6 +77,19 @@ import BrainHubCore
         #expect(ts[1].error == "exit 1")
     }
 
+    @Test func accounts() throws {
+        let ps: [String: [Profile]] = try decode(#"""
+        {"m":[{"name":"","claude":"me@home.test"},{"name":"work","claude":"me@work.test","codex":""}]}
+        """#)
+        let m = try #require(ps["m"])
+        #expect(m[0].label(for: .claude) == "Default · me@home.test" && m[1].label(for: .claude) == "work · me@work.test")
+        #expect(m[1].label(for: .codex) == "work · not logged in" && m[1].label(for: .shell) == "work")
+        let t: Terminal = try decode(#"""
+        {"id":1,"title":"a","host":"m","cli":"Codex","provider":"codex","cwd":"~","status":"live","updated":"","profile":"work","account":"me@work.test"}
+        """#)
+        #expect(t.profile == "work" && t.account == "me@work.test")
+    }
+
     @Test func agentStateAndDetail() throws {
         let ts: [Terminal] = try decode(#"""
         [{"id":1,"title":"a","host":"m","cli":"Codex (OpenAI)","provider":"codex","cwd":"~","status":"live","updated":"",

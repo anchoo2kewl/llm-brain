@@ -1,17 +1,24 @@
 import BrainHubCore
 import SwiftUI
 
-/// Cmd+T: machine, agent CLI, folder.
+/// Cmd+T: machine, agent CLI, account, folder.
 struct NewTerminalSheet: View {
     var opened: (TerminalRef) -> Void
     @Environment(\.dismiss) private var dismiss
     private var model: AppModel { AppModel.shared }
     @AppStorage("newTerminal.cli") private var cli: CLI = .claude
     @AppStorage("newTerminal.machine") private var machine = ""
+    @AppStorage("newTerminal.account") private var account = ""
+    @ViewState private var profiles: [String: [Profile]] = [:]
     @ViewState private var path = ""
     @ViewState private var title = ""
     @ViewState private var busy = false
     @ViewState private var failure: String?
+
+    /// The logins of the chosen machine. A shell has no login of its own to pick.
+    private var accounts: [Profile] { cli == .shell ? [] : profiles[machine] ?? [] }
+    /// The account to start with: the last choice, when this machine has it.
+    private var chosen: String { accounts.contains { $0.name == account } ? account : "" }
 
     var body: some View {
         Form {
@@ -22,6 +29,11 @@ struct NewTerminalSheet: View {
                 ForEach(CLI.allCases) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
+            if accounts.count > 1 {
+                Picker("Account", selection: Binding(get: { chosen }, set: { account = $0 })) {
+                    ForEach(accounts, id: \.name) { Text($0.label(for: cli)).tag($0.name) }
+                }
+            }
             HStack {
                 TextField("Folder", text: $path, prompt: Text("~ (home)"))
                 if !recentFolders.isEmpty {
@@ -46,6 +58,7 @@ struct NewTerminalSheet: View {
         .onAppear {
             if !model.machineNames.contains(machine) { machine = model.nodes?.me.node ?? model.machineNames.first ?? "" }
         }
+        .task { profiles = (try? await model.client?.get(Paths.profiles, as: [String: [Profile]].self)) ?? [:] }
     }
 
     private var recentFolders: [String] {
@@ -59,7 +72,8 @@ struct NewTerminalSheet: View {
         failure = nil
         Task {
             do {
-                let ref = try await model.create(host: machine, cli: cli, path: path.trimmingCharacters(in: .whitespaces), title: title)
+                let ref = try await model.create(host: machine, cli: cli, path: path.trimmingCharacters(in: .whitespaces), title: title,
+                                                 account: chosen)
                 opened(ref)
                 dismiss()
             } catch {

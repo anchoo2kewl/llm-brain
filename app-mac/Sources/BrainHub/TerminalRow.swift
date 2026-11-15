@@ -30,6 +30,11 @@ struct TerminalRow: View {
             }
             HStack(spacing: 6) {
                 Badge(provider: t.provider, text: t.badge)
+                if let p = t.profile, !p.isEmpty {
+                    Text(p).font(.caption2.weight(.medium)).padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(Capsule().stroke(.secondary.opacity(0.5))).foregroundStyle(.secondary)
+                        .help("Account: \(p)\(t.account.map { " · \($0)" } ?? "")")
+                }
                 Text(t.branch.map { $0.isEmpty || $0 == "HEAD" ? t.cwd : "\(t.cwd) · \($0)" } ?? t.cwd)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
@@ -120,6 +125,7 @@ struct TerminalDetailView: View {
                 line("Context", "\(shortCount(used)) of \(shortCount(window)) (\(Int(f * 100))%)")
             }
             if let m = t.model, !m.isEmpty { line("Model", m) }
+            if let a = t.account, !a.isEmpty { line("Account", (t.profile.map { $0.isEmpty ? "" : "\($0) · " } ?? "") + a) }
             if let tool = detail?.tool { line("Now", tool) }
             if let agents = detail?.agents, !agents.isEmpty {
                 let live = agents.filter(\.live)

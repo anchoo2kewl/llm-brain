@@ -260,11 +260,11 @@ final class AppModel {
         notify(ref)
     }
 
-    func create(host: String, cli: CLI, path: String, title: String) async throws -> TerminalRef {
+    func create(host: String, cli: CLI, path: String, title: String, account: String = "") async throws -> TerminalRef {
         guard let client else { throw HubError("Add a hub first (Settings).") }
         struct Created: Decodable { var id: Int64 }
         let r = try await client.post(Paths.newTerminal, form: [("host", host), ("cli", cli.rawValue), ("path", path),
-                                                                ("format", "json")], as: Created.self)
+                                                                ("profile", account), ("format", "json")], as: Created.self)
         let ref = TerminalRef(hub: client.base, id: r.id)
         if !title.trimmingCharacters(in: .whitespaces).isEmpty { try? await rename(ref, to: title) }
         await refresh()

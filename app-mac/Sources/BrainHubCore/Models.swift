@@ -30,10 +30,13 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// Subagents that run now.
     public var subagents: Int?
     public var started: String?
+    /// The login profile it runs with (nil = the machine's default login), and who that login is.
+    public var profile: String?
+    public var account: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
-        case contextUsed = "context_used", contextWindow = "context_window", subagents, started
+        case contextUsed = "context_used", contextWindow = "context_window", subagents, started, profile, account
     }
 
     public init(id: Int64, title: String, host: String, cli: String, provider: String, cwd: String,
@@ -235,6 +238,7 @@ public enum Paths {
     public static let nodes = "/api/cluster/nodes"
     public static let inbox = "/api/inbox"
     public static let newTerminal = "/terminals/new"
+    public static let profiles = "/api/profiles"
     public static func status(_ id: Int64) -> String { "/terminals/\(id)/status" }
     public static func rename(_ id: Int64) -> String { "/terminals/\(id)/rename" }
     public static func close(_ id: Int64) -> String { "/api/terminals/\(id)/close" }
@@ -255,6 +259,29 @@ public enum Paths {
 /// Claude Code and Codex attach an image when its path is pasted.
 public func pastedPaths(_ paths: [String]) -> String {
     paths.map { $0.contains(where: \.isWhitespace) ? shellQuote($0) : $0 }.joined(separator: " ") + " "
+}
+
+/// One set of CLI logins on a machine (`GET /api/profiles`). The empty name is the machine's default login.
+public struct Profile: Decodable, Hashable, Sendable {
+    public var name: String
+    public var claude: String?
+    public var codex: String?
+
+    public init(name: String, claude: String? = nil, codex: String? = nil) {
+        (self.name, self.claude, self.codex) = (name, claude, codex)
+    }
+
+    /// The profile in an account picker, with who is logged in for that CLI.
+    public func label(for cli: CLI) -> String {
+        let who: String? = switch cli {
+        case .claude: claude
+        case .codex: codex
+        default: nil
+        }
+        let title = name.isEmpty ? "Default" : name
+        guard cli == .claude || cli == .codex else { return title }
+        return title + " · " + (who.flatMap { $0.isEmpty ? nil : $0 } ?? "not logged in")
+    }
 }
 
 /// The CLIs a new terminal can run (`cli` form field of `POST /terminals/new`).
