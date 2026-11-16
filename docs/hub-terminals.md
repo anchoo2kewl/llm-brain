@@ -58,6 +58,10 @@ The terminal page has a touch key row (Esc, Tab, ⇧Tab, arrows, ⌃C, ⌃D, Ent
 - Each pane can be Terminal or Chat on its own.
 - The layout is kept in the browser.
 
+### Send now
+
+Ctrl+Enter sends what you typed immediately, in every terminal, even while the agent is busy. Each CLI has its own key for that (Claude Code: Enter, then Ctrl+X Ctrl+S); the hub presses it for you. A CLI with no such key, and a shell, get a plain Enter.
+
 ### Workspace shortcuts
 
 All are Ctrl+Shift, caught before the terminal sees them.

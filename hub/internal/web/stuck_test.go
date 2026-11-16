@@ -78,6 +78,10 @@ func TestFrozenTerminalEverywhere(t *testing.T) {
 	if _, body, _ := r.get(t, "/terminals/18/status"); !strings.Contains(body, `"blocked":{"reason":"macOS privacy prompt"`) {
 		t.Fatalf("status: %s", body)
 	}
+	// The page learns which CLI it is talking to here, to turn Ctrl+Enter into that CLI's "send now" keys.
+	if _, body, _ := r.get(t, "/terminals/18/status"); !strings.Contains(body, `"provider":"claude"`) {
+		t.Fatalf("status lacks the provider: %s", body)
+	}
 
 	// One inbox item, blocked — not also "waiting for you" — and its push says what happened.
 	items := inboxKeys(t, r)

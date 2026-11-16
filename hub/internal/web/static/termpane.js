@@ -100,7 +100,24 @@
       for (var i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 255;
       send(b);
     });
-    if (opts.keys) term.attachCustomKeyEventHandler(opts.keys);
+    // Ctrl+Enter sends what is typed now, even while the agent is busy. Each CLI has its own key for sending a
+    // queued message at once; the hub gives them all this one. Listed here: the keys to press after Enter.
+    // A CLI that is not listed (and a shell, where Ctrl+S would freeze the output) gets the Enter alone.
+    var sendNowKeys = { claude: ["\x18", "\x13"] }; // Ctrl+X Ctrl+S
+    var provider = "";
+    status(function (s) { provider = s.provider || ""; });
+    function sendNow() {
+      send("\r");
+      // One key at a time, a moment apart: sent together a CLI reads them as pasted text, not as keys.
+      (sendNowKeys[provider] || []).forEach(function (k, i) { setTimeout(function () { send(k); }, 80 + 60 * i); });
+    }
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.key === "Enter" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.type === "keydown") { e.preventDefault(); sendNow(); }
+        return false;
+      }
+      return opts.keys ? opts.keys(e) : true;
+    });
     var rt = null;
     if (window.ResizeObserver) new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(resize, 80); }).observe(el);
     if (window.hubDrop && opts.host) {
