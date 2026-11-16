@@ -286,7 +286,7 @@ class SlopScoreTest(unittest.TestCase):
         r = Repo()
         r.write("src/a.py", "".join(f"def f{i}(x):\n    return x + {i}\n\n" for i in range(40)))
         r.commit("fix: stuff")
-        body = ("Follow-up per §5.4 and AC2 (Vitalii's 194/229). In this session the browser extension was not connected, "
+        body = ("Follow-up per §5.4 and AC2 (Sam's 194/229). In this session the browser extension was not connected, "
                 "so this comprehensive and robust change was not possible to eyeball. Fixes #1. Fixes #2.\n\n" + "word " * 500)
         res = r.score(title="fix(ui): Type chip, full Description, facet labels, unclipped Asset, keyboard, timeline diagnosis (#9)", body=body)
         found = ids(res)

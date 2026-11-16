@@ -222,7 +222,7 @@
     },
     "P14": {
       "title": "Private references",
-      "what": "The description does not lean on references a teammate can't resolve, like `§5.4`, `AC2`, `slice 3` or `Vitalii's 194` (a review-comment number).",
+      "what": "The description does not lean on references a teammate can't resolve, like `§5.4`, `AC2`, `slice 3` or `Sam's 194` (a review-comment number).",
       "category": "clarity",
       "detector": "regex_count",
       "norm": "count",
