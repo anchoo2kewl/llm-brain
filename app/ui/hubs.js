@@ -104,10 +104,15 @@
     say("Opening...");
     invoke("select_hub", { url: url })
       .then(function (r) {
+        if (r.reachable) {
+          // The app moved this window to the hub (or hid it). This page may no longer call the app.
+          state.selected = url;
+          render();
+          return say("");
+        }
         return invoke("get_state").then(function (st) {
           apply(st);
-          if (r.reachable) say("");
-          else say("That hub did not answer: " + (r.error || "unreachable") + ". The window did not change.", true);
+          say("That hub did not answer: " + (r.error || "unreachable") + ". The window did not change.", true);
         });
       })
       .catch(fail);
