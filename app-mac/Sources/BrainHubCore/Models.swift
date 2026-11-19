@@ -215,6 +215,49 @@ public struct TerminalRef: Codable, Hashable, Sendable {
     public init(hub: String, id: Int64) { (self.hub, self.id) = (hub, id) }
 }
 
+extension TerminalRef {
+    /// A sidebar row dragged onto a machine: "<hub>#<id>".
+    public var dragText: String { "\(hub)#\(id)" }
+    public init?(dragText: String) {
+        guard let i = dragText.lastIndex(of: "#"), let id = Int64(dragText[dragText.index(after: i)...]), id > 0 else { return nil }
+        self.init(hub: String(dragText[..<i]), id: id)
+    }
+}
+
+/// `GET /api/migrations/{job}`: a terminal's conversation moving to another machine, phase by phase. The hub runs
+/// it; the source terminal ends only after the copy is live there.
+public struct Migration: Decodable, Sendable, Equatable {
+    public struct Phase: Decodable, Sendable, Equatable {
+        public var name: String
+        public var state: String // pending | running | done | failed | skipped
+        public var detail: String?
+    }
+    public var id: String
+    public var to: String
+    public var phases: [Phase]
+    public var dest: Int64?
+    public var done: Bool
+    public var error: String?
+    enum CodingKeys: String, CodingKey { case id, to, phases, dest = "dest_terminal", done, error }
+
+    /// The phase to show: the one running or failed, else the last one done.
+    public var current: Phase? {
+        phases.first { $0.state == "running" || $0.state == "failed" } ?? phases.last { $0.state == "done" }
+    }
+
+    public static func label(_ phase: String, to: String) -> String {
+        switch phase {
+        case "check": "Checking readiness"
+        case "export": "Exporting the conversation"
+        case "copy": "Copying it to \(to)"
+        case "resume": "Resuming on \(to)"
+        case "verify": "Checking it is live"
+        case "close": "Ending the source"
+        default: phase
+        }
+    }
+}
+
 /// Where a continue or move reply's terminal lives. A local reply carries `terminal_id`; a peer's session continued
 /// through this hub carries a link `/cluster/open?node=<node>&path=/terminals/<id>` instead.
 public func openedTerminalRef(_ reply: OpenedTerminal, hub: String, nodes: ClusterNodes?) -> TerminalRef? {
@@ -246,6 +289,10 @@ public enum Paths {
     public static func send(_ id: Int64) -> String { "/api/terminals/\(id)/send" }
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }
+    public static func migrate(_ id: Int64) -> String { "/api/terminals/\(id)/migrate" }
+    public static func migration(_ job: String) -> String {
+        "/api/migrations/" + (job.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
+    }
     /// Put a file on a machine, in the hub's uploads folder for this terminal (`t<id>`, as the web terminal does).
     public static func upload(host: String, terminal id: Int64) -> String {
         "/hosts/\(host.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._"))) ?? host)/upload?into=t\(id)"

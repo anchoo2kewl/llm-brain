@@ -186,15 +186,22 @@ struct Sidebar: View {
             }
             let index = Dictionary(uniqueKeysWithValues: model.orderedRefs.enumerated().map { ($1, $0) })
             ForEach(model.machines) { m in
-                Section(m.name) {
+                Section {
                     if m.terminals.isEmpty && m.elsewhere.isEmpty {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
                     }
                     ForEach(m.terminals) { e in
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded, end: { end(e.ref) })
                             .tag(e.ref)
+                            .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
                                 Button("Move to Top") { model.moveToTop(e.ref, in: m) }
+                                let others = model.machines.map(\.name).filter { $0 != e.terminal.host }
+                                if !others.isEmpty {
+                                    Menu("Move to Machine") {
+                                        ForEach(others, id: \.self) { n in Button(n) { migrate(e.ref, to: n) } }
+                                    }
+                                }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
                                 Divider()
@@ -215,11 +222,27 @@ struct Sidebar: View {
                             }
                         }
                     }
+                } header: {
+                    Text(m.name).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        .help("Drop a terminal here to move its conversation to \(m.name)")
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let ref = items.first.flatMap(TerminalRef.init(dragText:)) else { return false }
+                            migrate(ref, to: m.name)
+                            return true
+                        }
                 }
             }
         }
         .overlay {
             if !model.loaded { ProgressView() }
+        }
+    }
+
+    /// Move a terminal to another machine; the moved terminal takes its place when it is live.
+    private func migrate(_ ref: TerminalRef, to machine: String) {
+        guard model.terminal(ref)?.host != machine, model.migrations[ref].map(\.done) ?? true else { return }
+        Task {
+            do { if let dest = try await model.migrate(ref, to: machine) { selection = dest } } catch { failure = error.localizedDescription }
         }
     }
 

@@ -32,6 +32,9 @@ final class AppModel {
         didSet { UserDefaults.standard.set(try? JSONEncoder().encode(order), forKey: "sidebarOrder") }
     }
 
+    /// Terminals moving to another machine (or just moved), with the hub's phases.
+    private(set) var migrations: [TerminalRef: Migration] = [:]
+
     /// Open connections, one per terminal, shared by every window.
     private(set) var sessions: [TerminalRef: TerminalSession] = [:]
     /// The terminal in the key window, when the app is active.
@@ -306,6 +309,39 @@ final class AppModel {
         let reply = try await HubClient(base: base).post(Paths.move(hit.id), json: ["to": machine, "close_source": closeSource],
                                                          as: OpenedTerminal.self)
         return try await opened(reply, hub: base)
+    }
+
+    /// Move a terminal's conversation to another machine. Its hub runs the move as a job (it goes on if the app
+    /// quits); this follows the phases. Returns the new terminal; on a failure the old one still runs.
+    func migrate(_ ref: TerminalRef, to machine: String) async throws -> TerminalRef? {
+        struct Started: Decodable { var job: String }
+        let c = try HubClient(base: ref.hub)
+        let started: Started
+        do {
+            started = try await c.post(Paths.migrate(ref.id), json: ["to": machine, "close_source": true], as: Started.self, timeout: 30)
+        } catch let e as HubError where e.message.contains("404") || e.message.contains("405") {
+            throw HubError("This hub can't move terminals yet: update the hub.")
+        }
+        defer { Task { try? await Task.sleep(for: .seconds(20)); self.migrations[ref] = nil } }
+        var misses = 0
+        while true {
+            do {
+                let m = try await c.get(Paths.migration(started.job), as: Migration.self)
+                migrations[ref] = m
+                misses = 0
+                if m.done {
+                    await refresh()
+                    if let e = m.error { throw HubError("Move failed: \(e). The terminal still runs where it was.") }
+                    return m.dest.map { TerminalRef(hub: ref.hub, id: $0) }
+                }
+            } catch let e as HubError where e.message.hasPrefix("Move failed") {
+                throw e
+            } catch {
+                misses += 1 // the hub restarting or the network blinking: the job goes on there
+                if misses > 30 { throw HubError("Lost track of the move: check the hub's terminals.") }
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
     }
 
     private func opened(_ reply: OpenedTerminal, hub: String) async throws -> TerminalRef {

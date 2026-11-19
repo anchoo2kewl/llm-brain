@@ -166,6 +166,10 @@
     var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
     li.append(top, badges, meta, prev);
     li.addEventListener("click", function () { show(id); });
+    if (infos[id].kind !== "session") {
+      li.draggable = true;
+      li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "move"; });
+    }
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
@@ -562,9 +566,78 @@
     focusSlot(dest, true);
   }
 
+  // Move to another machine: drag a terminal onto a machine in the sidebar, or Actions → Move focused terminal.
+  // The hub runs the move as a job (it goes on if this page closes) and this shows its phases as they happen;
+  // the source ends only after the resumed copy is live. Only the conversation moves, not uncommitted files.
+  var moveBox = document.getElementById("wsmove"), moveList = document.getElementById("wsmachines"), moveSay = document.getElementById("wsmovestatus");
+  var machines = [], moving = false, PHASE = { check: "Check readiness", "export": "Export the conversation", copy: "Copy it to ", resume: "Resume on ", verify: "Check it is live", close: "End the source" };
+  function loadMachines() {
+    fetch("/api/cluster/nodes", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }).then(function (n) {
+      var names = n && n.self ? [n.self.node].concat((n.peers || []).filter(function (p) { return p.ok; }).map(function (p) { return p.info.node; })) : [];
+      order.forEach(function (id) { var t = infos[id]; if (t && t.kind !== "session" && t.host && names.indexOf(t.host) < 0) names.push(t.host); });
+      machines = names;
+      paintMachines();
+    });
+  }
+  function paintMachines() {
+    moveBox.hidden = machines.length < 2;
+    moveList.textContent = "";
+    machines.forEach(function (m) {
+      var li = el("li", "ws-machine", shortHost(m));
+      li.title = "Drop a terminal here to move its conversation to " + m;
+      li.addEventListener("dragover", function (e) { if (e.dataTransfer.types.indexOf("text/x-brain-terminal") >= 0) { e.preventDefault(); li.classList.add("over"); } });
+      li.addEventListener("dragleave", function () { li.classList.remove("over"); });
+      li.addEventListener("drop", function (e) { e.preventDefault(); li.classList.remove("over"); migrate(e.dataTransfer.getData("text/x-brain-terminal"), m); });
+      moveList.appendChild(li);
+    });
+    var g = document.getElementById("ws-move-group");
+    if (g) g.remove();
+    if (machines.length < 2) return;
+    g = el("optgroup"); g.id = "ws-move-group"; g.label = "Move focused terminal to";
+    machines.forEach(function (m) { var o = el("option", "", shortHost(m)); o.value = "move:" + m; g.appendChild(o); });
+    document.getElementById("ws-actions").appendChild(g);
+  }
+  function migrate(id, to) {
+    var t = infos[id];
+    if (!t || moving) return;
+    if (t.kind === "session") { sayMove("Only hub terminals can move. Continue this session in a terminal first."); return; }
+    if (t.host === to) { sayMove((t.title || "This terminal") + " already runs on " + shortHost(to) + "."); return; }
+    moving = true;
+    sayMove("Moving " + (t.title || "terminal " + id) + " to " + shortHost(to) + "…");
+    fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: to, close_source: true }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { code: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.code === 404 || x.code === 405) throw new Error("this hub can't move terminals yet (update the hub)");
+        if (x.code !== 202) throw new Error(x.j.error || "error " + x.code);
+        poll(x.j.job, t, to);
+      })
+      .catch(function (e) { moving = false; sayMove("Move failed: " + e.message + ". Nothing changed."); });
+  }
+  function poll(job, t, to) {
+    fetch("/api/migrations/" + job, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      var box = el("div");
+      box.appendChild(el("b", "", "Moving " + (t.title || "terminal") + " to " + shortHost(to)));
+      var ol = el("ol", "ws-phases");
+      (j.phases || []).forEach(function (p) {
+        var mark = { done: "✓", running: "…", failed: "✗", skipped: "–", pending: "·" }[p.state] || "·";
+        var li = el("li", "ph-" + p.state, mark + " " + (PHASE[p.name] || p.name) + (p.name === "copy" || p.name === "resume" ? shortHost(to) : ""));
+        if (p.detail) li.appendChild(el("span", "mut", " — " + p.detail));
+        ol.appendChild(li);
+      });
+      box.appendChild(ol);
+      if (j.done) box.appendChild(el("p", j.error ? "bad" : "", j.error ? "Move failed: " + j.error + ". " + (t.title || "The terminal") + " still runs on " + shortHost(t.host) + "." : "Moved. " + shortHost(to) + " owns the conversation now."));
+      moveSay.hidden = false; moveSay.textContent = ""; moveSay.appendChild(box);
+      if (!j.done) { setTimeout(function () { poll(job, t, to); }, 1000); return; }
+      moving = false;
+      refresh(function () { if (!j.error && j.dest_terminal && infos[String(j.dest_terminal)]) show(String(j.dest_terminal)); });
+    }).catch(function () { setTimeout(function () { poll(job, t, to); }, 3000); }); // the hub restarting
+  }
+  function sayMove(msg) { moveSay.hidden = false; moveSay.textContent = msg; }
+
   document.getElementById("ws-actions").onchange = function () {
     var action = this.value;
     this.value = "";
+    if (action.indexOf("move:") === 0) { migrate(st.slots[st.focus], action.slice(5)); return; }
     runAction(action);
   };
 
@@ -613,4 +686,6 @@
 
   refresh(function () { var id = st.slots[st.focus]; if (id && panes[id]) setTimeout(function () { panes[id].focus(); }, 300); });
   setInterval(refresh, 10000);
+  setTimeout(loadMachines, 1500);
+  setInterval(loadMachines, 30000);
 })();

@@ -59,6 +59,12 @@ struct TerminalRow: View {
                     .foregroundStyle(wants ? AnyShapeStyle(state == .blocked || t.askKind == "error" ? .red : .orange) : AnyShapeStyle(.secondary))
                     .padding(.leading, 16)
             }
+            if let m = model.migrations[ref], let p = m.current {
+                Label(m.error.map { "Move failed: \($0)" } ?? (m.done ? "Moved to \(m.to)" : "\(Migration.label(p.name, to: m.to))…"),
+                      systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
+                    .font(.caption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .lineLimit(3).padding(.leading, 16).help(p.detail ?? "")
+            }
             if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
