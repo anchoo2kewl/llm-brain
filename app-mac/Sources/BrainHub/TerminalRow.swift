@@ -31,9 +31,8 @@ struct TerminalRow: View {
                 }
                 if let number, number < 9 { Text("⌘\(number + 1)").font(.caption2).foregroundStyle(.tertiary) }
                 if let end {
-                    Button(action: end) { Image(systemName: "xmark").font(.caption2.weight(.semibold)) }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .opacity(hovering ? 1 : 0) // still in the accessibility tree when hidden
+                    SessionCloseButton(closing: model.closingTerminals.contains(ref), action: end)
+                        .opacity(hovering || model.closingTerminals.contains(ref) ? 1 : 0)
                         .help("End \(Self.name(t)): stops its CLI on \(t.host)")
                         .accessibilityLabel("End \(Self.name(t))")
                 }
@@ -83,6 +82,31 @@ struct TerminalRow: View {
         case .idle: "Idle"
         case .ended: "Ended"
         }
+    }
+}
+
+/// A generous, visible destructive target with immediate feedback while the hub stops its process.
+struct SessionCloseButton: View {
+    let closing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if closing {
+                    ProgressView().controlSize(.small)
+                    Text("Closing…").font(.caption)
+                } else {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 24, weight: .semibold))
+                }
+            }
+            .frame(minWidth: 32, minHeight: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.red)
+        .disabled(closing)
+        .accessibilityLabel(closing ? "Closing session" : "Close session")
     }
 }
 
