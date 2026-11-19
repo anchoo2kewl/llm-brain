@@ -211,6 +211,7 @@ struct Sidebar: View {
                     if !m.elsewhere.isEmpty {
                         DisclosureGroup("Running elsewhere (\(m.elsewhere.count))") {
                             Button("End All Running Elsewhere", role: .destructive) { endElsewhere(m.elsewhere) }
+                                .disabled(!model.endingElsewhere.isEmpty)
                             ForEach(m.elsewhere) { s in
                                 HStack {
                                     VStack(alignment: .leading, spacing: 1) {
@@ -224,6 +225,7 @@ struct Sidebar: View {
                                     .buttonStyle(.borderless)
                                     .help("End this session on its machine")
                                     .accessibilityLabel("End session")
+                                    .disabled(model.endingElsewhere.contains("\(model.hub ?? "")#\(s.id)"))
                                 }
                                 .contextMenu {
                                     Button("Continue in a Terminal") { continueLive(s) }

@@ -14,6 +14,7 @@ final class AppModel {
     private(set) var nodes: ClusterNodes?
     private(set) var terminals: [(hub: String, terminal: Terminal)] = []
     private(set) var live: [LiveSession] = []
+    private(set) var endingElsewhere: Set<String> = []
     /// The hub's inbox says these wait for you.
     private(set) var inboxWaiting: Set<TerminalRef> = []
     /// Rang the bell since you last looked. Only for a hub that does not send a terminal's state.
@@ -350,10 +351,27 @@ final class AppModel {
 
     func endElsewhere(_ session: LiveSession) async throws {
         guard let client else { throw HubError("Select a hub first.") }
+        let key = "\(client.base)#\(session.id)"
+        guard endingElsewhere.insert(key).inserted else { return }
+        defer { endingElsewhere.remove(key) }
         struct Closed: Decodable {}
         AppDiagnostics.record("elsewhere_close_requested session=\(session.id)")
-        _ = try await client.post("/api/sessions/\(session.id)/close", json: [:], as: Closed.self, timeout: 30)
-        await refresh()
+        do {
+            _ = try await client.post("/api/sessions/\(session.id)/close", json: [:], as: Closed.self, timeout: 30)
+            for _ in 0..<30 {
+                let running = try await client.get(Paths.liveSessions, as: [LiveSession].self, timeout: 5)
+                if !running.contains(where: { $0.id == session.id }) {
+                    AppDiagnostics.record("elsewhere_close_confirmed session=\(session.id)")
+                    await refresh()
+                    return
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+            throw HubError("The stop was requested, but this session is still reported as running. Check its machine agent.")
+        } catch {
+            AppDiagnostics.record("elsewhere_close_failed session=\(session.id)")
+            throw error
+        }
     }
 
     func close(_ ref: TerminalRef) async throws {
