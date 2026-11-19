@@ -33,6 +33,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def hub_url():
     value = os.environ.get('BRAIN_HUB_URL', '').strip()
     if not value:
+        # Follow the owner's explicit desktop selection, including offline localhost.
+        # Never choose a different hub merely because a request fails: ids are hub-local.
+        path = (Path.home()/'Library/Application Support/app.llmbrain.hub/hubs.json' if sys.platform == 'darwin'
+                else Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home()/'.config')))/'app.llmbrain.hub/hubs.json')
+        try:
+            config = json.loads(path.read_text())
+            selected = config.get('selected')
+            if selected and any(h.get('url') == selected for h in config.get('hubs', [])):
+                value = selected
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    if not value:
         value = (Path.home()/'.config/llm-brain/connections-hub.url').read_text().strip()
     return checked(value)
 

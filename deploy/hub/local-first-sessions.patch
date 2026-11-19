@@ -1,0 +1,404 @@
+diff --git a/bin/brain-mcp b/bin/brain-mcp
+index 8db3f66..ebfb77e 100755
+--- a/bin/brain-mcp
++++ b/bin/brain-mcp
+@@ -32,6 +32,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
+ 
+ def hub_url():
+     value = os.environ.get('BRAIN_HUB_URL', '').strip()
++    if not value:
++        # Follow the owner's explicit desktop selection, including offline localhost.
++        # Never choose a different hub merely because a request fails: ids are hub-local.
++        path = (Path.home()/'Library/Application Support/app.llmbrain.hub/hubs.json' if sys.platform == 'darwin'
++                else Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home()/'.config')))/'app.llmbrain.hub/hubs.json')
++        try:
++            config = json.loads(path.read_text())
++            selected = config.get('selected')
++            if selected and any(h.get('url') == selected for h in config.get('hubs', [])):
++                value = selected
++        except (OSError, ValueError, TypeError, AttributeError):
++            pass
+     if not value:
+         value = (Path.home()/'.config/llm-brain/connections-hub.url').read_text().strip()
+     return checked(value)
+diff --git a/hub/internal/agent/exec.go b/hub/internal/agent/exec.go
+index a7f6db6..e5a71fb 100644
+--- a/hub/internal/agent/exec.go
++++ b/hub/internal/agent/exec.go
+@@ -143,6 +143,11 @@ func (e *Executor) Run(ctx context.Context) {
+ 	var lastInv, lastNotices time.Time
+ 	for ctx.Err() == nil {
+ 		if time.Since(lastInv) > time.Minute {
++			if local, ok := e.Hub.(*LocalHub); ok {
++				if err := e.RecoverLocalTerminals(ctx, local.S); err != nil {
++					e.logf("agent: local terminal recovery: %v", err)
++				}
++			}
+ 			if err := e.Hub.Inventory(ctx, e.inventory(ctx)); err != nil && ctx.Err() == nil {
+ 				e.logf("agent: inventory: %v", err)
+ 			} else {
+diff --git a/hub/internal/agent/recover.go b/hub/internal/agent/recover.go
+new file mode 100644
+index 0000000..dfb67b9
+--- /dev/null
++++ b/hub/internal/agent/recover.go
+@@ -0,0 +1,72 @@
++package agent
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"regexp"
++	"strconv"
++	"strings"
++
++	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
++)
++
++var recoveredUUID = regexp.MustCompile(`(?:--session-id|--resume)\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
++
++// RecoverLocalTerminals registers surviving tmux processes without restarting them.
++// It only runs for the executor backed by this hub's own queue, never a remote inventory.
++func (e *Executor) RecoverLocalTerminals(ctx context.Context, s *store.Store) error {
++	t, err := e.tmux()
++	if err != nil {
++		return err
++	}
++	out, err := t.run(ctx, "list-panes", "-a", "-F", "#{session_name}\t#{session_path}\t#{pane_current_command}\t#{pane_start_command}\t#{@brain-terminal}")
++	if err != nil {
++		if live, ok := e.Terminals(ctx); ok && len(live) == 0 {
++			return nil
++		}
++		return err
++	}
++	seen := map[int64]bool{}
++	for _, line := range strings.Split(out, "\n") {
++		x, ok := recoveredTerminal(line, e.Host)
++		if !ok || seen[x.ID] {
++			continue
++		}
++		seen[x.ID] = true
++		if err := s.AdoptLocalTerminal(ctx, x); err != nil {
++			return fmt.Errorf("recover terminal %d: %w", x.ID, err)
++		}
++	}
++	return nil
++}
++
++func recoveredTerminal(line, host string) (store.Terminal, bool) {
++	f := strings.SplitN(line, "\t", 5)
++	if len(f) != 5 || !strings.HasPrefix(f[0], "llmb-") {
++		return store.Terminal{}, false
++	}
++	id, err := strconv.ParseInt(strings.TrimPrefix(f[0], "llmb-"), 10, 64)
++	if err != nil || id <= 0 || !strings.HasPrefix(f[1], "/") {
++		return store.Terminal{}, false
++	}
++	x := store.Terminal{ID: id, Host: host, Provider: "shell", Cwd: f[1], Title: "Recovered session"}
++	var meta TermOpen
++	if json.Unmarshal([]byte(f[4]), &meta) == nil && KnownProvider(meta.Provider) {
++		x.Provider, x.Model, x.Profile = meta.Provider, meta.Model, meta.Profile
++		x.SessionUUID = meta.SessionID
++	} else {
++		for _, p := range []string{"claude", "codex", "gemini"} {
++			if f[2] == p || strings.Contains(f[3], p+" ") {
++				x.Provider = p
++				break
++			}
++		}
++	}
++	if x.SessionUUID == "" {
++		if m := recoveredUUID.FindStringSubmatch(f[3]); len(m) == 2 {
++			x.SessionUUID = m[1]
++		}
++	}
++	return x, true
++}
+diff --git a/hub/internal/agent/recover_test.go b/hub/internal/agent/recover_test.go
+new file mode 100644
+index 0000000..ec4cfab
+--- /dev/null
++++ b/hub/internal/agent/recover_test.go
+@@ -0,0 +1,20 @@
++package agent
++
++import "testing"
++
++func TestRecoveredTerminal(t *testing.T) {
++	uuid := "43c94b34-dedb-43b8-bf83-06c7c790998c"
++	x, ok := recoveredTerminal("llmb-111\t/Users/me/code with spaces\tclaude\t/bin/zsh -lic claude --session-id "+uuid+" --settings private\t", "laptop")
++	if !ok || x.ID != 111 || x.Provider != "claude" || x.Cwd != "/Users/me/code with spaces" || x.SessionUUID != uuid {
++		t.Fatalf("%+v %v", x, ok)
++	}
++	x, ok = recoveredTerminal(`llmb-115`+"\t/tmp/app\tzsh\t/bin/zsh\t"+`{"provider":"codex","profile":"work","model":"gpt-5","session_id":"`+uuid+`"}`, "laptop")
++	if !ok || x.Provider != "codex" || x.Profile != "work" || x.SessionUUID != uuid {
++		t.Fatalf("%+v %v", x, ok)
++	}
++	for _, bad := range []string{"personal\t/tmp\tclaude\tclaude\t", "llmb-0\t/tmp\tzsh\tzsh\t", "llmb-1\trelative\tzsh\tzsh\t"} {
++		if _, ok := recoveredTerminal(bad, "laptop"); ok {
++			t.Fatalf("accepted %q", bad)
++		}
++	}
++}
+diff --git a/hub/internal/agent/term.go b/hub/internal/agent/term.go
+index c566384..c4118b6 100644
+--- a/hub/internal/agent/term.go
++++ b/hub/internal/agent/term.go
+@@ -525,7 +525,9 @@ func (e *Executor) termCwd(ctx context.Context, id int64, o TermOpen) (string, e
+ 		return filepath.EvalSymlinks(home)
+ 	}
+ 	cwd, err := NewRoots([]string{home}).Validate(want)
+-	if err != nil { cwd, err = e.Roots.Validate(want) }
++	if err != nil {
++		cwd, err = e.Roots.Validate(want)
++	}
+ 	if err != nil {
+ 		if errors.Is(err, ErrOutside) {
+ 			return "", fmt.Errorf("%s is not in your home folder", o.Cwd)
+@@ -670,6 +672,11 @@ func (e *Executor) termOpen(ctx context.Context, c store.Command) {
+ 		fail(err)
+ 		return
+ 	}
++	// Keep non-secret identity with the process so another local hub can recover it.
++	meta, _ := json.Marshal(TermOpen{Provider: o.Provider, Model: o.Model, Profile: o.Profile, SessionID: o.SessionID})
++	if _, err := t.run(context.WithoutCancel(ctx), "set-option", "-t", "="+TmuxName(c.AgentID), "@brain-terminal", string(meta)); err != nil {
++		e.logf("agent: terminal %d recovery metadata: %v", c.AgentID, err)
++	}
+ 	e.pipeNotices(ctx, t, c.AgentID, o)
+ 	if o.Provider != "shell" {
+ 		go e.acceptTrust(context.WithoutCancel(ctx), t, c.AgentID)
+diff --git a/hub/internal/store/recover.go b/hub/internal/store/recover.go
+new file mode 100644
+index 0000000..7ffdb4b
+--- /dev/null
++++ b/hub/internal/store/recover.go
+@@ -0,0 +1,33 @@
++package store
++
++import (
++	"context"
++	"fmt"
++)
++
++// AdoptLocalTerminal imports only missing records; an id owned by another host
++// is an error, never an overwrite or a command to start/kill a process.
++func (s *Store) AdoptLocalTerminal(ctx context.Context, t Terminal) error {
++	if t.ID <= 0 || t.Host == "" || t.Cwd == "" {
++		return fmt.Errorf("invalid recovered terminal")
++	}
++	now := Now()
++	_, err := s.DB.ExecContext(ctx, `INSERT INTO terminals
++		(id,host,provider,cwd,model,title,status,created_at,updated_at,live_at,session_uuid,profile)
++		VALUES (?,?,?,?,?,?,'live',?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
++		t.ID, t.Host, t.Provider, t.Cwd, t.Model, t.Title, now, now, now, t.SessionUUID, t.Profile)
++	if err != nil {
++		return err
++	}
++	x, err := s.Terminal(ctx, t.ID)
++	if err != nil {
++		return err
++	}
++	if x.Host != t.Host {
++		return fmt.Errorf("id belongs to host %s; left untouched", x.Host)
++	}
++	if x.SessionUUID != "" && t.SessionUUID != "" && x.SessionUUID != t.SessionUUID {
++		return fmt.Errorf("conversation identity differs; left untouched")
++	}
++	return nil
++}
+diff --git a/hub/internal/store/recover_test.go b/hub/internal/store/recover_test.go
+new file mode 100644
+index 0000000..ef48a30
+--- /dev/null
++++ b/hub/internal/store/recover_test.go
+@@ -0,0 +1,52 @@
++package store
++
++import (
++	"context"
++	"path/filepath"
++	"testing"
++)
++
++func TestAdoptLocalTerminal(t *testing.T) {
++	s, err := Open(filepath.Join(t.TempDir(), "hub.db"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer s.Close()
++	ctx := context.Background()
++	x := Terminal{ID: 111, Host: "laptop", Provider: "claude", Cwd: "/tmp/code", SessionUUID: "original-conversation"}
++	if err := s.AdoptLocalTerminal(ctx, x); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.RenameTerminal(ctx, 111, "My work"); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.AdoptLocalTerminal(ctx, x); err != nil {
++		t.Fatal(err)
++	}
++	got, err := s.Terminal(ctx, 111)
++	if err != nil || got.Title != "My work" || got.Status != "live" || got.SessionUUID != x.SessionUUID {
++		t.Fatalf("%+v %v", got, err)
++	}
++	x.Host = "studio"
++	if err := s.AdoptLocalTerminal(ctx, x); err == nil {
++		t.Fatal("stole another host's terminal")
++	}
++	x.Host = "laptop"
++	x.SessionUUID = "different"
++	if err := s.AdoptLocalTerminal(ctx, x); err == nil {
++		t.Fatal("accepted different conversation")
++	}
++	got, _ = s.Terminal(ctx, 111)
++	if got.Host != "laptop" || got.SessionUUID != "original-conversation" {
++		t.Fatal("changed original")
++	}
++	id, err := s.CreateTerminal(ctx, Terminal{Host: "laptop", Provider: "shell", Cwd: "/tmp"}, Command{Host: "laptop", Kind: "term_open"})
++	if err != nil || id <= 111 {
++		t.Fatalf("reused recovered id: %d %v", id, err)
++	}
++	var n int
++	s.DB.QueryRowContext(ctx, "SELECT count(*) FROM commands WHERE agent_id=111").Scan(&n)
++	if n != 0 {
++		t.Fatal("recovery queued a process command")
++	}
++}
+diff --git a/hub/internal/web/recover_test.go b/hub/internal/web/recover_test.go
+new file mode 100644
+index 0000000..6be7272
+--- /dev/null
++++ b/hub/internal/web/recover_test.go
+@@ -0,0 +1,46 @@
++package web
++
++import (
++	"context"
++	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestRecoveredNoticeOnlyUsesLocalCredential(t *testing.T) {
++	r := newSessRig(t)
++	dir := filepath.Join(r.srv.StateDir, "terminal-context", "111")
++	if err := os.MkdirAll(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(dir, "notice.token"), []byte("private-test-credential"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	for _, x := range []store.Terminal{{ID: 111, Host: r.srv.Host, Provider: "claude", Cwd: "/tmp"}, {ID: 112, Host: "another-machine", Provider: "claude", Cwd: "/tmp"}} {
++		if err := r.st.AdoptLocalTerminal(context.Background(), x); err != nil {
++			t.Fatal(err)
++		}
++	}
++	remote := filepath.Join(r.srv.StateDir, "terminal-context", "112")
++	os.MkdirAll(remote, 0700)
++	os.WriteFile(filepath.Join(remote, "notice.token"), []byte("private-test-credential"), 0600)
++	for _, test := range []struct {
++		id, token string
++		want      int
++	}{{"111", "", 403}, {"111", "wrong", 403}, {"111", "private-test-credential", 204}, {"112", "private-test-credential", 403}} {
++		req, _ := http.NewRequest("POST", r.ts.URL+"/api/terminals/"+test.id+"/question", strings.NewReader(`{"message":"Recovered notification"}`))
++		req.Header.Set("Content-Type", "application/json")
++		req.Header.Set("X-Hub-Notice-Token", test.token)
++		res, err := r.cl.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		res.Body.Close()
++		if res.StatusCode != test.want {
++			t.Fatalf("%s: %d want %d", test.id, res.StatusCode, test.want)
++		}
++	}
++}
+diff --git a/hub/internal/web/terminal_question.go b/hub/internal/web/terminal_question.go
+index 776481a..c750bf6 100644
+--- a/hub/internal/web/terminal_question.go
++++ b/hub/internal/web/terminal_question.go
+@@ -5,7 +5,10 @@ import (
+ 	"encoding/json"
+ 	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"regexp"
++	"strconv"
+ 	"strings"
+ 
+ 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
+@@ -28,7 +31,17 @@ func (s *Server) terminalQuestion(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	cmd, err := s.Store.TermOpenCommand(r.Context(), id)
+ 	var original agent.TermOpen
+-	if err != nil || json.Unmarshal(cmd.Payload, &original) != nil || original.NoticeToken == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Hub-Notice-Token")), []byte(original.NoticeToken)) != 1 {
++	if err == nil {
++		_ = json.Unmarshal(cmd.Payload, &original)
++	}
++	// Recovered local processes retain their credential file, but have no term_open
++	// command in this database. Never use this path for another machine's terminal.
++	if err == store.ErrNotFound && t.Host == s.Host {
++		if secret, e := os.ReadFile(filepath.Join(s.StateDir, "terminal-context", strconv.FormatInt(id, 10), "notice.token")); e == nil {
++			original.NoticeToken = strings.TrimSpace(string(secret))
++		}
++	}
++	if original.NoticeToken == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Hub-Notice-Token")), []byte(original.NoticeToken)) != 1 {
+ 		http.Error(w, "Notification not authorized", 403)
+ 		return
+ 	}
+diff --git a/hub/main.go b/hub/main.go
+index 8fefaaa..9c0348b 100644
+--- a/hub/main.go
++++ b/hub/main.go
+@@ -149,6 +149,7 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
+ 	people := fs.String("people", "", "GitHub login=display name pairs, comma-separated")
+ 	noScan := fs.Bool("no-scan", false, "serve only; don't ingest this machine's files")
+ 	agentHub := fs.String("agent-hub", "", "run this machine's session agent for another hub (e.g. a permanent node), not for this one")
++	remoteAgent := fs.Bool("remote-agent", false, "explicitly delegate local session control to --agent-hub; requires that hub online")
+ 	gwURL := fs.String("gateway", "http://127.0.0.1:8317", "account gateway (CLIProxyAPI) base URL; '' disables")
+ 	gwEnv := fs.String("gateway-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/cpa.env"), "file holding CPA_MGMT_KEY (quota) and CPA_API_KEY (plain chats)")
+ 	slackEnv := fs.String("slack-env", filepath.Join(os.Getenv("HOME"), ".config/llm-brain/slack.env"), "file holding SLACK_TOKEN, read only when the hub has no Slack token yet")
+@@ -242,10 +243,13 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
+ 	var ex *agent.Executor
+ 	exDone := make(chan struct{})
+ 	if c.agent {
+-		if *agentHub != "" { // an ephemeral node: the permanent node's hub opens and shows this machine's terminals
++		if *remoteAgent && *agentHub != "" {
+ 			ex = c.executor(agent.NewHTTPHub(strings.TrimRight(*agentHub, "/")), 3*time.Second, lg)
+ 			ex.HubURL = strings.TrimRight(*agentHub, "/")
+ 		} else {
++			if *agentHub != "" {
++				lg.Printf("local-first session control: ignoring legacy --agent-hub; use --remote-agent to delegate explicitly")
++			}
+ 			ex = c.executor(lh, 2*time.Second, lg)
+ 			ex.HubURL = fmt.Sprintf("http://127.0.0.1:%d", *port) // terminals dial back here
+ 			if *listen != "" {
+diff --git a/tests/brain_mcp_selection_test.py b/tests/brain_mcp_selection_test.py
+new file mode 100644
+index 0000000..6a8d25a
+--- /dev/null
++++ b/tests/brain_mcp_selection_test.py
+@@ -0,0 +1,18 @@
++import importlib.machinery,importlib.util,json,os,tempfile,unittest
++from pathlib import Path
++from unittest.mock import patch
++loader=importlib.machinery.SourceFileLoader('brain_mcp_selection','bin/brain-mcp')
++spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
++class SelectionTest(unittest.TestCase):
++ def test_desktop_selection_and_explicit_override(self):
++  with tempfile.TemporaryDirectory() as tmp,patch.object(m.Path,'home',return_value=Path(tmp)),patch.dict(os.environ,{'BRAIN_HUB_URL':''}):
++   with patch.object(m.sys,'platform','darwin'):
++    desktop=Path(tmp)/'Library/Application Support/app.llmbrain.hub/hubs.json';desktop.parent.mkdir(parents=True)
++    legacy=Path(tmp)/'.config/llm-brain/connections-hub.url';legacy.parent.mkdir(parents=True);legacy.write_text('http://100.64.0.2:8787')
++    desktop.write_text(json.dumps({'selected':'http://127.0.0.1:8787','hubs':[{'url':'http://127.0.0.1:8787'}]}))
++    self.assertEqual(m.hub_url(),'http://127.0.0.1:8787')
++    with patch.dict(os.environ,{'BRAIN_HUB_URL':'http://100.64.0.3:8787'}):self.assertEqual(m.hub_url(),'http://100.64.0.3:8787')
++    desktop.write_text(json.dumps({'selected':'http://unknown.invalid','hubs':[]}))
++    self.assertEqual(m.hub_url(),'http://100.64.0.2:8787')
++    desktop.write_text('broken')
++    self.assertEqual(m.hub_url(),'http://100.64.0.2:8787')
