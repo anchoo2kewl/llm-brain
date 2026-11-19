@@ -15,6 +15,7 @@ final class AppModel {
     private(set) var terminals: [(hub: String, terminal: Terminal)] = []
     private(set) var live: [LiveSession] = []
     private(set) var endingElsewhere: Set<String> = []
+    private(set) var closingTerminals: Set<TerminalRef> = []
     /// The hub's inbox says these wait for you.
     private(set) var inboxWaiting: Set<TerminalRef> = []
     /// Rang the bell since you last looked. Only for a hub that does not send a terminal's state.
@@ -375,6 +376,10 @@ final class AppModel {
     }
 
     func close(_ ref: TerminalRef) async throws {
+        // Claim before the first suspension, shared by every window and close entry point.
+        guard closingTerminals.insert(ref).inserted else { return }
+        defer { closingTerminals.remove(ref) }
+        AppDiagnostics.record("terminal_close_requested id=\(ref.id)")
         struct Ignored: Decodable {}
         _ = try await HubClient(base: ref.hub).post(Paths.close(ref.id), json: [:], as: Ignored.self, timeout: 30)
         AppDiagnostics.record("terminal_close_confirmed id=\(ref.id)")

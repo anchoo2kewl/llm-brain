@@ -144,7 +144,6 @@ struct MainWindow: View {
 
     /// End a terminal: its pane closes here and its CLI stops on its machine.
     private func end(_ ref: TerminalRef) {
-        if let p = panes.tree.pane(showing: ref) { panes.tree.focus(p); panes.tree.close() }
         Task { do { try await model.close(ref) } catch { failure = error.localizedDescription } }
     }
 
@@ -202,7 +201,8 @@ struct Sidebar: View {
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
                                 Divider()
-                                Button("End Terminal…", role: .destructive) { close(e.ref) }
+                                Button(model.closingTerminals.contains(e.ref) ? "Closing…" : "End Terminal…", role: .destructive) { close(e.ref) }
+                                    .disabled(model.closingTerminals.contains(e.ref))
                             }
                     }
                     .onMove { from, to in model.move(in: m, from: from, to: to) }
@@ -210,7 +210,8 @@ struct Sidebar: View {
                     .onInsert(of: [.utf8PlainText, .plainText]) { _, providers in _ = dropped(providers, on: m.name) }
                     if !m.elsewhere.isEmpty {
                         DisclosureGroup("Running elsewhere (\(m.elsewhere.count))") {
-                            Button("End All Running Elsewhere", role: .destructive) { endElsewhere(m.elsewhere) }
+                            Button(model.endingElsewhere.isEmpty ? "End All Running Elsewhere" : "Closing sessions…", role: .destructive) { endElsewhere(m.elsewhere) }
+                                .buttonStyle(.bordered).tint(.red).controlSize(.large)
                                 .disabled(!model.endingElsewhere.isEmpty)
                             ForEach(m.elsewhere) { s in
                                 HStack {
@@ -219,10 +220,7 @@ struct Sidebar: View {
                                         Text("\(s.cli) · \(s.cwd)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                     Spacer()
-                                    Button(role: .destructive) { endElsewhere([s]) } label: {
-                                        Image(systemName: "xmark").font(.caption)
-                                    }
-                                    .buttonStyle(.borderless)
+                                    SessionCloseButton(closing: model.endingElsewhere.contains("\(model.hub ?? "")#\(s.id)")) { endElsewhere([s]) }
                                     .help("End this session on its machine")
                                     .accessibilityLabel("End session")
                                     .disabled(model.endingElsewhere.contains("\(model.hub ?? "")#\(s.id)"))
@@ -230,6 +228,7 @@ struct Sidebar: View {
                                 .contextMenu {
                                     Button("Continue in a Terminal") { continueLive(s) }
                                     Button("End Session", role: .destructive) { endElsewhere([s]) }
+                                        .disabled(model.endingElsewhere.contains("\(model.hub ?? "")#\(s.id)"))
                                 }
                                 .onTapGesture(count: 2) { continueLive(s) }
                                 .help("Double-click to continue this conversation in a hub terminal")
