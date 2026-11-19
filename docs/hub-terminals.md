@@ -58,6 +58,10 @@ The terminal page has a touch key row (Esc, Tab, ⇧Tab, arrows, ⌃C, ⌃D, Ent
 - Each pane can be Terminal or Chat on its own.
 - The layout is kept in the browser.
 
+### Send now
+
+Ctrl+Enter passes a distinct modified Enter to Claude Code’s send-now action, sending the draft and queued messages immediately. Other providers and shells receive plain Enter. Ctrl+Shift+Enter still reaches the Workspace zoom shortcut. The hub’s tmux bridge preserves the extended key; no Ctrl+S is sent to a shell.
+
 ### Workspace shortcuts
 
 All are Ctrl+Shift, caught before the terminal sees them.

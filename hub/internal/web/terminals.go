@@ -304,7 +304,7 @@ func (s *Server) terminalStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": t.Status, "error": t.Error, "cwd": t.Cwd,
+	writeJSON(w, http.StatusOK, map[string]any{"status": t.Status, "error": t.Error, "cwd": t.Cwd, "provider": t.Provider,
 		"host_live": s.Agents.Ctl.HostLive(r.Context(), t.Host), "blocked": t.Block()})
 }
 
