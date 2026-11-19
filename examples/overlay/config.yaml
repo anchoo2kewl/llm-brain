@@ -7,6 +7,8 @@ intake:
   repos: [acme/platform]
   assignee: sam-dev
   authors: [mona-l, octo-b]
+  bot_authors:                    # a scheduled workflow's issues, only with this label, in acme repos, assigned to you
+    - {login: "github-actions[bot]", require_labels: [security-fix], repo_owners: [acme]}
   created_since: "2026-01-01"
 pr_owners: [acme]
 reviewers: [octo-b]
