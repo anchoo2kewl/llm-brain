@@ -2,6 +2,8 @@
 //! The main window shows the hub's own web pages. This crate adds a hub switcher, a global quick-search
 //! window, inbox notifications and a menu-bar icon. See docs/desktop-app.md.
 
+#[cfg(target_os = "linux")]
+mod updates;
 mod allow;
 mod config;
 mod hub;
@@ -276,7 +278,12 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let back = MenuItemBuilder::with_id("back", "Back").accelerator("CmdOrCtrl+[").build(app)?;
     let forward = MenuItemBuilder::with_id("forward", "Forward").accelerator("CmdOrCtrl+]").build(app)?;
 
-    let app_menu = SubmenuBuilder::new(app, APP_TITLE)
+    let app_menu = SubmenuBuilder::new(app, APP_TITLE);
+    #[cfg(target_os = "linux")]
+    let app_menu = app_menu
+        .item(&MenuItem::with_id(app, "update", "Check for Updates…", true, None::<&str>)?)
+        .item(&CheckMenuItem::with_id(app, "auto-update", "Automatically Install Updates", true, updates::automatic(app), None::<&str>)?);
+    let app_menu = app_menu
         .about(None)
         .separator()
         .item(&hubs)
@@ -344,6 +351,10 @@ fn on_menu(app: &AppHandle, id: &str) {
         "reload" => focused_eval(app, "location.reload()"),
         "back" => focused_eval(app, "history.back()"),
         "forward" => focused_eval(app, "history.forward()"),
+        #[cfg(target_os = "linux")]
+        "update" => updates::check(app, true),
+        #[cfg(target_os = "linux")]
+        "auto-update" => { if let Err(err) = updates::toggle(app) { eprintln!("update preference: {err}"); } },
         "quit" => app.exit(0),
         other => {
             if let Some(url) = other.strip_prefix("hub:") {
@@ -695,6 +706,8 @@ fn main() {
             });
 
             app.set_menu(build_app_menu(&handle)?)?;
+            #[cfg(target_os = "linux")]
+            updates::check(&handle, false);
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             build_search_window(&handle)?;

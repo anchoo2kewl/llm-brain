@@ -160,3 +160,7 @@ On macOS, click the Dock icon to show the window again. On Linux, use the tray i
 - Only the macOS build was run by hand. The Linux build comes from CI and was not run by hand yet.
 - The quick-search window is a normal always-on-top window, not a system panel. When it opens, macOS can bring the main window forward too.
 - The app cannot cancel an HTTP request that is already running. It starts no request for an old keystroke, and it drops the reply of an old request. A request ends after 5 seconds at most.
+
+### Desktop updates
+
+Beginning with 0.1.4, Brain Hub checks for a newer stable desktop release at startup. In the application menu, use **Check for Updates…** to check immediately or turn off **Automatically Install Updates**. On macOS, move Brain Hub into a writable Applications folder before updating. On Linux, keep the AppImage in a writable folder. Both install the matching release for the next launch and leave active terminals running. Linux deb and rpm installations announce new versions and use the system package installer. Release downloads are checked against the SHA-256 digest supplied by GitHub. Users on 0.1.3 or earlier install this release once to get the updater.

@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppModel.shared.requestNotifications()
             KeyRouter.install()
             GlobalHotkey.register()
+            Updates.check(manual: false)
             // After sleep the sockets are dead but may not know it yet.
             NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { AppModel.shared.sessions.values.forEach { $0.reconnect() } }
@@ -61,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct HubCommands: Commands {
+    @AppStorage("automaticUpdates") private var automaticUpdates = true
     @FocusedValue(\.windowActions) private var actions
     @Environment(\.openWindow) private var openWindow
 
@@ -73,6 +75,10 @@ struct HubCommands: Commands {
     var body: some Commands {
         let _ = (AppModel.shared.openMain = { [openWindow] in openWindow(id: "main") })
         // Cmd+W: the focused pane, else whatever window is in front (sheet, Settings, Shortcuts). Never does nothing.
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { Updates.check(manual: true) }
+            Toggle("Automatically Install Updates", isOn: $automaticUpdates)
+        }
         CommandGroup(replacing: .saveItem) {
             Button(Shortcut.close.title) { AppModel.shared.closeCommand() }.shortcut(.close)
         }

@@ -17,7 +17,10 @@ cp "$bin/BrainHub" "$app/Contents/MacOS/BrainHub"
 # brain-attach runs in each terminal pane and holds the hub connection.
 for arch in arm64 amd64; do
   (cd ../attach && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags=-s -o "$OLDPWD/.build/brain-attach-$arch" .)
+  (cd ../attach && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags=-s -o "$OLDPWD/.build/brain-update-$arch" ./cmd/brain-update)
 done
+lipo -create -output "$app/Contents/MacOS/brain-update" .build/brain-update-arm64 .build/brain-update-amd64
+codesign --force --sign - "$app/Contents/MacOS/brain-update"
 lipo -create -output "$app/Contents/MacOS/brain-attach" .build/brain-attach-arm64 .build/brain-attach-amd64
 codesign --force --sign - "$app/Contents/MacOS/brain-attach"
 # Ghostty's terminfo and themes: libghostty finds them next to the executable, so a `theme =` line works.
