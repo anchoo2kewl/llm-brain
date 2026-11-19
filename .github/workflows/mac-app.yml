@@ -1,0 +1,104 @@
+# Build libghostty (GhosttyKit.xcframework) from the pinned Ghostty commit in app-mac/ghostty.commit, then test and
+# build the Mac app with it. The xcframework needs Xcode (Metal shaders, xcodebuild), so local builds without Xcode
+# download the `GhosttyKit-<commit>` artifact from here with app-mac/fetch-ghostty.sh.
+name: mac-app
+
+on:
+  push:
+    branches: [main, feat/desktop-client]
+    paths: ["app-mac/**", "attach/**", ".github/workflows/mac-app.yml"]
+  pull_request:
+    paths: ["app-mac/**", "attach/**", ".github/workflows/mac-app.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-app-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  ghostty-kit:
+    runs-on: macos-latest
+    outputs:
+      commit: ${{ steps.pin.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: pin
+        run: echo "commit=$(cat app-mac/ghostty.commit)" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: GhosttyKit
+          key: ghostty-kit-${{ steps.pin.outputs.commit }}-v1
+      - name: Build GhosttyKit.xcframework with Zig
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          COMMIT: ${{ steps.pin.outputs.commit }}
+          ZIG: "0.17.1"
+          ZIG_SHA256: 75f1bc7a1e9852f17ec9a0c1895f767c4ec56d46bc8a834920eece1d0359dd8d
+        run: |
+          xcodebuild -version
+          curl -fsSL -o zig.tar.xz "https://ziglang.org/download/$ZIG/zig-aarch64-macos-$ZIG.tar.xz"
+          echo "$ZIG_SHA256  zig.tar.xz" | shasum -a 256 -c
+          tar xf zig.tar.xz
+          export PATH="$PWD/zig-aarch64-macos-$ZIG:$PATH"
+          git init -q ghostty && cd ghostty
+          git fetch -q --depth 1 https://github.com/ghostty-org/ghostty.git "$COMMIT"
+          git checkout -q FETCH_HEAD
+          zig build -Doptimize=ReleaseFast -Demit-xcframework=true -Dxcframework-target=universal \
+            -Demit-macos-app=false -Di18n=false -Demit-terminfo=true -Demit-themes=true
+          mkdir -p ../GhosttyKit/share
+          cp -R macos/GhosttyKit.xcframework ../GhosttyKit/
+          # terminfo and themes, copied into the app's Resources so the user's `theme =` works.
+          cp -R zig-out/share/terminfo zig-out/share/ghostty ../GhosttyKit/share/
+      # SwiftPM takes a static library only as lib*.a. A tarball: some theme names have a colon, which an artifact
+      # cannot hold.
+      - run: |
+          x=GhosttyKit/GhosttyKit.xcframework
+          if [ -f $x/macos-arm64_x86_64/ghostty-internal.a ]; then
+            mv $x/macos-arm64_x86_64/ghostty-internal.a $x/macos-arm64_x86_64/libghostty.a
+            plutil -replace AvailableLibraries.0.LibraryPath -string libghostty.a $x/Info.plist
+          fi
+          tar -czf GhosttyKit.tgz GhosttyKit
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GhosttyKit-${{ steps.pin.outputs.commit }}
+          path: GhosttyKit.tgz
+          retention-days: 90
+
+  app:
+    needs: ghostty-kit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: GhosttyKit-${{ needs.ghostty-kit.outputs.commit }}
+      - run: mkdir app-mac/Vendor && tar -xzf GhosttyKit.tgz -C app-mac/Vendor --strip-components 1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: attach/go.mod
+          cache-dependency-path: attach/go.sum
+      - name: brain-attach tests
+        working-directory: attach
+        run: |
+          go vet ./...
+          go test ./...
+          for os in darwin linux windows; do for arch in amd64 arm64; do GOOS=$os GOARCH=$arch go build -o /dev/null .; done; done
+      - name: Mac app tests
+        working-directory: app-mac
+        # -O as well: an optimiser-only bug once broke the hub URL allow-list.
+        run: |
+          swift test
+          swift test -Xswiftc -O
+      - name: Build the universal app
+        working-directory: app-mac
+        run: ./build-app.sh --arch arm64 --arch x86_64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BrainHub-mac
+          path: app-mac/dist/BrainHub-mac-*.zip
+          retention-days: 14

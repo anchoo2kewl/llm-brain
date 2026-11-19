@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Local app pages only (quick search, hub list). Pages served by a hub get no IPC.",
+  "windows": ["main", "search", "hubs"],
+  "permissions": ["core:default"]
+}
