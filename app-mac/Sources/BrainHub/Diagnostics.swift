@@ -30,21 +30,44 @@ enum AppDiagnostics {
         let directories = [
             directory,
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports"),
-            URL(fileURLWithPath: "/Library/Logs/DiagnosticReports")
+            URL(fileURLWithPath: "/Library/Logs/DiagnosticReports"),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/state/ghostty/crash")
         ]
         return directories.flatMap { directory in
             (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         }.filter { url in
             if url.deletingLastPathComponent() == directory { return url.pathExtension == "log" }
+            if url.pathExtension == "ghosttycrash" { return nativeEvent(url) != nil }
             return ["ips", "crash"].contains(url.pathExtension)
                 && (url.lastPathComponent.lowercased().hasPrefix("brain") || url.lastPathComponent.hasPrefix("hub-"))
         }.sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
+    private static func nativeEvent(_ url: URL) -> [String: Any]? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: 1_048_576)) ?? Data()
+        let lines = data.split(separator: 10, maxSplits: 3, omittingEmptySubsequences: false)
+        guard lines.count >= 3,
+              let event = try? JSONSerialization.jsonObject(with: Data(lines[2])) as? [String: Any],
+              let debug = event["debug_meta"] as? [String: Any],
+              let images = debug["images"] as? [[String: Any]],
+              images.contains(where: { ($0["code_file"] as? String)?.hasSuffix("/Brain Hub.app/Contents/MacOS/BrainHub") == true })
+        else { return nil }
+        return event
+    }
+
     static func read(_ url: URL) -> String {
         guard reports.contains(url), let handle = try? FileHandle(forReadingFrom: url) else { return "Report unavailable." }
         defer { try? handle.close() }
-        return String(decoding: (try? handle.read(upToCount: 1_048_576)) ?? Data(), as: UTF8.self)
+        let data = (try? handle.read(upToCount: 1_048_576)) ?? Data()
+        if url.pathExtension == "ghosttycrash" {
+            guard let event = nativeEvent(url),
+                  let json = try? JSONSerialization.data(withJSONObject: event, options: [.prettyPrinted, .sortedKeys])
+            else { return "Native crash report metadata unavailable. Open the original report folder to inspect the dump." }
+            return String(decoding: json, as: UTF8.self)
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -60,6 +83,9 @@ struct DiagnosticsView: View {
                 Button("Open Log Folder") { NSWorkspace.shared.open(AppDiagnostics.directory) }
                 Button("Open Crash Reports") {
                     NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports"))
+                }
+                Button("Open Native Crash Reports") {
+                    NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/state/ghostty/crash"))
                 }
                 Spacer()
             }

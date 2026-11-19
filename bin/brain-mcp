@@ -121,10 +121,23 @@ def validate(value, schema):
     elif kind=='string':
         if not isinstance(value,str) or len(value.encode())>schema.get('maxLength',65536) or ('enum' in schema and value not in schema['enum']):raise ValueError('Invalid text')
 
+def native_crash_event(path):
+    try:
+        with path.open('rb') as source:
+            lines = source.read(1048576).split(b'\n',3)
+        event = json.loads(lines[2])
+        images = event.get('debug_meta',{}).get('images',[])
+        if any(image.get('code_file','').endswith('/Brain Hub.app/Contents/MacOS/BrainHub') for image in images):
+            return event
+    except (OSError,ValueError,IndexError,AttributeError):
+        pass
+    return None
+
 def diagnostic_reports():
     roots = [Path.home()/'Library/Logs/BrainHub',
              Path.home()/'Library/Logs/DiagnosticReports',
-             Path('/Library/Logs/DiagnosticReports')]
+             Path('/Library/Logs/DiagnosticReports'),
+             Path.home()/'.local/state/ghostty/crash']
     found = {}
     for index, root in enumerate(roots):
         try:
@@ -133,8 +146,10 @@ def diagnostic_reports():
                     continue
                 name = path.name
                 allowed = (index == 0 and name in ('app.log','app.previous.log')) or (
-                    index > 0 and path.suffix in ('.ips','.crash') and
+                    index in (1,2) and path.suffix in ('.ips','.crash') and
                     (name.lower().startswith('brain') or name.startswith('hub-')))
+                if index == 3 and path.suffix == '.ghosttycrash':
+                    allowed = native_crash_event(path) is not None
                 if allowed:
                     found[str(index)+'/'+name] = path
         except OSError:
@@ -147,7 +162,12 @@ def read_diagnostic(report):
         raise ValueError('Unknown diagnostic report')
     with path.open('rb') as source:
         raw = source.read(1048577)
-    text = raw[:1048576].decode('utf-8',errors='replace')
+    if path.suffix == '.ghosttycrash':
+        event = native_crash_event(path)
+        if event is None: raise ValueError('Invalid native crash envelope')
+        text = json.dumps(event,indent=2)
+    else:
+        text = raw[:1048576].decode('utf-8',errors='replace')
     text = text.replace(str(Path.home()), '~')
     text = re.sub(r'(?i)(authorization[=: ]+bearer |api[_-]?key[=: ]+|token[=: ]+)[^\s",]+',
                   r'\1[REDACTED]', text)

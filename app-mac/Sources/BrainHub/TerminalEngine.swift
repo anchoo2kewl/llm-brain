@@ -71,6 +71,12 @@ final class TerminalEngine {
     }
 }
 
+// A global C entry point avoids inheriting the main actor of Ghostty's initializer. Native I/O
+// threads call this function before any main-queue dispatch can take place.
+func ghosttyWakeup(_ userdata: UnsafeMutableRawPointer?) {
+    DispatchQueue.main.async { Ghostty.shared.tick() }
+}
+
 /// The libghostty app: one per process, shared by every surface.
 @MainActor
 final class Ghostty {
@@ -104,7 +110,7 @@ final class Ghostty {
         var runtime = ghostty_runtime_config_s(
             userdata: nil,
             supports_selection_clipboard: false,
-            wakeup_cb: { _ in DispatchQueue.main.async { MainActor.assumeIsolated { Ghostty.shared.tick() } } },
+            wakeup_cb: ghosttyWakeup,
             action_cb: { _, target, action in MainActor.assumeIsolated { Ghostty.action(target, action) } },
             read_clipboard_cb: { ud, loc, state, mimes, count, _ in
                 MainActor.assumeIsolated { Ghostty.readClipboard(ud, loc, state, mimes, count) }
@@ -145,7 +151,7 @@ final class Ghostty {
         }
     }
 
-    private func tick() { if let app { ghostty_app_tick(app) } }
+    fileprivate func tick() { if let app { ghostty_app_tick(app) } }
 
     private static func action(_ target: ghostty_target_s, _ action: ghostty_action_s) -> Bool {
         let view = target.tag == GHOSTTY_TARGET_SURFACE

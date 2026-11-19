@@ -9,6 +9,21 @@ from unittest.mock import patch
 loader=importlib.machinery.SourceFileLoader('brain_mcp','bin/brain-mcp')
 spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
 class DiagnosticsTest(unittest.TestCase):
+ def test_native_report_reads_metadata_without_dump_memory(self):
+  import tempfile
+  event={'debug_meta':{'images':[{'code_file':'/Applications/Brain Hub.app/Contents/MacOS/BrainHub'}]},'level':'fatal'}
+  with tempfile.TemporaryDirectory() as directory:
+   path=m.Path(directory)/'test.ghosttycrash'
+   path.write_bytes(b'{}\n{}\n'+json.dumps(event).encode()+b'\n'+b'PRIVATE-DUMP-MEMORY')
+   self.assertEqual(m.native_crash_event(path),event)
+   with patch.object(m,'diagnostic_reports',return_value={'3/test.ghosttycrash':path}):
+    output=m.read_diagnostic('3/test.ghosttycrash')
+    self.assertIn('fatal',output['text'])
+    self.assertNotIn('PRIVATE-DUMP-MEMORY',output['text'])
+   event['debug_meta']['images'][0]['code_file']='/Applications/Other.app/Contents/MacOS/Other'
+   path.write_bytes(b'{}\n{}\n'+json.dumps(event).encode()+b'\n')
+   self.assertIsNone(m.native_crash_event(path))
+
  def test_unknown_report_and_traversal_are_rejected(self):
   with patch.object(m,'diagnostic_reports',return_value={}):
    for report in ('../../etc/passwd','1/unknown.ips'):
