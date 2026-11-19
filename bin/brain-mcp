@@ -100,7 +100,8 @@ TOOLS = [
     tool('session_detail','Read one session: machine, folder, provider, state and its conversation.',{'id':NUM},('id',),read=True),
     tool('session_rename','Rename a session.',{'id':NUM,'title':{'type':'string','maxLength':200}},('id','title'),idem=True),
     tool('session_close','End a session: stops its CLI on its machine. Its conversation stays on disk and can be continued later. Only for sessions the owner asked to end.',{'id':NUM},('id',),destructive=True),
-    tool('session_move','Move (default) or clone a Claude/Codex session to another machine as a hub job. Move: the hub checks the destination has the same CLI, copies the conversation, resumes it there, verifies it stays live, and only then ends the source. Clone: the destination forks the conversation with all its context and the source keeps running. Uncommitted files, worktrees and running processes do not move. Returns a job; follow it with move_status.',{'id':NUM,'to':{'type':'string','maxLength':128},'mode':{'type':'string','enum':['move','clone']}},('id','to')),
+    tool('session_move','Move (default) or clone a Claude/Codex session to another machine as a hub job. Move: the hub checks the destination has the same CLI, copies the conversation, resumes it there, verifies it stays live, and only then ends the source. Clone: the destination forks the conversation with all its context and the source keeps running. Optionally select destination_path and pin_path for future moves. without_folder uses home and bypasses saved mappings. Uncommitted files, worktrees and running processes do not move. Returns a job; follow it with move_status.',{'id':NUM,'to':{'type':'string','maxLength':128},'mode':{'type':'string','enum':['move','clone']},'destination_path':{'type':'string','maxLength':4096},'pin_path':{'type':'boolean'},'without_folder':{'type':'boolean'}},('id','to')),
+    tool('move_folders','List, set or remove saved per-machine working-folder mappings. Paths refer to existing folders on the destination; files are not copied.',{'action':{'type':'string','enum':['list','set','remove']},'from_host':{'type':'string','maxLength':128},'source_path':{'type':'string','maxLength':4096},'to':{'type':'string','maxLength':128},'destination_path':{'type':'string','maxLength':4096}},('action',),idem=True),
     tool('move_status','Read a move or clone job: each phase (check, export, copy, resume, verify, close), the destination session id, and any error.',{'job':{'type':'string','maxLength':64}},('job',),read=True),
     tool('workspace_get','Read what each open workspace window (web or desktop) shows: layout, sessions in its panes, focus, zoom.',{},read=True),
     tool('workspace_control','Ask the open workspaces to open or focus a session, change layout (1, 2, stack, 3, 4, 6, 9), or zoom/unzoom the focused pane. client limits it to one window from workspace_get.',{'action':{'type':'string','enum':['open','focus','layout','zoom','unzoom']},'terminal':NUM,'layout':{'type':'string','enum':['1','2','stack','3','4','6','9']},'client':{'type':'string','maxLength':80}},('action',)),
@@ -118,6 +119,8 @@ def validate(value, schema):
         for v in value:validate(v,schema['items'])
     elif kind=='integer':
         if type(value) is not int or not schema.get('minimum',-10**12)<=value<=schema.get('maximum',10**12):raise ValueError('Invalid number')
+    elif kind=='boolean':
+        if type(value) is not bool:raise ValueError('Invalid boolean')
     elif kind=='string':
         if not isinstance(value,str) or len(value.encode())>schema.get('maxLength',65536) or ('enum' in schema and value not in schema['enum']):raise ValueError('Invalid text')
 
@@ -232,7 +235,17 @@ def call(name,a):
     if name=='session_close':return rq('/api/terminals/%d/close'%tid(),{})
     if name=='session_move':
         body={'to':a['to'],'clone':True} if a.get('mode')=='clone' else {'to':a['to'],'close_source':True}
+        if a.get('without_folder') and (a.get('destination_path') or a.get('pin_path')):raise ValueError('without_folder cannot be combined with a path or pin')
+        if a.get('pin_path') and not a.get('destination_path'):raise ValueError('pin_path requires destination_path')
+        if a.get('destination_path') or a.get('without_folder'):rq('/api/move-folders')  # refuse old hubs that would ignore the new options
+        for key in ('destination_path','pin_path','without_folder'):
+            if key in a:body[key]=a[key]
         return rq('/api/terminals/%d/migrate'%tid(),body)
+    if name=='move_folders':
+        if a['action']=='list':return rq('/api/move-folders')
+        required=('from_host','source_path','to','destination_path') if a['action']=='set' else ('from_host','source_path','to')
+        if any(not a.get(k) for k in required):raise ValueError('Give '+', '.join(required))
+        return rq('/api/move-folders',a)
     if name=='move_status':
         if not re.fullmatch(r'[a-f0-9]{64}',a['job']):raise ValueError('Invalid job')
         return rq('/api/migrations/'+a['job'])

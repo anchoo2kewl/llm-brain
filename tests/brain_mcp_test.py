@@ -92,6 +92,18 @@ class ControlTest(unittest.TestCase):
     self.assertTrue(self.call(name,args)['isError'])
    self.assertEqual(r.call_count,n)
   tools={t['name']:t for t in m.TOOLS};self.assertTrue(tools['session_close']['annotations']['destructiveHint'])
+ def test_move_folder_options_and_mapping_management(self):
+  with patch.object(m,'request',return_value={'mappings':[]}) as r:
+   self.assertFalse(self.call('session_move',{'id':5,'to':'Studio','destination_path':'~/different/repo','pin_path':True}).get('isError'))
+   self.assertEqual(r.call_args.args[1],{'to':'Studio','close_source':True,'destination_path':'~/different/repo','pin_path':True})
+   self.call('session_move',{'id':5,'to':'Studio','without_folder':True});self.assertTrue(r.call_args.args[1]['without_folder'])
+   self.call('move_folders',{'action':'list'});self.assertEqual(r.call_args.args[0],'/api/move-folders')
+   pin={'action':'set','from_host':'laptop','source_path':'~/repo','to':'Studio','destination_path':'~/other/repo'}
+   self.assertFalse(self.call('move_folders',pin).get('isError'));self.assertEqual(r.call_args.args,('/api/move-folders',pin))
+   self.call('move_folders',{k:v for k,v in pin.items() if k!='destination_path'}|{'action':'remove'});self.assertEqual(r.call_args.args[1]['action'],'remove')
+   n=r.call_count
+   for args in ({'id':5,'to':'Studio','pin_path':True},{'id':5,'to':'Studio','pin_path':'yes'},{'id':5,'to':'Studio','without_folder':True,'destination_path':'~/repo'}):self.assertTrue(self.call('session_move',args)['isError'])
+   self.assertEqual(r.call_count,n)
  def test_desktop_update_is_local_and_validated(self):
   with patch.object(m,'desktop_update',return_value={'version':'0.1.4'}) as update:
    self.assertFalse(self.call('desktop_update',{'action':'status'}).get('isError'))
