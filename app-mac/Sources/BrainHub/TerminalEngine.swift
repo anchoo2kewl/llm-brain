@@ -454,6 +454,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             interpretKeyEvents([event])
             return
         }
+        // Preserve the actual modified Return through the hub bridge, even before mode negotiation.
+        if event.modifierFlags.intersection([.control, .option, .command, .shift]) == .control,
+           event.keyCode == 36 || event.keyCode == 76 {
+            let action = "text:\\x1b[13;5u"
+            _ = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            return
+        }
         // Option as Alt (and similar settings) change which modifiers produce the character.
         let tm = ghostty_surface_key_translation_mods(surface, Self.mods(event.modifierFlags)).rawValue
         var mods = event.modifierFlags

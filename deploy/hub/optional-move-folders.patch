@@ -1,24 +1,124 @@
-From c8e893344c0ee87c1c3112dbae199627bb745682 Mon Sep 17 00:00:00 2001
+From 27a9ae8d266b782d3934c955d3a572ecfad44a5e Mon Sep 17 00:00:00 2001
 From: Anshuman Biswas <abiswas@elastio.com>
 Date: Thu, 19 Nov 2026 11:39:48 -0500
 Subject: [PATCH] Support optional destination folders and durable per-machine
  mappings for session moves
 
 ---
+ hub/internal/agent/extended_keys_test.go      |  90 ++++++++++++
  .../agent/session_destination_test.go         |  40 ++++++
  hub/internal/agent/sessionput.go              |  56 +++++---
+ hub/internal/agent/term.go                    |   5 +
  .../store/migrations/0038_move_folders.sql    |   7 +
  hub/internal/web/find.go                      |  34 ++++-
  hub/internal/web/migrate.go                   |  58 ++++++--
  hub/internal/web/move_folders.go              | 132 ++++++++++++++++++
  hub/internal/web/move_folders_test.go         |  52 +++++++
+ hub/internal/web/static/termpane.js           |  15 +-
  hub/internal/web/static/workspace.js          |   9 +-
- 8 files changed, 351 insertions(+), 37 deletions(-)
+ 11 files changed, 450 insertions(+), 48 deletions(-)
+ create mode 100644 hub/internal/agent/extended_keys_test.go
  create mode 100644 hub/internal/agent/session_destination_test.go
  create mode 100644 hub/internal/store/migrations/0038_move_folders.sql
  create mode 100644 hub/internal/web/move_folders.go
  create mode 100644 hub/internal/web/move_folders_test.go
 
+diff --git a/hub/internal/agent/extended_keys_test.go b/hub/internal/agent/extended_keys_test.go
+new file mode 100644
+index 0000000..c67208a
+--- /dev/null
++++ b/hub/internal/agent/extended_keys_test.go
+@@ -0,0 +1,90 @@
++package agent
++
++import (
++	"bytes"
++	"context"
++	"github.com/creack/pty"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strconv"
++	"testing"
++	"time"
++)
++
++// Exercise the actual outer-terminal -> tmux -> application byte path on a separate socket.
++func TestControlEnterBridge(t *testing.T) {
++	bin, err := exec.LookPath("tmux")
++	if err != nil {
++		t.Skip("tmux not installed")
++	}
++	dir := t.TempDir()
++	conf := filepath.Join(dir, "tmux.conf")
++	out := filepath.Join(dir, "key")
++	if err := os.WriteFile(conf, []byte(tmuxConf), 0600); err != nil {
++		t.Fatal(err)
++	}
++	socket := "brain-key-test-" + strconv.Itoa(os.Getpid())
++	run := func(args ...string) *exec.Cmd {
++		return exec.Command(bin, append([]string{"-L", socket, "-f", conf}, args...)...)
++	}
++	command := "stty raw -echo; printf '\\033[>4;2mREADY'; dd bs=1 count=7 of=" + shellQuote(out) + " 2>/dev/null; sleep 1"
++	if b, err := run("new-session", "-d", "-s", "keytest", command).CombinedOutput(); err != nil {
++		t.Fatalf("tmux: %v %s", err, b)
++	}
++	defer run("kill-server").Run()
++	cmd := run("attach-session", "-t", "keytest")
++	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
++	master, err := pty.Start(cmd)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer func() { _ = run("kill-server").Run(); _ = master.Close(); _ = cmd.Wait() }()
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	ready := make(chan error, 1)
++	go func() {
++		var data []byte
++		buf := make([]byte, 4096)
++		for len(data) < 65536 {
++			n, err := master.Read(buf)
++			data = append(data, buf[:n]...)
++			if bytes.Contains(data, []byte("READY")) {
++				ready <- nil
++				return
++			}
++			if err != nil {
++				ready <- err
++				return
++			}
++		}
++		ready <- io.ErrNoProgress
++	}()
++	select {
++	case err := <-ready:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-ctx.Done():
++		t.Fatal("terminal did not become ready")
++	}
++	want := []byte("\x1b[13;5u")
++	if _, err := master.Write(want); err != nil {
++		t.Fatal(err)
++	}
++	for {
++		got, _ := os.ReadFile(out)
++		if len(got) >= len(want) {
++			if !bytes.Equal(got, want) {
++				t.Fatalf("Control+Enter became %q", got)
++			}
++			return
++		}
++		select {
++		case <-ctx.Done():
++			t.Fatalf("Control+Enter collapsed or disappeared: %q", got)
++		case <-time.After(10 * time.Millisecond):
++		}
++	}
++}
 diff --git a/hub/internal/agent/session_destination_test.go b/hub/internal/agent/session_destination_test.go
 new file mode 100644
 index 0000000..8dcd758
@@ -161,6 +261,29 @@ index 8ca42ef..7b375be 100644
 +	}
 +	return home, nil
 +}
+diff --git a/hub/internal/agent/term.go b/hub/internal/agent/term.go
+index dfe9b24..c566384 100644
+--- a/hub/internal/agent/term.go
++++ b/hub/internal/agent/term.go
+@@ -231,6 +231,10 @@ set -g escape-time 10
+ set -g default-terminal "xterm-256color"
+ set -g set-clipboard on
+ set -g focus-events on
++# Preserve Control+Enter and other modified keys through the terminal bridge.
++set -s extended-keys on
++set -s extended-keys-format csi-u
++set -as terminal-features ",xterm*:extkeys"
+ set -g allow-passthrough on
+ setw -g aggressive-resize on
+ `
+@@ -521,6 +525,7 @@ func (e *Executor) termCwd(ctx context.Context, id int64, o TermOpen) (string, e
+ 		return filepath.EvalSymlinks(home)
+ 	}
+ 	cwd, err := NewRoots([]string{home}).Validate(want)
++	if err != nil { cwd, err = e.Roots.Validate(want) }
+ 	if err != nil {
+ 		if errors.Is(err, ErrOutside) {
+ 			return "", fmt.Errorf("%s is not in your home folder", o.Cwd)
 diff --git a/hub/internal/store/migrations/0038_move_folders.sql b/hub/internal/store/migrations/0038_move_folders.sql
 new file mode 100644
 index 0000000..99dc661
@@ -565,6 +688,32 @@ index 0000000..466ce55
 +		t.Fatal(body)
 +	}
 +}
+diff --git a/hub/internal/web/static/termpane.js b/hub/internal/web/static/termpane.js
+index fa57617..013feef 100644
+--- a/hub/internal/web/static/termpane.js
++++ b/hub/internal/web/static/termpane.js
+@@ -131,17 +131,10 @@
+         navigator.clipboard.writeText(text).then(function () { say("Copied to your browser clipboard."); }).catch(blocked);
+       } else blocked();
+     }
+-    // Ctrl+Enter sends what is typed now, even while the agent is busy. Each CLI has its own key for sending a
+-    // queued message at once; the hub gives them all this one. Listed here: the keys to press after Enter.
+-    // A CLI that is not listed (and a shell, where Ctrl+S would freeze the output) gets the Enter alone.
+-    var sendNowKeys = { claude: ["\x18", "\x13"] }; // Ctrl+X Ctrl+S
+-    var provider = "";
+-    status(function (s) { provider = s.provider || ""; });
+-    function sendNow() {
+-      send("\r");
+-      // One key at a time, a moment apart: sent together a CLI reads them as pasted text, not as keys.
+-      (sendNowKeys[provider] || []).forEach(function (k, i) { setTimeout(function () { send(k); }, 80 + 60 * i); });
+-    }
++    // Send the actual modified Enter; Claude's chat:sendNow handles draft and queue together.
++    var provider = opts.provider || "";
++    status(function (s) { provider = s.provider || provider; });
++    function sendNow() { send(provider === "claude" ? "\x1b[13;5u" : "\r"); }
+     term.attachCustomKeyEventHandler(function (e) {
+       if (e.key === "Enter" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+         if (e.type === "keydown") { e.preventDefault(); sendNow(); }
 diff --git a/hub/internal/web/static/workspace.js b/hub/internal/web/static/workspace.js
 index d4ae972..f1fe06f 100644
 --- a/hub/internal/web/static/workspace.js

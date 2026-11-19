@@ -41,3 +41,7 @@ Mappings are exact source-folder/machine pairs, normalized across home-folder pr
 Pass the returned job to `move_status`. Its `destination_path` reports the resolved directory; phases show copy, resume, verification and source close. Reconnect MCP clients after updating the bridge to refresh their tool schemas.
 
 REST endpoints: `GET /api/move-folders`, `POST /api/move-folders` (`action: set|remove`), and the existing terminal migration endpoint with the same move options. Older hubs that cannot confirm folder support are rejected when a folder option is requested.
+
+## Send immediately
+
+Control+Enter sends Claude Code’s draft and queued messages immediately. Hub tmux servers preserve extended keys in CSI-u format; native and web clients send the distinct modified Return. `config/claude-keybindings.json` selects Control+Enter as the displayed send-now binding. It can be merged with existing Claude keybindings without changing other actions.
