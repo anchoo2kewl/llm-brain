@@ -58,6 +58,7 @@ The details are in [Getting started](docs/getting-started.md).
 | [Configuration](docs/configuration.md) | Config layers, every key of `config/fleet.yaml`, env vars, files on disk |
 | [Overlay](docs/overlay.md) | Your private settings: people, repos, house notes, private rules |
 | [Fleet](docs/fleet.md) | Intake, claims, workers, babysitting, merge policy, kill switches, every `fleet` command |
+| [Agent rules (draft)](docs/agent-rules.md) | What agents may do: human approval, stop, limits, agent identity |
 | [PR review](docs/pr-review.md) | Review flow, rule modules, fuzzy `when`, `bin/review-rules`, output format |
 | [AI Slop Score](docs/slop-score.md) | The taste and PR-hygiene score on every review |
 | [LLM roles and gateway](docs/llm-roles-and-gateway.md) | `bin/llm-run`, providers, CLIProxyAPI, account priority, quota |
