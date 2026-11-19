@@ -18,9 +18,10 @@ if launchctl print "$launch_domain/$label" >/dev/null 2>&1; then
  launchctl bootout "$launch_domain/$label"
 fi
 mv "$staged" "$target"
-if ! launchctl bootstrap "$launch_domain" "$plist"; then
+if ! "$target" version >/dev/null || ! launchctl bootstrap "$launch_domain" "$plist"; then
  cp "$target.previous" "$staged"
  mv "$staged" "$target"
+ "$target" version >/dev/null
  launchctl bootstrap "$launch_domain" "$plist" || true
  exit 1
 fi

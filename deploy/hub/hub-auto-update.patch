@@ -1,0 +1,916 @@
+From ed9c4fc9cc7c5bc07687dec2e4f7d7a323b95c83 Mon Sep 17 00:00:00 2001
+From: Anshuman Biswas <abiswas@elastio.com>
+Date: Thu, 19 Nov 2026 12:55:35 -0500
+Subject: [PATCH] Add independent hub auto-updates, readiness, rollback and MCP
+ controls
+
+---
+ bin/brain-hub-update                       | 197 +++++++++++++++++++++
+ bin/brain-mcp                              |  84 ++++++++-
+ hub/internal/web/hub_update.go             | 123 +++++++++++++
+ hub/internal/web/hub_update_busy.go        |  16 ++
+ hub/internal/web/hub_update_test.go        |  71 ++++++++
+ hub/internal/web/server.go                 |   4 +
+ hub/internal/web/workspace_ctl.go          |  75 ++++++++
+ hub/internal/web/workspace_persist_test.go |  28 +++
+ hub/main.go                                |   2 +
+ tests/brain_mcp_test.py                    |  51 ++++++
+ tests/hub_update_test.py                   |  46 +++++
+ 11 files changed, 695 insertions(+), 2 deletions(-)
+ create mode 100755 bin/brain-hub-update
+ create mode 100644 hub/internal/web/hub_update.go
+ create mode 100644 hub/internal/web/hub_update_busy.go
+ create mode 100644 hub/internal/web/hub_update_test.go
+ create mode 100644 hub/internal/web/workspace_persist_test.go
+ create mode 100644 tests/hub_update_test.py
+
+diff --git a/bin/brain-hub-update b/bin/brain-hub-update
+new file mode 100755
+index 0000000..efd4f58
+--- /dev/null
++++ b/bin/brain-hub-update
+@@ -0,0 +1,197 @@
++#!/usr/bin/env python3
++"""Update the hub service, independently of desktop clients. Python standard library only."""
++import argparse, contextlib, fcntl, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
++from pathlib import Path
++from urllib.parse import urlsplit
++from urllib.request import Request, urlopen
++
++REPO = 'anchoo2kewl/llm-brain'
++API = 'https://api.github.com/repos/'+REPO+'/releases?per_page=100'
++PREFIX = 'hub-v'
++LABEL = 'com.llm-brain.hub'
++UPDATE_LABEL = LABEL+'-update'
++
++def version(v):
++    m=re.fullmatch(r'(?:hub-v|v)?(\d+)\.(\d+)\.(\d+)',v)
++    if not m:raise ValueError('Invalid hub version')
++    return tuple(map(int,m.groups()))
++
++def read_json(path, default):
++    try:return json.loads(path.read_text())
++    except FileNotFoundError:return default
++
++def atomic_json(path, value):
++    path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
++    fd,tmp=tempfile.mkstemp(prefix=path.name+'.',dir=path.parent)
++    try:
++        os.fchmod(fd,0o600)
++        with os.fdopen(fd,'w') as f:json.dump(value,f);f.write('\n')
++        os.replace(tmp,path)
++    finally:
++        with contextlib.suppress(FileNotFoundError):os.unlink(tmp)
++
++def fetch(url, limit):
++    if urlsplit(url).scheme!='https':raise ValueError('Update download must use HTTPS')
++    req=Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'llm-brain-hub-updater'})
++    with urlopen(req,timeout=30) as r:
++        if urlsplit(r.url).scheme!='https':raise ValueError('Insecure update redirect')
++        data=r.read(limit+1)
++    if len(data)>limit:raise ValueError('Update response is too large')
++    return data
++
++def asset_url(a, tag):
++    url=a.get('browser_download_url','')
++    prefix='https://github.com/'+REPO+'/releases/download/'+tag+'/'
++    if not url.startswith(prefix):raise ValueError('Unexpected hub asset URL')
++    return url
++
++def latest_release():
++    releases=json.loads(fetch(API,2<<20))
++    choices=[]
++    for r in releases:
++        tag=r.get('tag_name','')
++        if r.get('draft') or r.get('prerelease') or not tag.startswith(PREFIX):continue
++        try:v=version(tag)
++        except ValueError:continue
++        choices.append((v,r))
++    if not choices:return None
++    r=max(choices,key=lambda x:x[0])[1];tag=r['tag_name']
++    assets={a['name']:a for a in r.get('assets',[])}
++    if 'hub-update.json' not in assets:raise ValueError('Hub release has no update manifest')
++    manifest=json.loads(fetch(asset_url(assets['hub-update.json'],tag),128<<10))
++    if manifest.get('schema')!=1 or tag!=PREFIX+manifest.get('version',''):raise ValueError('Hub release manifest mismatch')
++    return manifest,assets,tag
++
++def target_key():
++    machine=platform.machine().lower()
++    arch={'arm64':'arm64','aarch64':'arm64','x86_64':'amd64','amd64':'amd64'}.get(machine)
++    system={'Darwin':'darwin','Linux':'linux'}.get(platform.system())
++    if not arch or not system:raise ValueError('Unsupported hub platform')
++    return system+'-'+arch
++
++def checked_asset(entry, assets, tag):
++    name=entry.get('name','');digest=entry.get('sha256','')
++    if name not in assets or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('Missing asset or invalid checksum')
++    data=fetch(asset_url(assets[name],tag),128<<20)
++    if hashlib.sha256(data).hexdigest()!=digest:raise ValueError('Hub asset checksum mismatch')
++    return data
++
++def run(*args,timeout=20):
++    return subprocess.run(args,check=True,capture_output=True,text=True,timeout=timeout).stdout.strip()
++
++class Updater:
++    def __init__(self, brain, state):
++        self.brain=Path(brain).resolve();self.state=Path(state).resolve();self.state.mkdir(parents=True,exist_ok=True,mode=0o700)
++        self.binary=self.brain/'bin/hub';self.config_file=self.state/'hub-update.json';self.status_file=self.state/'hub-update-status.json'
++        self.config=read_json(self.config_file,{})
++        self.base=self.config.get('hub_url','http://127.0.0.1:8787').rstrip('/')
++        p=urlsplit(self.base)
++        if p.scheme!='http' or p.hostname not in ('127.0.0.1','::1') or p.username or p.password or p.path or p.query or p.fragment:raise ValueError('Hub health URL must be loopback HTTP')
++    def current(self):return run(str(self.binary),'version',timeout=5)
++    def status(self):
++        return {**read_json(self.status_file,{}),'version':self.current(),'auto_enabled':self.config.get('auto_enabled',True),'interval_hours':self.config.get('interval_hours',6),'hub_url':self.base}
++    def save(self,**values):
++        state=read_json(self.status_file,{});state.update(values);atomic_json(self.status_file,state);return self.status()
++    def health(self):
++        with urlopen(self.base+'/api/hub-update/health',timeout=3) as r:return json.load(r)
++    def service(self, action):
++        if platform.system()=='Darwin':
++            domain='gui/'+str(os.getuid())
++            if action=='stop':run('/bin/launchctl','bootout',domain+'/'+LABEL)
++            else:
++                for attempt in range(10):
++                    try:run('/bin/launchctl','bootstrap',domain,str(Path.home()/'Library/LaunchAgents'/ (LABEL+'.plist')));break
++                    except subprocess.CalledProcessError:
++                        if attempt==9:raise
++                        time.sleep(.2)
++        else:run('systemctl','--user',action,self.config.get('service','llm-brain-hub.service'))
++    def healthy_version(self,want):
++        for _ in range(40):
++            try:
++                if self.health().get('version')==want:return True
++            except (OSError,ValueError):pass
++            time.sleep(.25)
++        return False
++    def install(self,manifest,assets,tag):
++        key=target_key();entry=manifest.get('platforms',{}).get(key)
++        if not entry:raise ValueError('Hub release does not support '+key)
++        payload=checked_asset(entry,assets,tag)
++        support_data={name:checked_asset(item,assets,tag) for name,item in manifest.get('support',{}).items() if name in ('brain-hub-update','brain-mcp')}
++        with tempfile.TemporaryDirectory(prefix='hub-update-',dir=self.binary.parent) as tmp:
++            staged=Path(tmp)/'hub';staged.write_bytes(payload);staged.chmod(0o755)
++            if platform.system()=='Darwin':run('/usr/bin/codesign','--verify','--strict',str(staged))
++            if run(str(staged),'version',timeout=5)!=manifest['version']:raise ValueError('Hub binary version mismatch')
++            health=self.health()
++            if not health.get('ready'):return self.save(state='deferred',message=health.get('reason','Hub is busy'),latest=manifest['version'])
++            previous=self.current();backup=self.binary.with_name('hub.previous')
++            shutil.copy2(self.binary,backup)
++            self.save(state='installing',latest=manifest['version'],message='Restarting hub service')
++            self.service('stop')
++            try:
++                os.replace(staged,self.binary)
++                if run(str(self.binary),'version',timeout=5)!=manifest['version']:raise RuntimeError('Installed hub version mismatch')
++                self.service('start')
++                if not self.healthy_version(manifest['version']):raise RuntimeError('New hub failed its health check')
++            except Exception:
++                with contextlib.suppress(Exception):self.service('stop')
++                restore=Path(tmp)/'restore';shutil.copy2(backup,restore);os.replace(restore,self.binary)
++                run(str(self.binary),'version',timeout=5)
++                self.service('start')
++                if not self.healthy_version(previous):raise RuntimeError('Update failed and the previous hub did not recover')
++                self.save(state='rolled_back',failed_version=manifest['version'],previous_version=previous,message='New hub failed; previous hub restored')
++                raise
++            # Only verified, named support files may replace the updater and MCP bridge.
++            for name,data in support_data.items():
++                support=Path(tmp)/name;support.write_bytes(data);support.chmod(0o755);os.replace(support,self.brain/'bin'/name)
++            return self.save(state='up_to_date',previous_version=previous,installed_version=manifest['version'],installed_at=time.time(),message='Hub updated and healthy')
++    def check(self,install=False,automatic=False):
++        request=self.state/'hub-update-request.json';manual=request.exists()
++        if automatic and not manual and not self.config.get('auto_enabled',True):return self.status()
++        status=read_json(self.status_file,{})
++        if automatic and not manual and status.get('state')!='deferred' and time.time()-status.get('last_check',0)<self.config.get('interval_hours',6)*3600:return self.status()
++        with contextlib.suppress(FileNotFoundError):request.unlink()
++        self.save(state='checking',message='Checking hub releases')
++        release=latest_release();now=time.time()
++        if not release:return self.save(state='up_to_date',last_check=now,message='No stable hub release published yet')
++        manifest,assets,tag=release
++        try:current_version=version(self.current())
++        except ValueError:current_version=(0,0,0)  # bootstrap source builds into the stable hub channel
++        newer=version(manifest['version'])>current_version
++        self.save(state='available' if newer else 'up_to_date',latest=manifest['version'],last_check=now,message='Hub update available' if newer else 'Hub is up to date')
++        if newer and automatic and not manual and status.get('failed_version')==manifest['version']:
++            return self.save(state='rolled_back',message='This hub version failed its previous health check; waiting for a newer release')
++        if newer and (install or automatic):return self.install(manifest,assets,tag)
++        return self.status()
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--brain',default=str(Path(__file__).resolve().parents[1]));parser.add_argument('--state',default=str(Path.home()/'.local/state/llm-brain'))
++    mode=parser.add_mutually_exclusive_group();mode.add_argument('--status',action='store_true');mode.add_argument('--check',action='store_true');mode.add_argument('--install',action='store_true');mode.add_argument('--automatic',action='store_true');mode.add_argument('--request',action='store_true');mode.add_argument('--auto',choices=('on','off'))
++    parser.add_argument('--interval-hours',type=int)
++    a=parser.parse_args();u=Updater(a.brain,a.state)
++    if a.auto or a.interval_hours is not None:
++        if a.interval_hours is not None and not 1<=a.interval_hours<=168:raise ValueError('Interval must be 1–168 hours')
++        if a.auto:u.config['auto_enabled']=a.auto=='on'
++        if a.interval_hours is not None:u.config['interval_hours']=a.interval_hours
++        atomic_json(u.config_file,u.config);result=u.status()
++    elif a.request:
++        atomic_json(u.state/'hub-update-request.json',{'requested_at':time.time()})
++        if platform.system()=='Darwin':run('/bin/launchctl','kickstart','gui/'+str(os.getuid())+'/'+UPDATE_LABEL)
++        else:run('systemctl','--user','start','llm-brain-hub-update.service')
++        result={**u.status(),'state':'queued','message':'Hub update requested'}
++    elif a.status:result=u.status()
++    else:
++        with open(u.state/'hub-update.lock','a') as lock:
++            try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++            except BlockingIOError:result={**u.status(),'message':'Hub updater already running'}
++            else:
++                try:result=u.check(install=a.install,automatic=a.automatic)
++                except Exception as e:
++                    state=read_json(u.status_file,{})
++                    u.save(state='rolled_back' if state.get('state')=='rolled_back' else 'error',message=str(e)[:1000]);raise
++    print(json.dumps(result))
++
++if __name__=='__main__':
++    try:main()
++    except Exception as e:
++        print(json.dumps({'error':str(e)[:1000]}));sys.exit(1)
+diff --git a/bin/brain-mcp b/bin/brain-mcp
+index 2320461..8db3f66 100755
+--- a/bin/brain-mcp
++++ b/bin/brain-mcp
+@@ -8,6 +8,7 @@ import subprocess
+ import re
+ from pathlib import Path
+ import sys
++import datetime
+ import urllib.error
+ import urllib.parse
+ import urllib.request
+@@ -82,6 +83,9 @@ def tool(name, description, properties, required=(), read=False, idem=False, des
+     return {'name':name,'description':description,'inputSchema':{'type':'object','properties':{**properties,'hub':HUB},'required':list(required),'additionalProperties':False},
+             'annotations':{'readOnlyHint':read,'destructiveHint':destructive,'idempotentHint':idem,'openWorldHint':True}}
+ TOOLS = [
++    tool('diagnostics_list','List local Brain Hub application logs and macOS crash reports. Returns names, sizes and modification times.',{},read=True),
++    tool('diagnostics_read','Read a local Brain Hub log or crash report by the identifier returned by diagnostics_list. Bounded to 1 MiB.',{'report':{'type':'string','maxLength':256}},('report',),read=True),
++    tool('hub_update','Read status, check or install stable hub service updates, or configure automatic updates (enabled by default). Separate from desktop client updates. Install restarts only the selected hub after readiness and checksum checks.',{'action':{'type':'string','enum':['status','check','install','settings']},'auto_enabled':{'type':'boolean'},'interval_hours':{'type':'integer','minimum':1,'maximum':168}},('action',),idem=True),
+     tool('desktop_update','Read the installed local macOS app version, check for a newer stable release, or install the verified update for next launch. Install only on user request.',
+          {'action':{'type':'string','enum':['status','check','install']}},('action',)),
+     tool('queue_list','Read queued and running Hub jobs, priorities, dependencies and reasons for waiting.',{},read=True),
+@@ -97,7 +101,8 @@ TOOLS = [
+     tool('session_detail','Read one session: machine, folder, provider, state and its conversation.',{'id':NUM},('id',),read=True),
+     tool('session_rename','Rename a session.',{'id':NUM,'title':{'type':'string','maxLength':200}},('id','title'),idem=True),
+     tool('session_close','End a session: stops its CLI on its machine. Its conversation stays on disk and can be continued later. Only for sessions the owner asked to end.',{'id':NUM},('id',),destructive=True),
+-    tool('session_move','Move (default) or clone a Claude/Codex session to another machine as a hub job. Move: the hub checks the destination has the same CLI, copies the conversation, resumes it there, verifies it stays live, and only then ends the source. Clone: the destination forks the conversation with all its context and the source keeps running. Uncommitted files, worktrees and running processes do not move. Returns a job; follow it with move_status.',{'id':NUM,'to':{'type':'string','maxLength':128},'mode':{'type':'string','enum':['move','clone']}},('id','to')),
++    tool('session_move','Move (default) or clone a Claude/Codex session to another machine as a hub job. Move: the hub checks the destination has the same CLI, copies the conversation, resumes it there, verifies it stays live, and only then ends the source. Clone: the destination forks the conversation with all its context and the source keeps running. Optionally select destination_path and pin_path for future moves. without_folder uses home and bypasses saved mappings. Uncommitted files, worktrees and running processes do not move. Returns a job; follow it with move_status.',{'id':NUM,'to':{'type':'string','maxLength':128},'mode':{'type':'string','enum':['move','clone']},'destination_path':{'type':'string','maxLength':4096},'pin_path':{'type':'boolean'},'without_folder':{'type':'boolean'}},('id','to')),
++    tool('move_folders','List, set or remove saved per-machine working-folder mappings. Paths refer to existing folders on the destination; files are not copied.',{'action':{'type':'string','enum':['list','set','remove']},'from_host':{'type':'string','maxLength':128},'source_path':{'type':'string','maxLength':4096},'to':{'type':'string','maxLength':128},'destination_path':{'type':'string','maxLength':4096}},('action',),idem=True),
+     tool('move_status','Read a move or clone job: each phase (check, export, copy, resume, verify, close), the destination session id, and any error.',{'job':{'type':'string','maxLength':64}},('job',),read=True),
+     tool('workspace_get','Read what each open workspace window (web or desktop) shows: layout, sessions in its panes, focus, zoom.',{},read=True),
+     tool('workspace_control','Ask the open workspaces to open or focus a session, change layout (1, 2, stack, 3, 4, 6, 9), or zoom/unzoom the focused pane. client limits it to one window from workspace_get.',{'action':{'type':'string','enum':['open','focus','layout','zoom','unzoom']},'terminal':NUM,'layout':{'type':'string','enum':['1','2','stack','3','4','6','9']},'client':{'type':'string','maxLength':80}},('action',)),
+@@ -115,9 +120,63 @@ def validate(value, schema):
+         for v in value:validate(v,schema['items'])
+     elif kind=='integer':
+         if type(value) is not int or not schema.get('minimum',-10**12)<=value<=schema.get('maximum',10**12):raise ValueError('Invalid number')
++    elif kind=='boolean':
++        if type(value) is not bool:raise ValueError('Invalid boolean')
+     elif kind=='string':
+         if not isinstance(value,str) or len(value.encode())>schema.get('maxLength',65536) or ('enum' in schema and value not in schema['enum']):raise ValueError('Invalid text')
+ 
++def native_crash_event(path):
++    try:
++        with path.open('rb') as source:
++            lines = source.read(1048576).split(b'\n',3)
++        event = json.loads(lines[2])
++        images = event.get('debug_meta',{}).get('images',[])
++        if any(image.get('code_file','').endswith('/Brain Hub.app/Contents/MacOS/BrainHub') for image in images):
++            return event
++    except (OSError,ValueError,IndexError,AttributeError):
++        pass
++    return None
++
++def diagnostic_reports():
++    roots = [Path.home()/'Library/Logs/BrainHub',
++             Path.home()/'Library/Logs/DiagnosticReports',
++             Path('/Library/Logs/DiagnosticReports'),
++             Path.home()/'.local/state/ghostty/crash']
++    found = {}
++    for index, root in enumerate(roots):
++        try:
++            for path in root.iterdir():
++                if path.is_symlink() or not path.is_file():
++                    continue
++                name = path.name
++                allowed = (index == 0 and name in ('app.log','app.previous.log')) or (
++                    index in (1,2) and path.suffix in ('.ips','.crash') and
++                    (name.lower().startswith('brain') or name.startswith('hub-')))
++                if index == 3 and path.suffix == '.ghosttycrash':
++                    allowed = native_crash_event(path) is not None
++                if allowed:
++                    found[str(index)+'/'+name] = path
++        except OSError:
++            continue
++    return found
++
++def read_diagnostic(report):
++    path = diagnostic_reports().get(report)
++    if path is None:
++        raise ValueError('Unknown diagnostic report')
++    with path.open('rb') as source:
++        raw = source.read(1048577)
++    if path.suffix == '.ghosttycrash':
++        event = native_crash_event(path)
++        if event is None: raise ValueError('Invalid native crash envelope')
++        text = json.dumps(event,indent=2)
++    else:
++        text = raw[:1048576].decode('utf-8',errors='replace')
++    text = text.replace(str(Path.home()), '~')
++    text = re.sub(r'(?i)(authorization[=: ]+bearer |api[_-]?key[=: ]+|token[=: ]+)[^\s",]+',
++                  r'\1[REDACTED]', text)
++    return {'report':report,'text':text,'truncated':len(raw)>1048576}
++
+ def desktop_update(action):
+     """Control the installed local Mac app using its bundled, digest-verifying updater."""
+     if sys.platform != 'darwin':
+@@ -145,12 +204,23 @@ def desktop_update(action):
+             'message': result.stdout.strip()}
+ 
+ def call(name,a):
++    if name in ('diagnostics_list','diagnostics_read'):
++        if a.get('hub'): raise ValueError('Diagnostics are local to this computer')
++        if name == 'diagnostics_read': return read_diagnostic(a['report'])
++        return {'reports':[{'report':key,'bytes':path.stat().st_size,
++                            'modified':datetime.datetime.fromtimestamp(path.stat().st_mtime,datetime.timezone.utc).isoformat()}
++                           for key,path in diagnostic_reports().items()]}
+     if name == 'desktop_update':
+         if a.get('hub'): raise ValueError('desktop_update operates on this client computer')
+         return desktop_update(a['action'])
+     a=dict(a);named=a.pop('hub','');base=hub_base(named)
+     def rq(path,payload=None,form=False,timeout=40):return request(path,payload,form=form,timeout=timeout,base=base)
+     tid=lambda:int(a['id'])
++    if name=='hub_update':
++        if a['action']!='settings' and any(k in a for k in ('auto_enabled','interval_hours')):raise ValueError('Settings require action=settings')
++        if a['action']=='status':return rq('/api/hub-update')
++        if a['action']=='settings' and not any(k in a for k in ('auto_enabled','interval_hours')):raise ValueError('Give auto_enabled or interval_hours')
++        return rq('/api/hub-update',a)
+     if name=='queue_list':return rq('/api/intake/queue')
+     if name=='queue_issue':return rq('/api/intake/queue',a)
+     if name=='queue_control':return rq('/api/intake/action',a)
+@@ -171,7 +241,17 @@ def call(name,a):
+     if name=='session_close':return rq('/api/terminals/%d/close'%tid(),{})
+     if name=='session_move':
+         body={'to':a['to'],'clone':True} if a.get('mode')=='clone' else {'to':a['to'],'close_source':True}
++        if a.get('without_folder') and (a.get('destination_path') or a.get('pin_path')):raise ValueError('without_folder cannot be combined with a path or pin')
++        if a.get('pin_path') and not a.get('destination_path'):raise ValueError('pin_path requires destination_path')
++        if a.get('destination_path') or a.get('without_folder'):rq('/api/move-folders')  # refuse old hubs that would ignore the new options
++        for key in ('destination_path','pin_path','without_folder'):
++            if key in a:body[key]=a[key]
+         return rq('/api/terminals/%d/migrate'%tid(),body)
++    if name=='move_folders':
++        if a['action']=='list':return rq('/api/move-folders')
++        required=('from_host','source_path','to','destination_path') if a['action']=='set' else ('from_host','source_path','to')
++        if any(not a.get(k) for k in required):raise ValueError('Give '+', '.join(required))
++        return rq('/api/move-folders',a)
+     if name=='move_status':
+         if not re.fullmatch(r'[a-f0-9]{64}',a['job']):raise ValueError('Invalid job')
+         return rq('/api/migrations/'+a['job'])
+@@ -204,7 +284,7 @@ def call(name,a):
+ def respond(msg):
+     method=msg.get('method')
+     if method=='initialize':
+-        return {'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'brain','version':'1.1.0'},'instructions':INSTRUCTIONS}
++        return {'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'brain','version':'1.2.0'},'instructions':INSTRUCTIONS}
+     if method=='ping':return {}
+     if method=='tools/list':return {'tools':TOOLS}
+     if method=='tools/call':
+diff --git a/hub/internal/web/hub_update.go b/hub/internal/web/hub_update.go
+new file mode 100644
+index 0000000..e80f7d6
+--- /dev/null
++++ b/hub/internal/web/hub_update.go
+@@ -0,0 +1,123 @@
++package web
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"io"
++	"net/http"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strconv"
++	"time"
++)
++
++func (s *Server) hubUpdateRoutes(m *http.ServeMux) {
++	m.HandleFunc("GET /api/hub-update", s.tailnetOnly(s.hubUpdateStatus))
++	m.HandleFunc("GET /api/hub-update/health", s.tailnetOnly(s.hubUpdateHealth))
++	m.HandleFunc("POST /api/hub-update", s.tailnetOnly(s.sameSite(s.hubUpdateAction)))
++}
++func (s *Server) hubUpdateHealth(w http.ResponseWriter, r *http.Request) {
++	ready, reason := s.hubRestartReady(r.Context())
++	writeJSON(w, 200, map[string]any{"version": s.HubUpdateVersion, "ready": ready, "reason": reason})
++}
++func (s *Server) hubRestartReady(ctx context.Context) (bool, string) {
++	if s.hubMigrationBusy() {
++		return false, "A session migration is active"
++	}
++	var n int
++	err := s.Store.DB.QueryRowContext(ctx, "SELECT count(*) FROM agent_sessions WHERE status='running'").Scan(&n)
++	if err != nil {
++		return false, "Could not verify active managed work"
++	}
++	if n > 0 {
++		return false, "Managed agent work is active"
++	}
++	err = s.Store.DB.QueryRowContext(ctx, "SELECT count(*) FROM commands WHERE status IN ('claimed','running') AND kind NOT IN ('term_attach','term_capture','term_send','term_resize')").Scan(&n)
++	if err != nil {
++		return false, "Could not verify active commands"
++	}
++	if n > 0 {
++		return false, "A hub command is active"
++	}
++	return true, ""
++}
++func (s *Server) hubUpdateRun(w http.ResponseWriter, r *http.Request, args ...string) {
++	helper := s.HubUpdateCommand
++	if helper == "" {
++		exe, err := os.Executable()
++		if err != nil {
++			jsonErr(w, 500, err)
++			return
++		}
++		helper = filepath.Join(filepath.Dir(exe), "brain-hub-update")
++	}
++	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
++	defer cancel()
++	args = append([]string{"--state", s.StateDir}, args...)
++	out, err := exec.CommandContext(ctx, helper, args...).Output()
++	if err != nil {
++		jsonErr(w, 502, errors.New("Hub updater unavailable or failed; inspect hub update status and install the updater service"))
++		return
++	}
++	var result map[string]any
++	if err := json.Unmarshal(out, &result); err != nil {
++		jsonErr(w, 502, errors.New("Invalid hub updater reply"))
++		return
++	}
++	writeJSON(w, 200, result)
++}
++func (s *Server) hubUpdateStatus(w http.ResponseWriter, r *http.Request) {
++	s.hubUpdateRun(w, r, "--status")
++}
++func (s *Server) hubUpdateAction(w http.ResponseWriter, r *http.Request) {
++	var a struct {
++		Action   string `json:"action"`
++		Auto     *bool  `json:"auto_enabled"`
++		Interval *int   `json:"interval_hours"`
++	}
++	d := json.NewDecoder(io.LimitReader(r.Body, 4096))
++	d.DisallowUnknownFields()
++	if err := d.Decode(&a); err != nil {
++		jsonErr(w, 400, err)
++		return
++	}
++	switch a.Action {
++	case "check":
++		if a.Auto != nil || a.Interval != nil {
++			jsonErr(w, 400, errors.New("settings require action=settings"))
++			return
++		}
++		s.hubUpdateRun(w, r, "--check")
++	case "install":
++		if a.Auto != nil || a.Interval != nil {
++			jsonErr(w, 400, errors.New("settings require action=settings"))
++			return
++		}
++		s.hubUpdateRun(w, r, "--request")
++	case "settings":
++		if a.Auto == nil && a.Interval == nil {
++			jsonErr(w, 400, errors.New("give auto_enabled or interval_hours"))
++			return
++		}
++		args := []string{}
++		if a.Auto != nil {
++			v := "off"
++			if *a.Auto {
++				v = "on"
++			}
++			args = append(args, "--auto", v)
++		}
++		if a.Interval != nil {
++			if *a.Interval < 1 || *a.Interval > 168 {
++				jsonErr(w, 400, errors.New("interval_hours must be 1–168"))
++				return
++			}
++			args = append(args, "--interval-hours", strconv.Itoa(*a.Interval))
++		}
++		s.hubUpdateRun(w, r, args...)
++	default:
++		jsonErr(w, 400, errors.New("action must be check, install or settings"))
++	}
++}
+diff --git a/hub/internal/web/hub_update_busy.go b/hub/internal/web/hub_update_busy.go
+new file mode 100644
+index 0000000..51a64fa
+--- /dev/null
++++ b/hub/internal/web/hub_update_busy.go
+@@ -0,0 +1,16 @@
++package web
++
++func (s *Server) hubMigrationBusy() bool {
++	if s.Agents == nil {
++		return false
++	}
++	ms := &s.Agents.migs
++	ms.mu.Lock()
++	defer ms.mu.Unlock()
++	for _, j := range ms.m {
++		if !j.Done {
++			return true
++		}
++	}
++	return false
++}
+diff --git a/hub/internal/web/hub_update_test.go b/hub/internal/web/hub_update_test.go
+new file mode 100644
+index 0000000..b8143ef
+--- /dev/null
++++ b/hub/internal/web/hub_update_test.go
+@@ -0,0 +1,71 @@
++package web
++
++import (
++	"context"
++	"encoding/json"
++	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestHubUpdateAPI(t *testing.T) {
++	r := newSessRig(t)
++	r.srv.HubUpdateVersion = "0.1.0"
++	helper := filepath.Join(t.TempDir(), "updater")
++	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s' '{\"state\":\"up_to_date\",\"auto_enabled\":true}'\n"), 0700); err != nil {
++		t.Fatal(err)
++	}
++	r.srv.HubUpdateCommand = helper
++	code, body, _ := r.get(t, "/api/hub-update")
++	if code != 200 || !strings.Contains(body, "auto_enabled") {
++		t.Fatalf("status %d %s", code, body)
++	}
++	code, body, _ = r.get(t, "/api/hub-update/health")
++	var health map[string]any
++	_ = json.Unmarshal([]byte(body), &health)
++	if code != 200 || health["version"] != "0.1.0" {
++		t.Fatalf("health %d %s", code, body)
++	}
++	for _, tc := range []struct {
++		body string
++		code int
++	}{
++		{"{\"action\":\"check\"}", 200},
++		{"{\"action\":\"install\"}", 200},
++		{"{\"action\":\"settings\",\"auto_enabled\":false}", 200},
++		{"{\"action\":\"settings\",\"interval_hours\":0}", 400},
++		{"{\"action\":\"shell\"}", 400},
++		{"{\"action\":\"settings\"}", 400},
++		{"{\"action\":\"install\",\"auto_enabled\":true}", 400},
++	} {
++		resp, err := r.cl.Post(r.ts.URL+"/api/hub-update", "application/json", strings.NewReader(tc.body))
++		if err != nil {
++			t.Fatal(err)
++		}
++		resp.Body.Close()
++		if resp.StatusCode != tc.code {
++			t.Fatalf("%s: %d", tc.body, resp.StatusCode)
++		}
++	}
++	if ready, _ := r.srv.hubRestartReady(context.Background()); !ready {
++		t.Fatal("idle test hub not ready")
++	}
++	id, err := r.st.QueueCommand(context.Background(), store.Command{Host: "laptop", Kind: "turn"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := r.st.DB.Exec("UPDATE commands SET status='running' WHERE id=?", id); err != nil {
++		t.Fatal(err)
++	}
++	if ready, _ := r.srv.hubRestartReady(context.Background()); ready {
++		t.Fatal("active command allowed restart")
++	}
++	if _, err := r.st.DB.Exec("UPDATE commands SET kind='term_attach' WHERE id=?", id); err != nil {
++		t.Fatal(err)
++	}
++	if ready, _ := r.srv.hubRestartReady(context.Background()); !ready {
++		t.Fatal("tmux attachment unnecessarily blocked update")
++	}
++}
+diff --git a/hub/internal/web/server.go b/hub/internal/web/server.go
+index 33550e4..949af0c 100644
+--- a/hub/internal/web/server.go
++++ b/hub/internal/web/server.go
+@@ -38,6 +38,9 @@ var templateFS embed.FS
+ var staticFS embed.FS
+ 
+ type Server struct {
++	HubUpdateVersion string
++	HubUpdateCommand string
++
+ 	ReviewHTTP *http.Client // optional transport for existing Telegram connector
+ 	GatewayURL string
+ 	GatewayKey string
+@@ -87,6 +90,7 @@ func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger
+ 
+ func (s *Server) Handler() http.Handler {
+ 	mux := http.NewServeMux()
++	s.hubUpdateRoutes(mux)
+ 	static, _ := fs.Sub(staticFS, "static")
+ 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
+ 	mux.HandleFunc("GET /{$}", s.home)
+diff --git a/hub/internal/web/workspace_ctl.go b/hub/internal/web/workspace_ctl.go
+index e32fc9c..a0cdb96 100644
+--- a/hub/internal/web/workspace_ctl.go
++++ b/hub/internal/web/workspace_ctl.go
+@@ -4,7 +4,10 @@ import (
+ 	"encoding/json"
+ 	"errors"
+ 	"io"
++	"log"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"slices"
+ 	"strconv"
+ 	"sync"
+@@ -38,6 +41,8 @@ type wsClient struct {
+ }
+ 
+ type workspaceCtl struct {
++	stateFile string
++
+ 	mu      sync.Mutex
+ 	seq     int64
+ 	intents []wsIntent
+@@ -55,6 +60,7 @@ func (c *workspaceCtl) push(i wsIntent) wsIntent {
+ 	if len(c.intents) > wsKeep {
+ 		c.intents = c.intents[len(c.intents)-wsKeep:]
+ 	}
++	c.saveLocked()
+ 	return i
+ }
+ 
+@@ -74,6 +80,7 @@ func (c *workspaceCtl) report(x wsClient) {
+ 	}
+ 	x.At = time.Now()
+ 	c.clients[x.Client] = x
++	c.saveLocked()
+ }
+ 
+ func (c *workspaceCtl) since(n int64) (int64, []wsIntent, []wsClient) {
+@@ -94,6 +101,7 @@ func (c *workspaceCtl) since(n int64) (int64, []wsIntent, []wsClient) {
+ }
+ 
+ func (s *Server) workspaceCtlRoutes(g, p func(string, http.HandlerFunc)) {
++	s.Agents.ws.restore(filepath.Join(s.StateDir, "workspace-clients.json"))
+ 	g("GET /api/workspace", s.workspaceGet)
+ 	p("POST /api/workspace/intent", s.workspaceIntent)
+ 	p("POST /api/workspace/state", s.workspaceState)
+@@ -148,3 +156,70 @@ func (s *Server) workspaceState(w http.ResponseWriter, r *http.Request) {
+ 	s.Agents.ws.report(x)
+ 	w.WriteHeader(http.StatusNoContent)
+ }
++
++// Keep sequence numbers and window reports across hub restarts; existing desktop clients may not
++// re-report an unchanged pane tree and must not lose the first command after a sequence reset.
++type workspaceSaved struct {
++	Seq     int64
++	Intents []wsIntent
++	Clients map[string]wsClient
++}
++
++func (c *workspaceCtl) restore(file string) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.stateFile != "" {
++		return
++	}
++	c.stateFile = file
++	f, err := os.Open(file)
++	if os.IsNotExist(err) {
++		return
++	}
++	if err != nil {
++		log.Printf("workspace restore: %v", err)
++		return
++	}
++	defer f.Close()
++	var state workspaceSaved
++	if err := json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&state); err != nil {
++		log.Printf("workspace restore: %v", err)
++		return
++	}
++	if state.Seq < 0 || len(state.Intents) > wsKeep || len(state.Clients) > wsMaxClients {
++		log.Printf("workspace restore: invalid snapshot")
++		return
++	}
++	c.seq, c.intents, c.clients = state.Seq, state.Intents, state.Clients
++}
++func (c *workspaceCtl) saveLocked() {
++	if c.stateFile == "" {
++		return
++	}
++	data, err := json.Marshal(workspaceSaved{c.seq, c.intents, c.clients})
++	if err != nil {
++		return
++	}
++	if err = os.MkdirAll(filepath.Dir(c.stateFile), 0700); err != nil {
++		log.Printf("workspace save: %v", err)
++		return
++	}
++	f, err := os.CreateTemp(filepath.Dir(c.stateFile), "workspace-*")
++	if err != nil {
++		log.Printf("workspace save: %v", err)
++		return
++	}
++	name := f.Name()
++	defer os.Remove(name)
++	if _, err = f.Write(data); err == nil {
++		err = f.Close()
++	} else {
++		f.Close()
++	}
++	if err == nil {
++		err = os.Rename(name, c.stateFile)
++	}
++	if err != nil {
++		log.Printf("workspace save: %v", err)
++	}
++}
+diff --git a/hub/internal/web/workspace_persist_test.go b/hub/internal/web/workspace_persist_test.go
+new file mode 100644
+index 0000000..9df8e56
+--- /dev/null
++++ b/hub/internal/web/workspace_persist_test.go
+@@ -0,0 +1,28 @@
++package web
++
++import (
++	"path/filepath"
++	"testing"
++)
++
++func TestWorkspaceSurvivesHubRestart(t *testing.T) {
++	file := filepath.Join(t.TempDir(), "workspace.json")
++	var before workspaceCtl
++	before.restore(file)
++	first := before.push(wsIntent{Action: "open", Terminal: 7, Client: "mac:1"})
++	before.report(wsClient{Client: "mac:1", Slots: []int64{7}, Focus: 7})
++	var after workspaceCtl
++	after.restore(file)
++	seq, intents, clients := after.since(0)
++	if seq != first.Seq || len(intents) != 1 || len(clients) != 1 || clients[0].Focus != 7 {
++		t.Fatalf("lost workspace: %d %+v %+v", seq, intents, clients)
++	}
++	next := after.push(wsIntent{Action: "unzoom", Client: "mac:1"})
++	if next.Seq != first.Seq+1 {
++		t.Fatal("sequence reset")
++	}
++	after.restore(file)
++	if n, _, _ := after.since(0); n != next.Seq {
++		t.Fatal("second listener reset workspace")
++	}
++}
+diff --git a/hub/main.go b/hub/main.go
+index 6f668d7..8fefaaa 100644
+--- a/hub/main.go
++++ b/hub/main.go
+@@ -177,6 +177,8 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
+ 	if err != nil {
+ 		return err
+ 	}
++	srv.HubUpdateVersion = version
++
+ 	if *indexPath == "" {
+ 		*indexPath = filepath.Join(c.state, "hub.bleve")
+ 	}
+diff --git a/tests/brain_mcp_test.py b/tests/brain_mcp_test.py
+index 18b096e..9617c89 100644
+--- a/tests/brain_mcp_test.py
++++ b/tests/brain_mcp_test.py
+@@ -8,6 +8,37 @@ from unittest.mock import patch
+ 
+ loader=importlib.machinery.SourceFileLoader('brain_mcp','bin/brain-mcp')
+ spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
++class DiagnosticsTest(unittest.TestCase):
++ def test_native_report_reads_metadata_without_dump_memory(self):
++  import tempfile
++  event={'debug_meta':{'images':[{'code_file':'/Applications/Brain Hub.app/Contents/MacOS/BrainHub'}]},'level':'fatal'}
++  with tempfile.TemporaryDirectory() as directory:
++   path=m.Path(directory)/'test.ghosttycrash'
++   path.write_bytes(b'{}\n{}\n'+json.dumps(event).encode()+b'\n'+b'PRIVATE-DUMP-MEMORY')
++   self.assertEqual(m.native_crash_event(path),event)
++   with patch.object(m,'diagnostic_reports',return_value={'3/test.ghosttycrash':path}):
++    output=m.read_diagnostic('3/test.ghosttycrash')
++    self.assertIn('fatal',output['text'])
++    self.assertNotIn('PRIVATE-DUMP-MEMORY',output['text'])
++   event['debug_meta']['images'][0]['code_file']='/Applications/Other.app/Contents/MacOS/Other'
++   path.write_bytes(b'{}\n{}\n'+json.dumps(event).encode()+b'\n')
++   self.assertIsNone(m.native_crash_event(path))
++
++ def test_unknown_report_and_traversal_are_rejected(self):
++  with patch.object(m,'diagnostic_reports',return_value={}):
++   for report in ('../../etc/passwd','1/unknown.ips'):
++    with self.assertRaises(ValueError):m.read_diagnostic(report)
++ def test_local_reports_are_bounded_and_redacted(self):
++  import tempfile
++  with tempfile.TemporaryDirectory() as directory:
++   path=m.Path(directory)/'app.log'
++   path.write_text('token=secret-value\n'+('x'*1048576))
++   with patch.object(m,'diagnostic_reports',return_value={'0/app.log':path}):
++    result=m.read_diagnostic('0/app.log')
++    self.assertTrue(result['truncated'])
++    self.assertNotIn('secret-value',result['text'])
++    self.assertIn('[REDACTED]',result['text'])
++
+ class BrainMCPTest(unittest.TestCase):
+  def invoke(self,name,args):return m.respond({'method':'tools/call','params':{'name':name,'arguments':args}})
+  def test_stdio_and_control_desk_instructions(self):
+@@ -61,6 +92,26 @@ class ControlTest(unittest.TestCase):
+     self.assertTrue(self.call(name,args)['isError'])
+    self.assertEqual(r.call_count,n)
+   tools={t['name']:t for t in m.TOOLS};self.assertTrue(tools['session_close']['annotations']['destructiveHint'])
++ def test_move_folder_options_and_mapping_management(self):
++  with patch.object(m,'request',return_value={'mappings':[]}) as r:
++   self.assertFalse(self.call('session_move',{'id':5,'to':'Studio','destination_path':'~/different/repo','pin_path':True}).get('isError'))
++   self.assertEqual(r.call_args.args[1],{'to':'Studio','close_source':True,'destination_path':'~/different/repo','pin_path':True})
++   self.call('session_move',{'id':5,'to':'Studio','without_folder':True});self.assertTrue(r.call_args.args[1]['without_folder'])
++   self.call('move_folders',{'action':'list'});self.assertEqual(r.call_args.args[0],'/api/move-folders')
++   pin={'action':'set','from_host':'laptop','source_path':'~/repo','to':'Studio','destination_path':'~/other/repo'}
++   self.assertFalse(self.call('move_folders',pin).get('isError'));self.assertEqual(r.call_args.args,('/api/move-folders',pin))
++   self.call('move_folders',{k:v for k,v in pin.items() if k!='destination_path'}|{'action':'remove'});self.assertEqual(r.call_args.args[1]['action'],'remove')
++   n=r.call_count
++   for args in ({'id':5,'to':'Studio','pin_path':True},{'id':5,'to':'Studio','pin_path':'yes'},{'id':5,'to':'Studio','without_folder':True,'destination_path':'~/repo'}):self.assertTrue(self.call('session_move',args)['isError'])
++   self.assertEqual(r.call_count,n)
++ def test_hub_update_is_separate_and_validated(self):
++  with patch.object(m,'request',return_value={'auto_enabled':True}) as r:
++   self.assertFalse(self.call('hub_update',{'action':'status'}).get('isError'));self.assertEqual(r.call_args.args[0],'/api/hub-update')
++   for args in ({'action':'check'},{'action':'install'},{'action':'settings','auto_enabled':False},{'action':'settings','interval_hours':12}):
++    self.assertFalse(self.call('hub_update',args).get('isError'));self.assertEqual(r.call_args.args,('/api/hub-update',args))
++   n=r.call_count
++   for args in ({'action':'settings'},{'action':'settings','interval_hours':0},{'action':'settings','auto_enabled':'yes'},{'action':'install','auto_enabled':True},{'action':'shell'}):self.assertTrue(self.call('hub_update',args)['isError'])
++   self.assertEqual(r.call_count,n)
+  def test_desktop_update_is_local_and_validated(self):
+   with patch.object(m,'desktop_update',return_value={'version':'0.1.4'}) as update:
+    self.assertFalse(self.call('desktop_update',{'action':'status'}).get('isError'))
+diff --git a/tests/hub_update_test.py b/tests/hub_update_test.py
+new file mode 100644
+index 0000000..171e709
+--- /dev/null
++++ b/tests/hub_update_test.py
+@@ -0,0 +1,46 @@
++import importlib.machinery,importlib.util,json,tempfile,unittest
++from pathlib import Path
++from unittest.mock import patch,Mock
++loader=importlib.machinery.SourceFileLoader('hub_update','bin/brain-hub-update');spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
++class HubUpdateTest(unittest.TestCase):
++ def setUp(self):
++  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);(self.root/'bin').mkdir();(self.root/'bin/hub').write_bytes(b'previous-hub')
++  self.u=m.Updater(self.root,self.root/'state');self.u.current=Mock(return_value='0.1.0')
++ def test_default_auto_and_disabled_auto_does_not_check(self):
++  self.assertTrue(self.u.status()['auto_enabled']);self.u.config['auto_enabled']=False
++  with patch.object(m,'latest_release') as latest:self.u.check(automatic=True);latest.assert_not_called()
++  m.atomic_json(self.u.state/'hub-update-request.json',{})
++  with patch.object(m,'latest_release',return_value=None) as latest:self.u.check(automatic=True);latest.assert_called_once()
++ def test_only_hub_releases_are_selected(self):
++  url='https://github.com/'+m.REPO+'/releases/download/hub-v0.2.0/hub-update.json'
++  releases=[{'tag_name':'client-v99.0.0'},{'tag_name':'hub-v0.3.0','draft':True},{'tag_name':'hub-v0.2.0','assets':[{'name':'hub-update.json','browser_download_url':url}]}]
++  def fetch(url,limit):return json.dumps({'schema':1,'version':'0.2.0'} if url.endswith('.json') else releases).encode()
++  with patch.object(m,'fetch',side_effect=fetch):self.assertEqual(m.latest_release()[2],'hub-v0.2.0')
++ def test_checksum_and_asset_origin_rejected(self):
++  asset={'name':'hub','browser_download_url':'https://github.com/'+m.REPO+'/releases/download/hub-v0.2.0/hub'}
++  with patch.object(m,'fetch',return_value=b'corrupt'):
++   with self.assertRaisesRegex(ValueError,'checksum'):m.checked_asset({'name':'hub','sha256':'a'*64},{'hub':asset},'hub-v0.2.0')
++  with self.assertRaises(ValueError):m.asset_url({'browser_download_url':'https://example.com/hub'},'hub-v0.2.0')
++ def test_busy_hub_is_not_restarted(self):
++  self.u.health=Mock(return_value={'ready':False,'reason':'Migration active'});self.u.service=Mock()
++  manifest={'version':'0.2.0','platforms':{m.target_key():{'name':'hub'}}}
++  with patch.object(m,'checked_asset',return_value=b'new-hub'),patch.object(m,'run',return_value='0.2.0'):
++   self.assertEqual(self.u.install(manifest,{},'hub-v0.2.0')['state'],'deferred')
++  self.u.service.assert_not_called();self.assertEqual(self.u.binary.read_bytes(),b'previous-hub')
++ def test_failed_health_restores_previous_executable(self):
++  self.u.health=Mock(return_value={'ready':True});self.u.service=Mock();self.u.healthy_version=Mock(side_effect=[False,True])
++  manifest={'version':'0.2.0','platforms':{m.target_key():{'name':'hub'}}}
++  with patch.object(m,'checked_asset',return_value=b'new-hub'),patch.object(m,'run',return_value='0.2.0'):
++   with self.assertRaisesRegex(RuntimeError,'health check'):self.u.install(manifest,{},'hub-v0.2.0')
++  self.assertEqual(self.u.binary.read_bytes(),b'previous-hub');self.assertEqual(m.read_json(self.u.status_file,{})['state'],'rolled_back')
++ def test_successful_install_checks_running_version(self):
++  self.u.health=Mock(return_value={'ready':True});self.u.service=Mock();self.u.healthy_version=Mock(return_value=True)
++  manifest={'version':'0.2.0','platforms':{m.target_key():{'name':'hub'}}}
++  with patch.object(m,'checked_asset',return_value=b'new-hub'),patch.object(m,'run',return_value='0.2.0'):
++   self.assertEqual(self.u.install(manifest,{},'hub-v0.2.0')['state'],'up_to_date')
++  self.u.healthy_version.assert_called_once_with('0.2.0');self.assertEqual(self.u.binary.read_bytes(),b'new-hub')
++ def test_no_downgrade(self):
++  self.u.install=Mock()
++  with patch.object(m,'latest_release',return_value=({'version':'0.0.9'},{},'hub-v0.0.9')):self.u.check(install=True)
++  self.u.install.assert_not_called()
++if __name__=='__main__':unittest.main()
+-- 
+2.54.0 (Apple Git-157)
+

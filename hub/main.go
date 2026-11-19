@@ -159,6 +159,8 @@ func serve(ctx context.Context, lg *log.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
+	srv.HubUpdateVersion = version
+
 	if *indexPath == "" {
 		*indexPath = filepath.Join(c.state, "hub.bleve")
 	}
