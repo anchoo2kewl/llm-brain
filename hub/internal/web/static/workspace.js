@@ -171,9 +171,10 @@
     var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
     pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
     top.insertBefore(pen, num);
-    top.insertBefore(closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; }), num);
+    var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; });
+    top.insertBefore(x, num);
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges };
+    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x };
     return li;
   }
   function paintItem(id) {
@@ -186,6 +187,7 @@
     li.parts.dot.className = "dot-s " + s;
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
     li.parts.meta.textContent = t.cli + " · " + t.cwd;
+    li.parts.close.sync();
     var slot = slotOf(id);
     li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
     li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host) : p ? p.lastLine() : "";
@@ -311,7 +313,7 @@
     });
     head.append(num, dot, title, badges, meta, grow, seg, code, open, zoom, close, clear);
     var empty = el("div", "ws-slot-empty");
-    // Frozen on a macOS prompt: what happened, what to do, and Restart CLI (two taps, like ⏻).
+    // Frozen on a macOS prompt: what happened, what to do, and Restart CLI (two taps).
     var stuck = el("div", "ws-stuck"), stuckText = el("p", "small"), stuckActs = el("div", "ws-stuck-acts");
     var restart = el("button", "small primary", "Restart CLI…"), screen = el("a", "btn small", "Screen Sharing ↗"), armedR = null;
     restart.type = "button"; restart.title = "End the frozen CLI and start it again in this terminal, continuing its conversation";
@@ -333,7 +335,7 @@
     });
     root.append(head, stuck, body, chat, msg, empty);
     grid.appendChild(root);
-    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, i: i,
+    var s = { root: root, head: head, body: body, msg: msg, empty: empty, dot: dot, title: title, meta: meta, badges: badges, open: open, close: close, i: i,
       seg: seg, chat: chat, chatFrame: chatFrame, chatNote: chatNote, chatSrc: "", stuck: stuck, stuckText: stuckText, screen: screen };
     s0.s = s;
     root.addEventListener("mousedown", function () { if (!st.zoom && s.i !== st.focus) focusSlot(s.i, false); });
@@ -359,28 +361,34 @@
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
   }
-  // closeBtn: ⏻ ends the terminal or session (its CLI process). The first tap arms it ("Close?"), a second
-  // within 4 seconds closes; no confirm() dialog.
+  // closeBtn: × ends the terminal or session (its CLI process on its machine) in one click. Its label names
+  // the session, so a screen reader says what it ends; it shows on hover and on keyboard focus.
   function closeBtn(idOf, cls, say) {
-    var b = el("button", cls, "⏻"), armed = null;
-    b.type = "button"; b.title = "Close: end its CLI process";
-    b.setAttribute("aria-label", "Close");
-    function disarm() { clearTimeout(armed); armed = null; b.textContent = "⏻"; b.classList.remove("armed"); }
+    var b = el("button", cls, "×"), busy = false;
+    b.type = "button";
+    b.sync = function () {
+      var id = idOf(), t = id && infos[id], n = t ? (t.title || "terminal " + id) : "terminal";
+      b.setAttribute("aria-label", "End " + n);
+      b.title = "End " + n + ": stops its CLI on " + (t ? shortHost(t.host) : "its machine");
+    };
+    b.sync();
+    b.addEventListener("focus", b.sync);
+    b.addEventListener("mouseenter", b.sync);
     b.addEventListener("click", function (e) {
       e.stopPropagation();
       var id = idOf(), t = id && infos[id];
-      if (!t) return;
-      if (!armed) { b.textContent = "Close?"; b.classList.add("armed"); armed = setTimeout(disarm, 4000); return; }
-      disarm();
+      if (!t || busy) return;
+      busy = true; b.disabled = true;
       var url = t.kind === "session" ? "/api/sessions/" + t.sid + "/close" : "/api/terminals/" + id + "/close";
       fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
-          if (!x.ok) { say("Close failed: " + (x.j.error || "error")); return; }
-          say(x.j.closing === "session" ? "Closing on " + t.host + "…" : "Closing…");
+          if (!x.ok) { say("End failed: " + (x.j.error || "error")); return; }
+          say(x.j.closing === "session" ? "Ending on " + shortHost(t.host) + "…" : "Ending…");
           refresh();
         })
-        .catch(function () { say("Close failed: the hub didn't answer"); });
+        .catch(function () { say("End failed: the hub didn't answer"); })
+        .then(function () { busy = false; b.disabled = false; });
     });
     return b;
   }
@@ -402,6 +410,7 @@
   function paintSlot(i) {
     if (i < 0 || !slotEls[i]) return;
     var s = slotEls[i], id = s.id, t = id && infos[id];
+    s.close.sync();
     s.root.classList.toggle("ext", !!(t && t.kind === "session"));
     var v = viewOf(id);
     s.seg.hidden = !t;

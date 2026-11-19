@@ -99,7 +99,7 @@ Any change on screen or in CPU time clears it. Without Full Disk Access, don't h
 
 ## Closing
 
-Every page that shows a session or terminal can close it: Now, Inbox, Sessions, a session, Chats, a terminal, the fleet overview, and the Workspace's ⏻ on each terminal and pane. A tap on **Close…** shows the real button; in the Workspace the first ⏻ tap arms it.
+Every page that shows a session or terminal can close it: Now, Inbox, Sessions, a session, Chats, a terminal, the fleet overview, and the Workspace's × on each terminal and pane. A tap on **Close…** shows the real button; in the Workspace one click on × ends the session's CLI on its machine. The × shows on hover and on keyboard focus, and its label names the session it ends.
 
 - A hub terminal is ended as a terminal (its tmux session is killed). If its Mac's agent is offline, the page tells you the `tmux -L llm-brain kill-session` command to run there.
 - A hub task's running turn is stopped.

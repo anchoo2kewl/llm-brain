@@ -47,7 +47,7 @@ struct MainWindow: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: Binding(get: { panes.tree.focusedTerminal }, set: { if let r = $0 { panes.show(r) } }),
-                    rename: startRename, close: { closing = $0 }, openInWindow: { openWindow(value: $0) }, failure: $failure)
+                    rename: startRename, close: { closing = $0 }, end: end, openInWindow: { openWindow(value: $0) }, failure: $failure)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
             switch (layout, model.hub.flatMap(URL.init(string:))) {
@@ -102,11 +102,7 @@ struct MainWindow: View {
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog("End this terminal?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } })) {
-            Button("End Terminal", role: .destructive) {
-                guard let ref = closing else { return }
-                if let p = panes.tree.pane(showing: ref) { panes.tree.focus(p); panes.tree.close() }
-                Task { do { try await model.close(ref) } catch { failure = error.localizedDescription } }
-            }
+            Button("End Terminal", role: .destructive) { if let ref = closing { end(ref) } }
         } message: { Text("The process in it stops on its machine.") }
         .confirmationDialog("Close this pane?", isPresented: Binding(get: { panes.confirmClose }, set: { panes.confirmClose = $0 })) {
             Button("Close Pane") { panes.closeNow() }.keyboardShortcut(.defaultAction)
@@ -146,6 +142,12 @@ struct MainWindow: View {
             paneCount: panes.tree.panes.count)
     }
 
+    /// End a terminal: its pane closes here and its CLI stops on its machine.
+    private func end(_ ref: TerminalRef) {
+        if let p = panes.tree.pane(showing: ref) { panes.tree.focus(p); panes.tree.close() }
+        Task { do { try await model.close(ref) } catch { failure = error.localizedDescription } }
+    }
+
     private func startRename(_ ref: TerminalRef) {
         newTitle = model.terminal(ref)?.title ?? ""
         renaming = ref
@@ -171,6 +173,7 @@ struct Sidebar: View {
     @Binding var selection: TerminalRef?
     var rename: (TerminalRef) -> Void
     var close: (TerminalRef) -> Void
+    var end: (TerminalRef) -> Void
     var openInWindow: (TerminalRef) -> Void
     @Binding var failure: String?
     @ViewState private var expanded: Set<TerminalRef> = []
@@ -188,7 +191,7 @@ struct Sidebar: View {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
                     }
                     ForEach(m.terminals) { e in
-                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded)
+                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded, end: { end(e.ref) })
                             .tag(e.ref)
                             .contextMenu {
                                 Button("Move to Top") { model.moveToTop(e.ref, in: m) }

@@ -7,6 +7,9 @@ struct TerminalRow: View {
     let terminal: Terminal
     let number: Int?
     @Binding var expanded: Set<TerminalRef>
+    /// One click on × ends the terminal (its CLI stops on its machine).
+    var end: (() -> Void)?
+    @ViewState private var hovering = false
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
@@ -20,13 +23,20 @@ struct TerminalRow: View {
                 .buttonStyle(.plain).foregroundStyle(.tertiary)
                 .accessibilityLabel(open ? "Hide detail" : "Show detail")
                 StateDot(state: state, wants: wants).help(Self.help(state, t))
-                Text(t.title.isEmpty ? t.badge : t.title).lineLimit(1).fontWeight(wants ? .semibold : .regular)
+                Text(Self.name(t)).lineLimit(1).fontWeight(wants ? .semibold : .regular)
                 Spacer(minLength: 0)
                 if let n = t.subagents, n > 0 {
                     Label("\(n)", systemImage: "arrow.triangle.branch").font(.caption2).foregroundStyle(.secondary)
                         .help("\(n) subagent\(n == 1 ? "" : "s") running")
                 }
                 if let number, number < 9 { Text("⌘\(number + 1)").font(.caption2).foregroundStyle(.tertiary) }
+                if let end {
+                    Button(action: end) { Image(systemName: "xmark").font(.caption2.weight(.semibold)) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .opacity(hovering ? 1 : 0) // still in the accessibility tree when hidden
+                        .help("End \(Self.name(t)): stops its CLI on \(t.host)")
+                        .accessibilityLabel("End \(Self.name(t))")
+                }
             }
             HStack(spacing: 6) {
                 Badge(provider: t.provider, text: t.badge)
@@ -52,8 +62,12 @@ struct TerminalRow: View {
             if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
+        .onHover { hovering = $0 }
+        .accessibilityAction(named: "End Terminal") { end?() }
         .listRowBackground(wants ? RoundedRectangle(cornerRadius: 6).fill(.orange.opacity(0.13)).padding(.horizontal, 6) : nil)
     }
+
+    static func name(_ t: Terminal) -> String { t.title.isEmpty ? t.badge : t.title }
 
     static func help(_ s: AgentState, _ t: Terminal) -> String {
         switch s {
