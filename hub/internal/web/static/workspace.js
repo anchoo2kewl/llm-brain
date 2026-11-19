@@ -571,7 +571,13 @@
   // the source ends only after the resumed copy is live. Only the conversation moves, not uncommitted files.
   var moveBox = document.getElementById("wsmove"), moveList = document.getElementById("wsmachines"), moveSay = document.getElementById("wsmovestatus");
   var machines = [], moving = false, PHASE = { check: "Check readiness", "export": "Export the conversation", copy: "Copy it to ", resume: "Resume on ", verify: "Check it is live", close: "End the source" };
+  var canMove = null; // the hub serves moves: its unknown-job reply is JSON
   function loadMachines() {
+    if (canMove === null) {
+      fetch("/api/migrations/-", { cache: "no-store" }).then(function (r) { canMove = /json/.test(r.headers.get("Content-Type") || ""); if (canMove) loadMachines(); }).catch(function () {});
+      return;
+    }
+    if (!canMove) return;
     fetch("/api/cluster/nodes", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }).then(function (n) {
       var names = n && n.self ? [n.self.node].concat((n.peers || []).filter(function (p) { return p.ok; }).map(function (p) { return p.info.node; })) : [];
       order.forEach(function (id) { var t = infos[id]; if (t && t.kind !== "session" && t.host && names.indexOf(t.host) < 0) names.push(t.host); });
@@ -614,7 +620,12 @@
       .catch(function (e) { moving = false; sayMove("Move failed: " + e.message + ". Nothing changed."); });
   }
   function poll(job, t, to) {
-    fetch("/api/migrations/" + job, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+    fetch("/api/migrations/" + job, { cache: "no-store" }).then(function (r) {
+      if (r.status === 404) { moving = false; sayMove("The hub lost track of the move (it restarted). Check the terminal list: the source ends only after a move finished."); refresh(); return null; }
+      if (!r.ok) throw new Error("status " + r.status);
+      return r.json();
+    }).then(function (j) {
+      if (!j) return;
       var box = el("div");
       box.appendChild(el("b", "", "Moving " + (t.title || "terminal") + " to " + shortHost(to)));
       var ol = el("ol", "ws-phases");

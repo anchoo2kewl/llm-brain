@@ -96,6 +96,29 @@ Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Linux) in the app menu
 - Herdr programs open in the Workspace too. Detach from one with Ctrl+\; the program keeps running.
 - Reload, Back and Forward act on the window in front.
 
+## End or move a terminal
+
+- **End:** hover over a terminal in the sidebar and click **×**. It ends the terminal's CLI on its machine at once. The × also shows on keyboard focus, and VoiceOver offers **End Terminal** on the row. The web workspace has the same × on each terminal and pane.
+- **Move to another machine:** drag a terminal onto another machine's name in the sidebar, or right-click it and choose **Move to Machine**. In the web workspace, drag it onto a machine under the terminal list, or use **Actions → Move focused terminal to**.
+
+The hub runs the move, so it finishes even if the app quits or the laptop goes offline. The row shows each phase as it happens:
+
+1. **Check readiness:** the terminal runs Claude Code or Codex, it has a conversation, and the destination machine is connected to the hub. Nothing changes if a check fails.
+2. **Export:** the conversation file from the source machine, or the hub's copy when that machine is offline.
+3. **Copy:** the file goes to the destination machine, where the CLI looks for it.
+4. **Resume:** a new terminal on the destination continues the same conversation.
+5. **Check it is live:** the hub waits about a minute for the destination machine to confirm that the CLI resumed. If it did not, the hub ends the new terminal and the source keeps running.
+6. **End the source:** only now does the old terminal end. If this step fails, the conversation still runs on the destination, and the row says so; end the old one with ×.
+
+The destination machine then owns the conversation: its terminal, its transcript and its next turns. The laptop can disconnect.
+
+What does not move:
+
+- Only the conversation moves. Uncommitted changes, untracked files, stashes and local branches stay on the source machine. Commit and push them first, then pull on the destination.
+- A git worktree is not copied. If the same folder (under the home folder) exists on the destination, the conversation runs there. If not, it runs in the destination's home folder, and the **Copy** phase says so.
+- Shell terminals and sessions started outside the hub cannot move. Continue such a session in a hub terminal first.
+- Moving needs a hub that supports it. An older hub answers with "update the hub", and the web workspace hides the drop targets.
+
 ## Quick search
 
 Press **Option+Space** on macOS, or **Ctrl+Alt+Space** on Linux, in any app. A small search window opens on top of other windows.
