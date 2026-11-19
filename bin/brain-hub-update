@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Update the hub service, independently of desktop clients. Python standard library only."""
+import argparse, contextlib, fcntl, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+REPO = 'anchoo2kewl/llm-brain'
+API = 'https://api.github.com/repos/'+REPO+'/releases?per_page=100'
+PREFIX = 'hub-v'
+LABEL = 'com.llm-brain.hub'
+UPDATE_LABEL = LABEL+'-update'
+
+def version(v):
+    m=re.fullmatch(r'(?:hub-v|v)?(\d+)\.(\d+)\.(\d+)',v)
+    if not m:raise ValueError('Invalid hub version')
+    return tuple(map(int,m.groups()))
+
+def read_json(path, default):
+    try:return json.loads(path.read_text())
+    except FileNotFoundError:return default
+
+def atomic_json(path, value):
+    path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    fd,tmp=tempfile.mkstemp(prefix=path.name+'.',dir=path.parent)
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,'w') as f:json.dump(value,f);f.write('\n')
+        os.replace(tmp,path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):os.unlink(tmp)
+
+def fetch(url, limit):
+    if urlsplit(url).scheme!='https':raise ValueError('Update download must use HTTPS')
+    req=Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'llm-brain-hub-updater'})
+    with urlopen(req,timeout=30) as r:
+        if urlsplit(r.url).scheme!='https':raise ValueError('Insecure update redirect')
+        data=r.read(limit+1)
+    if len(data)>limit:raise ValueError('Update response is too large')
+    return data
+
+def asset_url(a, tag):
+    url=a.get('browser_download_url','')
+    prefix='https://github.com/'+REPO+'/releases/download/'+tag+'/'
+    if not url.startswith(prefix):raise ValueError('Unexpected hub asset URL')
+    return url
+
+def latest_release():
+    releases=json.loads(fetch(API,2<<20))
+    choices=[]
+    for r in releases:
+        tag=r.get('tag_name','')
+        if r.get('draft') or r.get('prerelease') or not tag.startswith(PREFIX):continue
+        try:v=version(tag)
+        except ValueError:continue
+        choices.append((v,r))
+    if not choices:return None
+    r=max(choices,key=lambda x:x[0])[1];tag=r['tag_name']
+    assets={a['name']:a for a in r.get('assets',[])}
+    if 'hub-update.json' not in assets:raise ValueError('Hub release has no update manifest')
+    manifest=json.loads(fetch(asset_url(assets['hub-update.json'],tag),128<<10))
+    if manifest.get('schema')!=1 or tag!=PREFIX+manifest.get('version',''):raise ValueError('Hub release manifest mismatch')
+    return manifest,assets,tag
+
+def target_key():
+    machine=platform.machine().lower()
+    arch={'arm64':'arm64','aarch64':'arm64','x86_64':'amd64','amd64':'amd64'}.get(machine)
+    system={'Darwin':'darwin','Linux':'linux'}.get(platform.system())
+    if not arch or not system:raise ValueError('Unsupported hub platform')
+    return system+'-'+arch
+
+def checked_asset(entry, assets, tag):
+    name=entry.get('name','');digest=entry.get('sha256','')
+    if name not in assets or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('Missing asset or invalid checksum')
+    data=fetch(asset_url(assets[name],tag),128<<20)
+    if hashlib.sha256(data).hexdigest()!=digest:raise ValueError('Hub asset checksum mismatch')
+    return data
+
+def run(*args,timeout=20):
+    return subprocess.run(args,check=True,capture_output=True,text=True,timeout=timeout).stdout.strip()
+
+class Updater:
+    def __init__(self, brain, state):
+        self.brain=Path(brain).resolve();self.state=Path(state).resolve();self.state.mkdir(parents=True,exist_ok=True,mode=0o700)
+        self.binary=self.brain/'bin/hub';self.config_file=self.state/'hub-update.json';self.status_file=self.state/'hub-update-status.json'
+        self.config=read_json(self.config_file,{})
+        self.base=self.config.get('hub_url','http://127.0.0.1:8787').rstrip('/')
+        p=urlsplit(self.base)
+        if p.scheme!='http' or p.hostname not in ('127.0.0.1','::1') or p.username or p.password or p.path or p.query or p.fragment:raise ValueError('Hub health URL must be loopback HTTP')
+    def current(self):return run(str(self.binary),'version',timeout=5)
+    def status(self):
+        return {**read_json(self.status_file,{}),'version':self.current(),'auto_enabled':self.config.get('auto_enabled',True),'interval_hours':self.config.get('interval_hours',6),'hub_url':self.base}
+    def save(self,**values):
+        state=read_json(self.status_file,{});state.update(values);atomic_json(self.status_file,state);return self.status()
+    def health(self):
+        with urlopen(self.base+'/api/hub-update/health',timeout=3) as r:return json.load(r)
+    def service(self, action):
+        if platform.system()=='Darwin':
+            domain='gui/'+str(os.getuid())
+            if action=='stop':run('/bin/launchctl','bootout',domain+'/'+LABEL)
+            else:run('/bin/launchctl','bootstrap',domain,str(Path.home()/'Library/LaunchAgents'/ (LABEL+'.plist')))
+        else:run('systemctl','--user',action,self.config.get('service','llm-brain-hub.service'))
+    def healthy_version(self,want):
+        for _ in range(40):
+            try:
+                if self.health().get('version')==want:return True
+            except (OSError,ValueError):pass
+            time.sleep(.25)
+        return False
+    def install(self,manifest,assets,tag):
+        key=target_key();entry=manifest.get('platforms',{}).get(key)
+        if not entry:raise ValueError('Hub release does not support '+key)
+        payload=checked_asset(entry,assets,tag)
+        support_data={name:checked_asset(item,assets,tag) for name,item in manifest.get('support',{}).items() if name in ('brain-hub-update','brain-mcp')}
+        with tempfile.TemporaryDirectory(prefix='hub-update-',dir=self.binary.parent) as tmp:
+            staged=Path(tmp)/'hub';staged.write_bytes(payload);staged.chmod(0o755)
+            if platform.system()=='Darwin':run('/usr/bin/codesign','--verify','--strict',str(staged))
+            if run(str(staged),'version',timeout=5)!=manifest['version']:raise ValueError('Hub binary version mismatch')
+            health=self.health()
+            if not health.get('ready'):return self.save(state='deferred',message=health.get('reason','Hub is busy'),latest=manifest['version'])
+            previous=self.current();backup=self.binary.with_name('hub.previous')
+            shutil.copy2(self.binary,backup)
+            self.save(state='installing',latest=manifest['version'],message='Restarting hub service')
+            self.service('stop')
+            try:
+                os.replace(staged,self.binary)
+                self.service('start')
+                if not self.healthy_version(manifest['version']):raise RuntimeError('New hub failed its health check')
+            except Exception:
+                with contextlib.suppress(Exception):self.service('stop')
+                restore=Path(tmp)/'restore';shutil.copy2(backup,restore);os.replace(restore,self.binary)
+                self.service('start')
+                if not self.healthy_version(previous):raise RuntimeError('Update failed and the previous hub did not recover')
+                self.save(state='rolled_back',failed_version=manifest['version'],previous_version=previous,message='New hub failed; previous hub restored')
+                raise
+            # Only verified, named support files may replace the updater and MCP bridge.
+            for name,data in support_data.items():
+                support=Path(tmp)/name;support.write_bytes(data);support.chmod(0o755);os.replace(support,self.brain/'bin'/name)
+            return self.save(state='up_to_date',previous_version=previous,installed_version=manifest['version'],installed_at=time.time(),message='Hub updated and healthy')
+    def check(self,install=False,automatic=False):
+        request=self.state/'hub-update-request.json';manual=request.exists()
+        if automatic and not manual and not self.config.get('auto_enabled',True):return self.status()
+        status=read_json(self.status_file,{})
+        if automatic and not manual and status.get('state')!='deferred' and time.time()-status.get('last_check',0)<self.config.get('interval_hours',6)*3600:return self.status()
+        with contextlib.suppress(FileNotFoundError):request.unlink()
+        self.save(state='checking',message='Checking hub releases')
+        release=latest_release();now=time.time()
+        if not release:return self.save(state='up_to_date',last_check=now,message='No stable hub release published yet')
+        manifest,assets,tag=release
+        try:current_version=version(self.current())
+        except ValueError:current_version=(0,0,0)  # bootstrap source builds into the stable hub channel
+        newer=version(manifest['version'])>current_version
+        self.save(state='available' if newer else 'up_to_date',latest=manifest['version'],last_check=now,message='Hub update available' if newer else 'Hub is up to date')
+        if newer and automatic and not manual and status.get('failed_version')==manifest['version']:
+            return self.save(state='rolled_back',message='This hub version failed its previous health check; waiting for a newer release')
+        if newer and (install or automatic):return self.install(manifest,assets,tag)
+        return self.status()
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--brain',default=str(Path(__file__).resolve().parents[1]));parser.add_argument('--state',default=str(Path.home()/'.local/state/llm-brain'))
+    mode=parser.add_mutually_exclusive_group();mode.add_argument('--status',action='store_true');mode.add_argument('--check',action='store_true');mode.add_argument('--install',action='store_true');mode.add_argument('--automatic',action='store_true');mode.add_argument('--request',action='store_true');mode.add_argument('--auto',choices=('on','off'))
+    parser.add_argument('--interval-hours',type=int)
+    a=parser.parse_args();u=Updater(a.brain,a.state)
+    if a.auto or a.interval_hours is not None:
+        if a.interval_hours is not None and not 1<=a.interval_hours<=168:raise ValueError('Interval must be 1–168 hours')
+        if a.auto:u.config['auto_enabled']=a.auto=='on'
+        if a.interval_hours is not None:u.config['interval_hours']=a.interval_hours
+        atomic_json(u.config_file,u.config);result=u.status()
+    elif a.request:
+        atomic_json(u.state/'hub-update-request.json',{'requested_at':time.time()})
+        if platform.system()=='Darwin':run('/bin/launchctl','kickstart','gui/'+str(os.getuid())+'/'+UPDATE_LABEL)
+        else:run('systemctl','--user','start','llm-brain-hub-update.service')
+        result={**u.status(),'state':'queued','message':'Hub update requested'}
+    elif a.status:result=u.status()
+    else:
+        with open(u.state/'hub-update.lock','a') as lock:
+            try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:result={**u.status(),'message':'Hub updater already running'}
+            else:
+                try:result=u.check(install=a.install,automatic=a.automatic)
+                except Exception as e:
+                    state=read_json(u.status_file,{})
+                    u.save(state='rolled_back' if state.get('state')=='rolled_back' else 'error',message=str(e)[:1000]);raise
+    print(json.dumps(result))
+
+if __name__=='__main__':
+    try:main()
+    except Exception as e:
+        print(json.dumps({'error':str(e)[:1000]}));sys.exit(1)

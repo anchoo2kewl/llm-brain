@@ -104,6 +104,14 @@ class ControlTest(unittest.TestCase):
    n=r.call_count
    for args in ({'id':5,'to':'Studio','pin_path':True},{'id':5,'to':'Studio','pin_path':'yes'},{'id':5,'to':'Studio','without_folder':True,'destination_path':'~/repo'}):self.assertTrue(self.call('session_move',args)['isError'])
    self.assertEqual(r.call_count,n)
+ def test_hub_update_is_separate_and_validated(self):
+  with patch.object(m,'request',return_value={'auto_enabled':True}) as r:
+   self.assertFalse(self.call('hub_update',{'action':'status'}).get('isError'));self.assertEqual(r.call_args.args[0],'/api/hub-update')
+   for args in ({'action':'check'},{'action':'install'},{'action':'settings','auto_enabled':False},{'action':'settings','interval_hours':12}):
+    self.assertFalse(self.call('hub_update',args).get('isError'));self.assertEqual(r.call_args.args,('/api/hub-update',args))
+   n=r.call_count
+   for args in ({'action':'settings'},{'action':'settings','interval_hours':0},{'action':'settings','auto_enabled':'yes'},{'action':'install','auto_enabled':True},{'action':'shell'}):self.assertTrue(self.call('hub_update',args)['isError'])
+   self.assertEqual(r.call_count,n)
  def test_desktop_update_is_local_and_validated(self):
   with patch.object(m,'desktop_update',return_value={'version':'0.1.4'}) as update:
    self.assertFalse(self.call('desktop_update',{'action':'status'}).get('isError'))

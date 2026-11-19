@@ -37,6 +37,9 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
+	HubUpdateVersion string
+	HubUpdateCommand string
+
 	ReviewHTTP *http.Client // optional transport for the existing Telegram connector
 
 	Store    *store.Store
@@ -82,6 +85,7 @@ func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.hubUpdateRoutes(mux)
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.home)

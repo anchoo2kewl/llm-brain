@@ -85,6 +85,7 @@ def tool(name, description, properties, required=(), read=False, idem=False, des
 TOOLS = [
     tool('diagnostics_list','List local Brain Hub application logs and macOS crash reports. Returns names, sizes and modification times.',{},read=True),
     tool('diagnostics_read','Read a local Brain Hub log or crash report by the identifier returned by diagnostics_list. Bounded to 1 MiB.',{'report':{'type':'string','maxLength':256}},('report',),read=True),
+    tool('hub_update','Read status, check or install stable hub service updates, or configure automatic updates (enabled by default). Separate from desktop client updates. Install restarts only the selected hub after readiness and checksum checks.',{'action':{'type':'string','enum':['status','check','install','settings']},'auto_enabled':{'type':'boolean'},'interval_hours':{'type':'integer','minimum':1,'maximum':168}},('action',),idem=True),
     tool('desktop_update','Read the installed local macOS app version, check for a newer stable release, or install the verified update for next launch. Install only on user request.',
          {'action':{'type':'string','enum':['status','check','install']}},('action',)),
     tool('queue_list','Read queued and running Hub jobs, priorities, dependencies and reasons for waiting.',{},read=True),
@@ -215,6 +216,11 @@ def call(name,a):
     a=dict(a);named=a.pop('hub','');base=hub_base(named)
     def rq(path,payload=None,form=False,timeout=40):return request(path,payload,form=form,timeout=timeout,base=base)
     tid=lambda:int(a['id'])
+    if name=='hub_update':
+        if a['action']!='settings' and any(k in a for k in ('auto_enabled','interval_hours')):raise ValueError('Settings require action=settings')
+        if a['action']=='status':return rq('/api/hub-update')
+        if a['action']=='settings' and not any(k in a for k in ('auto_enabled','interval_hours')):raise ValueError('Give auto_enabled or interval_hours')
+        return rq('/api/hub-update',a)
     if name=='queue_list':return rq('/api/intake/queue')
     if name=='queue_issue':return rq('/api/intake/queue',a)
     if name=='queue_control':return rq('/api/intake/action',a)
@@ -278,7 +284,7 @@ def call(name,a):
 def respond(msg):
     method=msg.get('method')
     if method=='initialize':
-        return {'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'brain','version':'1.1.0'},'instructions':INSTRUCTIONS}
+        return {'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'brain','version':'1.2.0'},'instructions':INSTRUCTIONS}
     if method=='ping':return {}
     if method=='tools/list':return {'tools':TOOLS}
     if method=='tools/call':
