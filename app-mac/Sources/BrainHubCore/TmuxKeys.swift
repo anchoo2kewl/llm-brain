@@ -262,3 +262,18 @@ public func tmuxConfig(home: URL = FileManager.default.homeDirectoryForCurrentUs
     }
     return nil
 }
+
+/// Ctrl+Enter sends what is typed now, even while the agent is busy. Each CLI has its own key for sending a queued
+/// message at once; the app gives them all this one key. A CLI that is not listed, and a shell (where Ctrl+S would
+/// freeze the output), get the key as it is.
+public enum SendNow {
+    public static let key = Key(name: "Enter", ctrl: true)
+
+    /// The keys to type for Ctrl+Enter, one at a time and a moment apart, or nil to leave the key alone.
+    public static func keys(provider: String) -> [Data]? {
+        switch provider {
+        case "claude": [Data([0x0d]), Data([0x18]), Data([0x13])] // Enter, then Ctrl+X Ctrl+S
+        default: nil
+        }
+    }
+}

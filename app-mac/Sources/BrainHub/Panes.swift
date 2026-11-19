@@ -111,7 +111,22 @@ enum KeyRouter {
             run(b, panes)
             return false
         }
+        if key == SendNow.key, let session = panes.focusedSession,
+           let seq = model.terminal(session.ref).flatMap({ SendNow.keys(provider: $0.provider) }) {
+            sendNow(seq, session)
+            return false
+        }
         return true
+    }
+
+    /// One key at a time, a moment apart: sent together, a CLI reads them as pasted text, not as keys.
+    private static func sendNow(_ seq: [Data], _ session: TerminalSession) {
+        Task { @MainActor in
+            for (i, k) in seq.enumerated() {
+                if i > 0 { try? await Task.sleep(for: .milliseconds(i == 1 ? 80 : 60)) }
+                session.send(k)
+            }
+        }
     }
 
     private static func run(_ b: KeyBinding, _ panes: WindowPanes) {
