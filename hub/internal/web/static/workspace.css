@@ -110,6 +110,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-stuck-acts .armed{background:var(--st-blocked);border-color:var(--st-blocked);color:#fff}
 @media (hover:none),(pointer:coarse),(max-width:1100px){.ws-stuck-acts button.small,.ws-stuck-acts a.btn.small{min-height:var(--tap);min-width:var(--tap);display:inline-flex;align-items:center;justify-content:center}}
 .ws-machines{list-style:none;margin:2px 0 6px;padding:0;display:flex;flex-wrap:wrap;gap:4px}
-.ws-machine{border:1px dashed var(--line);border-radius:6px;padding:3px 8px;font-size:12px}.ws-machine.over{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.ws-machine{border:1px dashed var(--line);border-radius:6px;padding:10px 12px;min-width:7em;flex:1 1 auto;text-align:center;font-size:12px}.ws-machine.over{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
 .ws-movestatus{margin:0 0 6px}.ws-phases{margin:4px 0;padding-left:4px;list-style:none}.ws-phases .ph-failed{color:var(--bad)}.ws-phases .ph-running{font-weight:600}
 .ws-item[draggable=true]{cursor:grab}
+.ws-grip{cursor:grab;opacity:.55;padding:0 4px;user-select:none}.ws-grip:hover{opacity:1}.ws-grip:active{cursor:grabbing}

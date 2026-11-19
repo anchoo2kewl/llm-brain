@@ -160,7 +160,7 @@ struct SearchPalette: View {
                 Button("Continue") { continueHit(hit) }
                 Menu("Move") {
                     ForEach(model.machineNames.filter { $0 != hit.host }, id: \.self) { m in
-                        Button("Move to \(m)") { move(hit, to: m) }
+                        Button("Move to \(model.machineLabel(m))") { move(hit, to: m) }
                     }
                 }
                 .fixedSize()

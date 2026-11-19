@@ -168,7 +168,7 @@
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
       li.draggable = true;
-      li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "move"; });
+      li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "copyMove"; });
     }
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
@@ -274,6 +274,13 @@
     var root = el("section", "ws-slot"), head = el("header", "ws-slot-head"), body = el("div", "ws-slot-body"), msg = el("div", "ws-slot-msg");
     var num = el("span", "ws-num", String(i + 1)), dot = el("span", "dot-s"), title = el("span", "ws-slot-title"), meta = el("span", "ws-slot-meta"), badges = el("span", "ws-badges");
     var grow = el("span", "grow");
+    var grip = el("span", "ws-grip", "⠿"); grip.draggable = true;
+    grip.title = "Drag onto a machine to move this terminal there (hold ⌥/Alt to clone it)";
+    grip.addEventListener("dragstart", function (e) {
+      var id = s0.s && s0.s.id;
+      if (!id || !infos[id] || infos[id].kind === "session") { e.preventDefault(); return; }
+      e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "copyMove";
+    });
     var open = el("a", "ws-btn", "↗"); open.title = "Open on its own page"; open.target = "_blank"; open.rel = "noopener";
     var code = el("button", "ws-btn", "</>"); code.type = "button"; code.title = "Edit this folder's files (toggle)";
     var zoom = el("button", "ws-btn ws-zoom", "⤢"); zoom.type = "button"; zoom.title = "Zoom (Ctrl+Shift+Enter)";
@@ -315,7 +322,7 @@
         .then(function (r) { if (r.ok) sayIn.value = ""; else msg.textContent = "Couldn't send to the terminal"; })
         .catch(function () { msg.textContent = "Couldn't send to the terminal"; });
     });
-    head.append(num, dot, title, badges, meta, grow, seg, code, open, zoom, close, clear);
+    head.append(grip, num, dot, title, badges, meta, grow, seg, code, open, zoom, close, clear);
     var empty = el("div", "ws-slot-empty");
     // Frozen on a macOS prompt: what happened, what to do, and Restart CLI (two taps).
     var stuck = el("div", "ws-stuck"), stuckText = el("p", "small"), stuckActs = el("div", "ws-stuck-acts");
@@ -590,36 +597,38 @@
     moveList.textContent = "";
     machines.forEach(function (m) {
       var li = el("li", "ws-machine", shortHost(m));
-      li.title = "Drop a terminal here to move its conversation to " + m;
+      li.title = "Drop a terminal here to move its conversation to " + m + " (hold ⌥/Alt to clone: the source keeps running)";
       li.addEventListener("dragover", function (e) { if (e.dataTransfer.types.indexOf("text/x-brain-terminal") >= 0) { e.preventDefault(); li.classList.add("over"); } });
       li.addEventListener("dragleave", function () { li.classList.remove("over"); });
-      li.addEventListener("drop", function (e) { e.preventDefault(); li.classList.remove("over"); migrate(e.dataTransfer.getData("text/x-brain-terminal"), m); });
+      li.addEventListener("drop", function (e) { e.preventDefault(); li.classList.remove("over"); migrate(e.dataTransfer.getData("text/x-brain-terminal"), m, e.altKey); });
       moveList.appendChild(li);
     });
-    var g = document.getElementById("ws-move-group");
-    if (g) g.remove();
+    document.querySelectorAll(".ws-move-group").forEach(function (g) { g.remove(); });
     if (machines.length < 2) return;
-    g = el("optgroup"); g.id = "ws-move-group"; g.label = "Move focused terminal to";
-    machines.forEach(function (m) { var o = el("option", "", shortHost(m)); o.value = "move:" + m; g.appendChild(o); });
-    document.getElementById("ws-actions").appendChild(g);
+    [["move", "Move focused terminal to"], ["clone", "Clone focused terminal to (keeps the source)"]].forEach(function (k) {
+      var g = el("optgroup"); g.className = "ws-move-group"; g.label = k[1];
+      machines.forEach(function (m) { var o = el("option", "", shortHost(m)); o.value = k[0] + ":" + m; g.appendChild(o); });
+      document.getElementById("ws-actions").appendChild(g);
+    });
   }
-  function migrate(id, to) {
+  function migrate(id, to, clone) {
     var t = infos[id];
     if (!t || moving) return;
     if (t.kind === "session") { sayMove("Only hub terminals can move. Continue this session in a terminal first."); return; }
     if (t.host === to) { sayMove((t.title || "This terminal") + " already runs on " + shortHost(to) + "."); return; }
     moving = true;
-    sayMove("Moving " + (t.title || "terminal " + id) + " to " + shortHost(to) + "…");
-    fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: to, close_source: true }) })
+    var verb = clone ? "Cloning " : "Moving ";
+    sayMove(verb + (t.title || "terminal " + id) + " to " + shortHost(to) + "…");
+    fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(clone ? { to: to, clone: true } : { to: to, close_source: true }) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { code: r.status, j: j }; }); })
       .then(function (x) {
         if (x.code === 404 || x.code === 405) throw new Error("this hub can't move terminals yet (update the hub)");
         if (x.code !== 202) throw new Error(x.j.error || "error " + x.code);
-        poll(x.j.job, t, to);
+        poll(x.j.job, t, to, verb);
       })
-      .catch(function (e) { moving = false; sayMove("Move failed: " + e.message + ". Nothing changed."); });
+      .catch(function (e) { moving = false; sayMove((clone ? "Clone" : "Move") + " failed: " + e.message + ". Nothing changed."); });
   }
-  function poll(job, t, to) {
+  function poll(job, t, to, verb) {
     fetch("/api/migrations/" + job, { cache: "no-store" }).then(function (r) {
       if (r.status === 404) { moving = false; sayMove("The hub lost track of the move (it restarted). Check the terminal list: the source ends only after a move finished."); refresh(); return null; }
       if (!r.ok) throw new Error("status " + r.status);
@@ -627,7 +636,7 @@
     }).then(function (j) {
       if (!j) return;
       var box = el("div");
-      box.appendChild(el("b", "", "Moving " + (t.title || "terminal") + " to " + shortHost(to)));
+      box.appendChild(el("b", "", verb + (t.title || "terminal") + " to " + shortHost(to)));
       var ol = el("ol", "ws-phases");
       (j.phases || []).forEach(function (p) {
         var mark = { done: "✓", running: "…", failed: "✗", skipped: "–", pending: "·" }[p.state] || "·";
@@ -636,12 +645,13 @@
         ol.appendChild(li);
       });
       box.appendChild(ol);
-      if (j.done) box.appendChild(el("p", j.error ? "bad" : "", j.error ? "Move failed: " + j.error + ". " + (t.title || "The terminal") + " still runs on " + shortHost(t.host) + "." : "Moved. " + shortHost(to) + " owns the conversation now."));
+      if (j.done) box.appendChild(el("p", j.error ? "bad" : "", j.error ? "Failed: " + j.error + ". " + (t.title || "The terminal") + " still runs on " + shortHost(t.host) + "."
+        : j.mode === "clone" ? "Cloned. The copy runs on " + shortHost(to) + "; the source keeps running." : "Moved. " + shortHost(to) + " owns the conversation now."));
       moveSay.hidden = false; moveSay.textContent = ""; moveSay.appendChild(box);
-      if (!j.done) { setTimeout(function () { poll(job, t, to); }, 1000); return; }
+      if (!j.done) { setTimeout(function () { poll(job, t, to, verb); }, 1000); return; }
       moving = false;
       refresh(function () { if (!j.error && j.dest_terminal && infos[String(j.dest_terminal)]) show(String(j.dest_terminal)); });
-    }).catch(function () { setTimeout(function () { poll(job, t, to); }, 3000); }); // the hub restarting
+    }).catch(function () { setTimeout(function () { poll(job, t, to, verb); }, 3000); }); // the hub restarting
   }
   function sayMove(msg) { moveSay.hidden = false; moveSay.textContent = msg; }
 
@@ -649,6 +659,7 @@
     var action = this.value;
     this.value = "";
     if (action.indexOf("move:") === 0) { migrate(st.slots[st.focus], action.slice(5)); return; }
+    if (action.indexOf("clone:") === 0) { migrate(st.slots[st.focus], action.slice(6), true); return; }
     runAction(action);
   };
 
@@ -698,5 +709,31 @@
   refresh(function () { var id = st.slots[st.focus]; if (id && panes[id]) setTimeout(function () { panes[id].focus(); }, 300); });
   setInterval(refresh, 10000);
   setTimeout(loadMachines, 1500);
+  // Agents steer the workspace through the hub (workspace_ctl.go): apply its requests after the last one seen,
+  // and tell it what this window shows. The first answer only sets where to start, so old requests don't replay.
+  var me = "web:main", wsSeq = -1, lastState = "";
+  var follower = 0;
+  function follow() {
+    fetch("/api/workspace?since=" + Math.max(wsSeq, 0), { cache: "no-store" }).then(function (r) {
+      if (r.status === 404 || r.status === 405) clearInterval(follower); // a hub without workspace control
+      return r.ok ? r.json() : null;
+    }).catch(function () { return null; }).then(function (w) {
+      if (!w) return;
+      if (wsSeq >= 0) (w.intents || []).forEach(function (i) {
+        if (i.client && i.client !== me) return;
+        if ((i.action === "open" || i.action === "focus") && infos[String(i.terminal)]) show(String(i.terminal));
+        else if (i.action === "layout" && COUNTS[i.layout]) setLayout(i.layout);
+        else if (i.action === "zoom" && !st.zoom || i.action === "unzoom" && st.zoom) toggleZoom();
+      });
+      wsSeq = w.seq;
+      var slots = st.slots.slice(0, logical()).map(Number).filter(function (n) { return n > 0; });
+      var now = JSON.stringify({ client: me, layout: st.layout, slots: slots, focus: Number(st.slots[st.focus]) || 0, zoom: st.zoom });
+      if (now === lastState) return;
+      lastState = now;
+      fetch("/api/workspace/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: now }).catch(function () {});
+    });
+  }
+  setTimeout(follow, 1200);
+  follower = setInterval(follow, 3000);
   setInterval(loadMachines, 30000);
 })();

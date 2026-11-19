@@ -218,6 +218,7 @@ struct PaneLeaf: View {
         Group {
             if let ref = panes.tree.terminals[id] {
                 TerminalPane(session: model.session(ref), focused: focused).id(ref)
+                    .overlay(alignment: .topTrailing) { PaneGrip(ref: ref) { dest in panes.tree.focus(id); panes.show(dest) } }
             } else {
                 ContentUnavailableView {
                     Label(model.hub == nil ? "No hub yet" : "Empty pane", systemImage: "terminal")

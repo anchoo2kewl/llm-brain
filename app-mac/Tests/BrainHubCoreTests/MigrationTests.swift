@@ -18,4 +18,14 @@ import BrainHubCore
         #expect(Migration.label("copy", to: "Studio") == "Copying it to Studio")
         #expect(Paths.migrate(7) == "/api/terminals/7/migrate")
     }
+
+    @Test func decodesCloneAndWorkspaceRequests() throws {
+        let m = try JSONDecoder().decode(Migration.self, from: Data(#"{"id":"j","to":"Studio","mode":"clone","done":true,"phases":[]}"#.utf8))
+        #expect(m.isClone)
+        let w = try JSONDecoder().decode(WorkspaceUpdate.self, from: Data(#"{"seq":9,"intents":[{"seq":7,"action":"focus","terminal":12},{"seq":8,"action":"zoom","client":"web:main"},{"seq":9,"action":"open","terminal":3,"client":"mac:1"}]}"#.utf8))
+        #expect(w.pending(after: -1, kind: "mac").isEmpty) // first look: no replay
+        #expect(w.pending(after: 6, kind: "mac").map(\.seq) == [7, 9])
+        #expect(w.pending(after: 7, kind: "mac").map(\.terminal) == [3])
+        #expect(Paths.workspace(since: 4) == "/api/workspace?since=4")
+    }
 }

@@ -25,6 +25,7 @@ struct BrainHubApp: App {
             TabView {
                 SettingsView().tabItem { Label("Hubs", systemImage: "server.rack") }
                 KeysSettings().tabItem { Label("Keys", systemImage: "keyboard") }
+                MCPSettings().tabItem { Label("MCP", systemImage: "point.3.connected.trianglepath.dotted") }
             }
         }
 
@@ -204,6 +205,39 @@ struct SettingsView: View {
             (name, url, failure) = ("", "", nil)
         } catch {
             failure = error.localizedDescription
+        }
+    }
+}
+
+/// Control the hubs from any MCP client: the bundled stdio bridge and the selected hub, ready to paste.
+struct MCPSettings: View {
+    private var model: AppModel { AppModel.shared }
+
+    var body: some View {
+        let bridge = Bundle.main.url(forResource: "brain-mcp", withExtension: nil)?.path
+        Form {
+            if let bridge, let hub = model.hub {
+                let c = MCPConfig(command: bridge, hub: hub)
+                Section {
+                    Text("Any MCP client can list hubs and sessions, read and send to sessions, end, rename, move or clone them, and open, focus or lay out the workspace. It uses this hub over your tailnet with the hub's own access rules; no key is stored. Needs python3.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                snippet("Claude Code", c.claudeCode)
+                snippet("Claude Desktop, Cursor and other clients (mcpServers JSON)", c.json)
+                snippet("Codex (~/.codex/config.toml)", c.codex)
+            } else {
+                Text(model.hub == nil ? "Add a hub first." : "This build has no MCP bridge (Contents/Resources/brain-mcp).").foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 620)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func snippet(_ title: String, _ text: String) -> some View {
+        Section(title) {
+            Text(text).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
         }
     }
 }
