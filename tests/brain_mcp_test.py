@@ -8,6 +8,22 @@ from unittest.mock import patch
 
 loader=importlib.machinery.SourceFileLoader('brain_mcp','bin/brain-mcp')
 spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
+class DiagnosticsTest(unittest.TestCase):
+ def test_unknown_report_and_traversal_are_rejected(self):
+  with patch.object(m,'diagnostic_reports',return_value={}):
+   for report in ('../../etc/passwd','1/unknown.ips'):
+    with self.assertRaises(ValueError):m.read_diagnostic(report)
+ def test_local_reports_are_bounded_and_redacted(self):
+  import tempfile
+  with tempfile.TemporaryDirectory() as directory:
+   path=m.Path(directory)/'app.log'
+   path.write_text('token=secret-value\n'+('x'*1048576))
+   with patch.object(m,'diagnostic_reports',return_value={'0/app.log':path}):
+    result=m.read_diagnostic('0/app.log')
+    self.assertTrue(result['truncated'])
+    self.assertNotIn('secret-value',result['text'])
+    self.assertIn('[REDACTED]',result['text'])
+
 class BrainMCPTest(unittest.TestCase):
  def invoke(self,name,args):return m.respond({'method':'tools/call','params':{'name':name,'arguments':args}})
  def test_stdio_and_control_desk_instructions(self):
@@ -76,4 +92,15 @@ class ControlTest(unittest.TestCase):
    out=json.loads(self.call('session_detail',{'id':3,'hub':'studio'})['content'][0]['text']);self.assertEqual(out['base'],'https://studio.example.ts.net')
    out=json.loads(self.call('session_detail',{'id':3,'hub':'mac'})['content'][0]['text']);self.assertEqual(out['base'],'http://127.0.0.1:8787')
    for hub in ('off','https://evil.invalid','nope'):self.assertTrue(self.call('session_detail',{'id':3,'hub':hub})['isError'])
+class ListTest(unittest.TestCase):
+ def test_session_list_spans_online_peers_unless_hub_named(self):
+  nodes={'self':{'node':'mac'},'peers':[{'ok':True,'url':'https://studio.example.ts.net','info':{'node':'studio'}},{'ok':False,'url':'http://10.0.0.9:8787','info':{'node':'off'}}]}
+  def fake(path,payload=None,form=False,timeout=40,base=None):
+   if path=='/api/cluster/nodes':return nodes
+   return [{'id':7}] if base=='https://studio.example.ts.net' else []
+  with patch.dict(os.environ,{'BRAIN_HUB_URL':'http://127.0.0.1:8787'}),patch.object(m,'request',side_effect=fake):
+   rows=json.loads(m.respond({'method':'tools/call','params':{'name':'session_list','arguments':{}}})['content'][0]['text'])
+   self.assertEqual(rows,[{'id':7,'hub':'studio'}])
+   rows=json.loads(m.respond({'method':'tools/call','params':{'name':'session_list','arguments':{'hub':'mac'}}})['content'][0]['text'])
+   self.assertEqual(rows,[])
 if __name__=='__main__':unittest.main()

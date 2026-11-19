@@ -21,6 +21,8 @@ struct BrainHubApp: App {
         Window("Keyboard Shortcuts", id: "shortcuts") { ShortcutsView() }
             .defaultSize(width: 560, height: 720)
 
+        Window("Diagnostics", id: "diagnostics") { DiagnosticsView() }
+
         Settings {
             TabView {
                 SettingsView().tabItem { Label("Hubs", systemImage: "server.rack") }
@@ -50,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            AppDiagnostics.record("app_started version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
             AppModel.shared.requestNotifications()
             KeyRouter.install()
             GlobalHotkey.register()
@@ -89,6 +92,7 @@ struct HubCommands: Commands {
         }
         CommandGroup(replacing: .help) {
             Button(Shortcut.shortcuts.title) { openWindow(id: "shortcuts") }.shortcut(.shortcuts)
+            Button("Diagnostics…") { openWindow(id: "diagnostics") }
             Button(Shortcut.help.title) { openWindow(id: "shortcuts") }.shortcut(.help)
         }
         CommandGroup(after: .newItem) {

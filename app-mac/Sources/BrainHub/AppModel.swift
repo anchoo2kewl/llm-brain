@@ -348,9 +348,19 @@ final class AppModel {
         await refresh()
     }
 
+    func endElsewhere(_ session: LiveSession) async throws {
+        guard let client else { throw HubError("Select a hub first.") }
+        struct Closed: Decodable {}
+        AppDiagnostics.record("elsewhere_close_requested session=\(session.id)")
+        _ = try await client.post("/api/sessions/\(session.id)/close", json: [:], as: Closed.self, timeout: 30)
+        await refresh()
+    }
+
     func close(_ ref: TerminalRef) async throws {
         struct Ignored: Decodable {}
         _ = try await HubClient(base: ref.hub).post(Paths.close(ref.id), json: [:], as: Ignored.self, timeout: 30)
+        AppDiagnostics.record("terminal_close_confirmed id=\(ref.id)")
+        for panes in windows.compactMap(\.value) { panes.tree.forget(ref) }
         sessions[ref]?.stop()
         sessions[ref] = nil
         await refresh()

@@ -44,6 +44,7 @@ final class TerminalEngine {
         refocus = s.window?.firstResponder === s
         s.removeFromSuperview()
         s.free()
+        AppDiagnostics.record("terminal_surface_stopped")
         if refocus { view.window?.makeFirstResponder(nil) }
     }
 
@@ -208,6 +209,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     /// Set while keyDown runs interpretKeyEvents: text the input method committed during that key.
     private var keyTextAccumulator: [String]?
     private var tracking: NSTrackingArea?
+    // Ghostty receives userdata from C callbacks. Retain the view until the native surface is freed.
+    private static var active: [UInt: SurfaceView] = [:]
+    private var closePending = false
 
     static func from(_ ud: UnsafeMutableRawPointer?) -> SurfaceView? {
         ud.map { Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue() }
@@ -226,19 +230,37 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             cfg.command = cmd
             return ghostty_surface_new(app, &cfg)
         }
+        if surface != nil { Self.active[UInt(bitPattern: Unmanaged.passUnretained(self).toOpaque())] = self }
         registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
     /// Freeing a surface inside one of its own callbacks is not safe: close on the next turn.
-    func closeSoon() { DispatchQueue.main.async { MainActor.assumeIsolated { self.onClose?() } } }
+    func closeSoon() {
+        guard !closePending, surface != nil else { return }
+        closePending = true
+        DispatchQueue.main.async { [self] in
+            guard surface != nil else { return }
+            onClose?()
+        }
+    }
 
     /// Stop the command and release the surface. The view does nothing after this.
     func free() {
         guard let s = surface else { return }
         surface = nil
-        ghostty_surface_free(s)
+        closePending = true
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
+        onBell = nil
+        onClose = nil
+        onFiles = nil
+        // A close can originate from a native callback. Keep userdata valid until the callback unwinds.
+        DispatchQueue.main.async { [self] in
+            ghostty_surface_free(s)
+            Self.active[UInt(bitPattern: Unmanaged.passUnretained(self).toOpaque())] = nil
+        }
     }
 
     // MARK: size, screen, visibility
