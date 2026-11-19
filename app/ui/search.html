@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick search</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="search.css">
+</head>
+<body>
+<div id="box">
+  <input id="q" type="text" placeholder="Search sessions on the cluster" autocomplete="off" autocorrect="off" spellcheck="false" autofocus>
+  <div id="msg" class="muted" hidden></div>
+  <ul id="list" role="listbox"></ul>
+  <div id="foot" class="muted" hidden>
+    <span id="hub"></span>
+    <span id="keys">&#8629; open &nbsp; &#8984;&#8629; continue &nbsp; esc hide</span>
+  </div>
+</div>
+<script src="relative.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

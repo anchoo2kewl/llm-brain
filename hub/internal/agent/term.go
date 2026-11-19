@@ -175,6 +175,10 @@ set -g escape-time 10
 set -g default-terminal "xterm-256color"
 set -g set-clipboard on
 set -g focus-events on
+# Preserve Control+Enter and other modified keys through the terminal bridge.
+set -s extended-keys on
+set -s extended-keys-format csi-u
+set -as terminal-features ",xterm*:extkeys"
 set -g allow-passthrough on
 setw -g aggressive-resize on
 `

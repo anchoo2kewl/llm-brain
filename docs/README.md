@@ -20,6 +20,7 @@ Every feature of llm-brain, one page per area. Start with [Getting started](gett
 | [LLM roles and gateway](llm-roles-and-gateway.md) | Implementer and reviewer roles, `bin/llm-run`, the CLIProxyAPI account gateway, priorities, quota |
 | [Team chat](chat.md) | Slack in the hub, `bin/chat-watch`, trusted people, notes, digest, stopping an issue |
 | [Shared memory](memory.md) | Lessons agents share, context packs, presence, TaskAI copy, importing Claude's memories |
+| [MCP control](mcp.md) | Manage hubs, sessions, moves, clones and workspaces from any MCP client with `bin/brain-mcp` |
 | [Jev](jev.md) | `bin/jev`: typed yes/no decisions from any agent |
 
 ## Hub

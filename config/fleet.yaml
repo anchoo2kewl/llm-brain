@@ -51,10 +51,14 @@ host_name: ""                   # how this machine is named in comments and noti
                                 # Set it per machine in ~/.config/llm-brain/local.yaml. Claims still use `hostname -s`.
 
 # Intake: every open issue assigned to the owner whose author is in `authors`. No label needed.
+# A bot is never an author; it gets in only through a `bot_authors` rule (see docs/configuration.md).
 intake:
   repos: []                     # e.g. [acme/platform]
   assignee: ""                  # usually owner.github
   authors: []                   # who may hand you work, e.g. [teammate-a, teammate-b]
+  bot_authors: []               # bots that may hand you work, each only with ALL of: every label in require_labels,
+                                # a repo owned by one of repo_owners, and assigned to `assignee`. e.g.
+                                # [{login: "github-actions[bot]", require_labels: [security-fix], repo_owners: [acme]}]
   created_since: "1970-01-01"   # ignore older backlog
   skip_labels: [agent:stop, agent:done]
   max_in_flight: 2              # issues the fleet owns at once; the next starts when one is closed/merged

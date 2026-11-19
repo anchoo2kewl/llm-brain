@@ -88,13 +88,32 @@ Which issues the fleet takes. See [Fleet](fleet.md#intake).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `intake.repos` | `[]` | Repos to take issues from, e.g. `[acme/platform]`. The first one is where babysat PRs look up their issue. |
+| `intake.repos` | `[]` | Repos to take issues from, e.g. `[acme/platform]`. A babysat PR looks up its issue in its own repo when that repo is listed here, otherwise in the first one. |
 | `intake.assignee` | `""` | The assignee to look for, usually your login. Also used as "me" when skipping your own PRs in review. |
 | `intake.authors` | `[]` | Who may hand you work. Issues by anyone else are ignored. |
+| `intake.bot_authors` | `[]` | Bots that may hand you work, with conditions. See below. |
 | `intake.created_since` | `1970-01-01` | Ignore issues created before this date. |
 | `intake.skip_labels` | `[agent:stop, agent:done]` | Issues with any of these are skipped (as are claimed, PR-open and blocked ones). |
 | `intake.max_in_flight` | `2` | Issues the fleet owns at once, across all machines. |
 | `intake.skip_if_my_open_pr` | `true` | Skip an issue that one of your open PRs already mentions. |
+
+`intake.bot_authors` lets an automated issue filer in, such as a scheduled workflow that files a "bump this
+vulnerable dependency" issue. Each rule takes an issue from that bot only when all of these hold:
+
+| Key | Meaning |
+| --- | --- |
+| `login` | The bot. `github-actions[bot]`, `app/github-actions` (what `gh` prints) and `github-actions` all mean the same bot, and the author must be a bot account. |
+| `require_labels` | Every one of these labels is on the issue. |
+| `repo_owners` | The issue's repo belongs to one of these users or orgs. |
+
+The issue must also be assigned to `intake.assignee`. An empty `require_labels` or `repo_owners` matches nothing.
+Every other intake rule (repos, `created_since`, skip labels, `max_in_flight`, the claim) applies as usual.
+
+```yaml
+intake:
+  bot_authors:
+    - {login: "github-actions[bot]", require_labels: [security-fix], repo_owners: [acme]}
+```
 
 ### `labels`
 
