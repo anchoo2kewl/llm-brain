@@ -42,6 +42,15 @@ struct BrainHubApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard let id = Bundle.main.bundleIdentifier,
+              let existing = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier })
+        else { return }
+        existing.activate()
+        NSApp.terminate(nil)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// A Dock click with no window open brings one back.
