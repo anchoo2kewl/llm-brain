@@ -98,7 +98,12 @@ class Updater:
         if platform.system()=='Darwin':
             domain='gui/'+str(os.getuid())
             if action=='stop':run('/bin/launchctl','bootout',domain+'/'+LABEL)
-            else:run('/bin/launchctl','bootstrap',domain,str(Path.home()/'Library/LaunchAgents'/ (LABEL+'.plist')))
+            else:
+                for attempt in range(10):
+                    try:run('/bin/launchctl','bootstrap',domain,str(Path.home()/'Library/LaunchAgents'/ (LABEL+'.plist')));break
+                    except subprocess.CalledProcessError:
+                        if attempt==9:raise
+                        time.sleep(.2)
         else:run('systemctl','--user',action,self.config.get('service','llm-brain-hub.service'))
     def healthy_version(self,want):
         for _ in range(40):
@@ -124,11 +129,13 @@ class Updater:
             self.service('stop')
             try:
                 os.replace(staged,self.binary)
+                if run(str(self.binary),'version',timeout=5)!=manifest['version']:raise RuntimeError('Installed hub version mismatch')
                 self.service('start')
                 if not self.healthy_version(manifest['version']):raise RuntimeError('New hub failed its health check')
             except Exception:
                 with contextlib.suppress(Exception):self.service('stop')
                 restore=Path(tmp)/'restore';shutil.copy2(backup,restore);os.replace(restore,self.binary)
+                run(str(self.binary),'version',timeout=5)
                 self.service('start')
                 if not self.healthy_version(previous):raise RuntimeError('Update failed and the previous hub did not recover')
                 self.save(state='rolled_back',failed_version=manifest['version'],previous_version=previous,message='New hub failed; previous hub restored')
