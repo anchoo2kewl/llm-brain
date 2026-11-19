@@ -189,6 +189,7 @@ struct Sidebar: View {
                 Section {
                     if m.terminals.isEmpty && m.elsewhere.isEmpty {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
+                            .onDrop(of: [.utf8PlainText, .plainText], isTargeted: nil) { dropped($0, on: m.name) }
                     }
                     ForEach(m.terminals) { e in
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded, end: { end(e.ref) })
@@ -196,12 +197,7 @@ struct Sidebar: View {
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
                                 Button("Move to Top") { model.moveToTop(e.ref, in: m) }
-                                let others = model.machines.map(\.name).filter { $0 != e.terminal.host }
-                                if !others.isEmpty {
-                                    Menu("Move to Machine") {
-                                        ForEach(others, id: \.self) { n in Button(model.machineLabel(n)) { migrate(e.ref, to: n) } }
-                                    }
-                                }
+                                MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
                                 Divider()
@@ -209,6 +205,8 @@ struct Sidebar: View {
                             }
                     }
                     .onMove { from, to in model.move(in: m, from: from, to: to) }
+                    // A row dragged here from another machine's section moves (⌥: clones) the terminal here.
+                    .onInsert(of: [.utf8PlainText, .plainText]) { _, providers in _ = dropped(providers, on: m.name) }
                     if !m.elsewhere.isEmpty {
                         DisclosureGroup("Running elsewhere (\(m.elsewhere.count))") {
                             ForEach(m.elsewhere) { s in
@@ -225,25 +223,25 @@ struct Sidebar: View {
                 } header: {
                     Text(model.machineLabel(m.name)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         .help("Drop a terminal here to move its conversation to \(model.machineLabel(m.name))")
-                        .dropDestination(for: String.self) { items, _ in
-                            guard let ref = items.first.flatMap(TerminalRef.init(dragText:)) else { return false }
-                            migrate(ref, to: m.name)
-                            return true
-                        }
+                        .onDrop(of: [.utf8PlainText, .plainText], isTargeted: nil) { dropped($0, on: m.name) }
                 }
             }
         }
         .overlay {
             if !model.loaded { ProgressView() }
         }
+        .safeAreaInset(edge: .bottom) { MachineDropPanel { ref, n, clone in migrate(ref, to: n, clone: clone) } }
     }
 
-    /// Move a terminal to another machine; the moved terminal takes its place when it is live.
-    private func migrate(_ ref: TerminalRef, to machine: String) {
-        guard model.terminal(ref)?.host != machine, model.migrations[ref].map(\.done) ?? true else { return }
-        Task {
-            do { if let dest = try await model.migrate(ref, to: machine) { selection = dest } } catch { failure = error.localizedDescription }
+    private func dropped(_ providers: [NSItemProvider], on machine: String) -> Bool {
+        AppModel.droppedRef(providers) { ref in
+            if model.terminal(ref)?.host != machine { migrate(ref, to: machine, clone: AppModel.cloneModifier) }
         }
+    }
+
+    /// Move (or clone) a terminal to another machine; the new terminal is selected when it is live.
+    private func migrate(_ ref: TerminalRef, to machine: String, clone: Bool = false) {
+        model.startMigration(ref, to: machine, clone: clone, done: { selection = $0 }, failed: { failure = $0 })
     }
 
     private func continueLive(_ s: LiveSession) {

@@ -60,7 +60,7 @@ struct TerminalRow: View {
                     .padding(.leading, 16)
             }
             if let m = model.migrations[ref], let p = m.current {
-                Label(m.error.map { "Move failed: \($0)" } ?? (m.done ? "Moved to \(m.to)" : "\(Migration.label(p.name, to: m.to))…"),
+                Label(m.error.map { "\(m.isClone ? "Clone" : "Move") failed: \($0)" } ?? (m.done ? "\(m.isClone ? "Cloned" : "Moved") to \(model.machineLabel(m.to))" : "\(Migration.label(p.name, to: model.machineLabel(m.to)))…"),
                       systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
                     .font(.caption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .lineLimit(3).padding(.leading, 16).help(p.detail ?? "")

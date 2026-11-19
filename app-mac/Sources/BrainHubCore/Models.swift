@@ -234,11 +234,14 @@ public struct Migration: Decodable, Sendable, Equatable {
     }
     public var id: String
     public var to: String
+    /// move | clone (a clone forks the conversation there and the source keeps running); older hubs send none.
+    public var mode: String?
     public var phases: [Phase]
     public var dest: Int64?
     public var done: Bool
     public var error: String?
-    enum CodingKeys: String, CodingKey { case id, to, phases, dest = "dest_terminal", done, error }
+    enum CodingKeys: String, CodingKey { case id, to, mode, phases, dest = "dest_terminal", done, error }
+    public var isClone: Bool { mode == "clone" }
 
     /// The phase to show: the one running or failed, else the last one done.
     public var current: Phase? {
@@ -290,6 +293,8 @@ public enum Paths {
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }
     public static func migrate(_ id: Int64) -> String { "/api/terminals/\(id)/migrate" }
+    public static func workspace(since: Int64) -> String { "/api/workspace?since=\(since)" }
+    public static let workspaceState = "/api/workspace/state"
     public static func migration(_ job: String) -> String {
         "/api/migrations/" + (job.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
     }
@@ -341,6 +346,30 @@ public enum CLI: String, CaseIterable, Identifiable, Sendable {
         case .codex: "Codex"
         case .gemini: "Gemini"
         case .shell: "Shell"
+        }
+    }
+}
+
+/// `GET /api/workspace`: what agents (the Brain MCP) asked the open workspaces to show, after `since`. Terminal ids
+/// are that hub's own.
+public struct WorkspaceUpdate: Decodable, Sendable, Equatable {
+    public struct Intent: Decodable, Sendable, Equatable {
+        public var seq: Int64
+        public var action: String // open | focus | layout | zoom | unzoom
+        public var terminal: Int64?
+        public var layout: String?
+        public var client: String?
+    }
+    public var seq: Int64
+    public var intents: [Intent]?
+
+    /// The requests for every client or for `kind` ("mac" takes "mac:2" too), in order. The first answer
+    /// (`last` < 0) only marks where to start, so old requests don't replay.
+    public func pending(after last: Int64, kind: String) -> [Intent] {
+        guard last >= 0 else { return [] }
+        return (intents ?? []).filter { i in
+            let c = i.client ?? ""
+            return i.seq > last && (c.isEmpty || c == kind || c.hasPrefix(kind + ":"))
         }
     }
 }

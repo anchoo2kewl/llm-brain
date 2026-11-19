@@ -264,10 +264,52 @@ final class AppModel {
             }
             primed = true
             updateBadge()
+            await followWorkspace(hubs: Set(all.map(\.hub)).union([client.base]))
         } catch {
             guard client.base == hub else { return }
             hubError = error.localizedDescription
             loaded = true
+        }
+    }
+
+    // MARK: agents steering the workspace
+
+    /// The last workspace request applied, per hub (-1: not looked yet), and the pane state last reported.
+    @ObservationIgnored private var workspaceSeq: [String: Int64] = [:]
+    @ObservationIgnored private var reported: [String: String] = [:]
+
+    /// Agents (the Brain MCP) ask a hub to open, focus or zoom its terminals in the open workspaces; this applies the
+    /// requests in the key window (open and focus bring it forward) and tells each hub what the windows show.
+    /// The terminal id is the asking hub's, so it never picks another hub's terminal with the same number.
+    private func followWorkspace(hubs: Set<String>) async {
+        for base in hubs {
+            guard let c = try? HubClient(base: base),
+                  let w = try? await c.get(Paths.workspace(since: max(workspaceSeq[base] ?? -1, 0)), as: WorkspaceUpdate.self, timeout: 3)
+            else { continue }
+            for i in w.pending(after: workspaceSeq[base] ?? -1, kind: "mac") {
+                let panes = keyPanes ?? windows.lazy.compactMap(\.value).first
+                switch i.action {
+                case "open", "focus":
+                    guard let id = i.terminal, terminal(TerminalRef(hub: base, id: id))?.isOpen == true else { continue }
+                    showMain()
+                    (keyPanes ?? panes)?.show(TerminalRef(hub: base, id: id))
+                case "zoom": if panes?.tree.zoomed == nil { panes?.tree.toggleZoom() }
+                case "unzoom": if panes?.tree.zoomed != nil { panes?.tree.toggleZoom() }
+                default: break // layouts are the web workspace's; here a window splits as you choose
+                }
+            }
+            workspaceSeq[base] = w.seq
+            // What the windows show of this hub's terminals.
+            for (n, p) in windows.compactMap(\.value).enumerated() {
+                let slots = p.tree.panes.compactMap { p.tree.terminals[$0] }.filter { $0.hub == base }.map(\.id)
+                let focus = p.tree.focusedTerminal.flatMap { $0.hub == base ? $0.id : nil } ?? 0
+                let state: [String: any Sendable] = ["client": "mac:\(n + 1)", "slots": slots, "focus": focus, "zoom": p.tree.zoomed != nil]
+                let key = "\(base) \(n) \(slots) \(focus) \(p.tree.zoomed != nil)"
+                guard reported["\(base) \(n)"] != key else { continue }
+                reported["\(base) \(n)"] = key
+                struct Empty: Decodable {}
+                _ = try? await c.post(Paths.workspaceState, json: state, as: Empty.self, timeout: 3)
+            }
         }
     }
 
@@ -338,13 +380,15 @@ final class AppModel {
     }
 
     /// Move a terminal's conversation to another machine. Its hub runs the move as a job (it goes on if the app
-    /// quits); this follows the phases. Returns the new terminal; on a failure the old one still runs.
-    func migrate(_ ref: TerminalRef, to machine: String) async throws -> TerminalRef? {
+    /// quits); this follows the phases. Returns the new terminal; on a failure the old one still runs. A clone forks
+    /// the conversation there and keeps the source.
+    func migrate(_ ref: TerminalRef, to machine: String, clone: Bool = false) async throws -> TerminalRef? {
         struct Started: Decodable { var job: String }
         let c = try HubClient(base: ref.hub)
         let started: Started
         do {
-            started = try await c.post(Paths.migrate(ref.id), json: ["to": machine, "close_source": true], as: Started.self, timeout: 30)
+            let body: [String: any Sendable] = clone ? ["to": machine, "clone": true] : ["to": machine, "close_source": true]
+            started = try await c.post(Paths.migrate(ref.id), json: body, as: Started.self, timeout: 30)
         } catch let e as HubError where e.message.contains("404") || e.message.contains("405") {
             throw HubError("This hub can't move terminals yet: update the hub.")
         }
@@ -357,10 +401,10 @@ final class AppModel {
                 misses = 0
                 if m.done {
                     await refresh()
-                    if let e = m.error { throw HubError("Move failed: \(e). The terminal still runs where it was.") }
+                    if let e = m.error { throw HubError("\(clone ? "Clone" : "Move") failed: \(e). The terminal still runs where it was.") }
                     return m.dest.map { TerminalRef(hub: ref.hub, id: $0) }
                 }
-            } catch let e as HubError where e.message.hasPrefix("Move failed") {
+            } catch let e as HubError where e.message.hasPrefix("Move failed") || e.message.hasPrefix("Clone failed") {
                 throw e
             } catch {
                 misses += 1 // the hub restarting or the network blinking: the job goes on there

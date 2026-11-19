@@ -26,6 +26,8 @@ codesign --force --sign - "$app/Contents/MacOS/brain-attach"
 # Ghostty's terminfo and themes: libghostty finds them next to the executable, so a `theme =` line works.
 if [ -d Vendor/share ]; then cp -R Vendor/share/terminfo Vendor/share/ghostty "$app/Contents/Resources/"; fi
 cp ../app/src-tauri/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
+# The MCP bridge any MCP client starts (Settings → MCP shows the config).
+install -m 755 ../bin/brain-mcp "$app/Contents/Resources/brain-mcp"
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

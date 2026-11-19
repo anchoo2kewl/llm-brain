@@ -99,11 +99,12 @@ Choose **New Terminal Window** (Cmd+N on macOS, Ctrl+N on Linux) in the app menu
 ## End or move a terminal
 
 - **End:** hover over a terminal in the sidebar and click **×**. It ends the terminal's CLI on its machine at once. The × also shows on keyboard focus, and VoiceOver offers **End Terminal** on the row. The web workspace has the same × on each terminal and pane.
-- **Move to another machine:** drag a terminal onto another machine's name in the sidebar, or right-click it and choose **Move to Machine**. In the web workspace, drag it onto a machine under the terminal list, or use **Actions → Move focused terminal to**.
+- **Move to another machine:** drag a terminal's sidebar row, or the ⠿ grip at a pane's top corner, onto a machine: its tile under the terminal list, its name, or any of its terminals in the sidebar. Or right-click the row or the grip and choose **Move to Machine**. In the web workspace, drag a terminal or a pane's ⠿ grip onto a machine under the terminal list, or use **Actions → Move focused terminal to**.
+- **Clone to another machine:** the same, holding ⌥ (Alt) as you drop, or **Clone to Machine** in the menus (**Actions → Clone focused terminal to** in the web workspace). A clone starts a new conversation on the destination with all of the source's context (Claude Code `--fork-session`, `codex fork`); the source keeps running and neither one writes the other's transcript.
 
 The hub runs the move, so it finishes even if the app quits or the laptop goes offline. The row shows each phase as it happens:
 
-1. **Check readiness:** the terminal runs Claude Code or Codex, it has a conversation, and the destination machine is connected to the hub. Nothing changes if a check fails.
+1. **Check readiness:** the terminal runs Claude Code or Codex, it has a conversation, the destination machine is connected to the hub, and the destination has the same CLI. A Claude Code conversation resumes only in Claude Code and a Codex one only in Codex, so the destination needs that CLI installed and logged in. Nothing changes if a check fails.
 2. **Export:** the conversation file from the source machine, or the hub's copy when that machine is offline.
 3. **Copy:** the file goes to the destination machine, where the CLI looks for it.
 4. **Resume:** a new terminal on the destination continues the same conversation.
@@ -117,6 +118,8 @@ What does not move:
 - Only the conversation moves. Uncommitted changes, untracked files, stashes and local branches stay on the source machine. Commit and push them first, then pull on the destination.
 - A git worktree is not copied. If the same folder (under the home folder) exists on the destination, the conversation runs there. If not, it runs in the destination's home folder, and the **Copy** phase says so.
 - Shell terminals and sessions started outside the hub cannot move. Continue such a session in a hub terminal first.
+- Running processes do not move: a dev server, a build or a test run in the source terminal stops with the source (a clone leaves them running there). The CLI resumes the conversation, not the process state.
+- The terminal's own hub runs the move, and the terminal number is that hub's. With two hubs listed (for example a laptop and a Studio), each terminal is moved by the hub that lists it, so terminal 12 on one hub is never confused with terminal 12 on another.
 - Moving needs a hub that supports it. An older hub answers with "update the hub", and the web workspace hides the drop targets.
 
 ## Quick search
