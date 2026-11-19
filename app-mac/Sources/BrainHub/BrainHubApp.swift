@@ -21,6 +21,8 @@ struct BrainHubApp: App {
         Window("Keyboard Shortcuts", id: "shortcuts") { ShortcutsView() }
             .defaultSize(width: 560, height: 720)
 
+        Window("Diagnostics", id: "diagnostics") { DiagnosticsView() }
+
         Settings {
             TabView {
                 SettingsView().tabItem { Label("Hubs", systemImage: "server.rack") }
@@ -40,6 +42,15 @@ struct BrainHubApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard let id = Bundle.main.bundleIdentifier,
+              let existing = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier })
+        else { return }
+        existing.activate()
+        NSApp.terminate(nil)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// A Dock click with no window open brings one back.
@@ -50,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            AppDiagnostics.record("app_started version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
             AppModel.shared.requestNotifications()
             KeyRouter.install()
             GlobalHotkey.register()
@@ -89,6 +101,7 @@ struct HubCommands: Commands {
         }
         CommandGroup(replacing: .help) {
             Button(Shortcut.shortcuts.title) { openWindow(id: "shortcuts") }.shortcut(.shortcuts)
+            Button("Diagnostics…") { openWindow(id: "diagnostics") }
             Button(Shortcut.help.title) { openWindow(id: "shortcuts") }.shortcut(.help)
         }
         CommandGroup(after: .newItem) {

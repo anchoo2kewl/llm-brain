@@ -177,6 +177,7 @@ struct Sidebar: View {
     var openInWindow: (TerminalRef) -> Void
     @Binding var failure: String?
     @ViewState private var expanded: Set<TerminalRef> = []
+    @ViewState private var draggingOverSidebar = false
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
@@ -209,12 +210,27 @@ struct Sidebar: View {
                     .onInsert(of: [.utf8PlainText, .plainText]) { _, providers in _ = dropped(providers, on: m.name) }
                     if !m.elsewhere.isEmpty {
                         DisclosureGroup("Running elsewhere (\(m.elsewhere.count))") {
+                            Button("End All Running Elsewhere", role: .destructive) { endElsewhere(m.elsewhere) }
+                                .disabled(!model.endingElsewhere.isEmpty)
                             ForEach(m.elsewhere) { s in
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(s.title.split(separator: "\n").first.map(String.init) ?? s.cli).lineLimit(1)
-                                    Text("\(s.cli) · \(s.cwd)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(s.title.split(separator: "\n").first.map(String.init) ?? s.cli).lineLimit(1)
+                                        Text("\(s.cli) · \(s.cwd)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Button(role: .destructive) { endElsewhere([s]) } label: {
+                                        Image(systemName: "xmark").font(.caption)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("End this session on its machine")
+                                    .accessibilityLabel("End session")
+                                    .disabled(model.endingElsewhere.contains("\(model.hub ?? "")#\(s.id)"))
                                 }
-                                .contextMenu { Button("Continue in a Terminal") { continueLive(s) } }
+                                .contextMenu {
+                                    Button("Continue in a Terminal") { continueLive(s) }
+                                    Button("End Session", role: .destructive) { endElsewhere([s]) }
+                                }
                                 .onTapGesture(count: 2) { continueLive(s) }
                                 .help("Double-click to continue this conversation in a hub terminal")
                             }
@@ -230,7 +246,12 @@ struct Sidebar: View {
         .overlay {
             if !model.loaded { ProgressView() }
         }
-        .safeAreaInset(edge: .bottom) { MachineDropPanel { ref, n, clone in migrate(ref, to: n, clone: clone) } }
+        .onDrop(of: [.utf8PlainText, .plainText], isTargeted: $draggingOverSidebar) { _ in false }
+        .safeAreaInset(edge: .bottom) {
+            if draggingOverSidebar {
+                MachineDropPanel { ref, n, clone in migrate(ref, to: n, clone: clone) }
+            }
+        }
     }
 
     private func dropped(_ providers: [NSItemProvider], on machine: String) -> Bool {
@@ -242,6 +263,17 @@ struct Sidebar: View {
     /// Move (or clone) a terminal to another machine; the new terminal is selected when it is live.
     private func migrate(_ ref: TerminalRef, to machine: String, clone: Bool = false) {
         model.startMigration(ref, to: machine, clone: clone, done: { selection = $0 }, failed: { failure = $0 })
+    }
+
+    private func endElsewhere(_ sessions: [LiveSession]) {
+        Task {
+            var errors: [String] = []
+            for session in sessions {
+                do { try await model.endElsewhere(session) }
+                catch { errors.append(error.localizedDescription) }
+            }
+            if !errors.isEmpty { failure = errors.joined(separator: "\n") }
+        }
     }
 
     private func continueLive(_ s: LiveSession) {

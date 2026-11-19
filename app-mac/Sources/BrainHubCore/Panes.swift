@@ -24,6 +24,11 @@ public struct PaneTree: Equatable, Sendable {
 
     public func pane(showing ref: TerminalRef) -> Int? { terminals.first { $0.value == ref }?.key }
 
+    /// Release every view of an ended terminal while preserving the split layout.
+    public mutating func forget(_ ref: TerminalRef) {
+        terminals = terminals.filter { $0.value != ref }
+    }
+
     /// Show a terminal in the focused pane, or focus the pane that already shows it.
     public mutating func show(_ ref: TerminalRef) {
         if let p = pane(showing: ref) { focus(p) } else { terminals[focused] = ref }

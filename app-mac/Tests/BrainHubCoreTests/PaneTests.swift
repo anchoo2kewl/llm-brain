@@ -129,6 +129,20 @@ import BrainHubCore
         #expect(p == afterMove)
     }
 
+    @Test func forgetEndedTerminalPreservesLayout() {
+        var p = PaneTree(terminal: a)
+        p.split(.horizontal)
+        p.show(b)
+        let frames = p.frames()
+        p.forget(a)
+        #expect(p.pane(showing: a) == nil)
+        #expect(p.focusedTerminal == b)
+        #expect(p.frames() == frames)
+        p.forget(b)
+        #expect(p.terminals.isEmpty)
+        #expect(p.panes.count == 2)
+    }
+
     @Test func atMostNinePanes() {
         var p = PaneTree()
         for i in 0..<8 { let ok = p.split(i % 2 == 0 ? .horizontal : .vertical); #expect(ok) }

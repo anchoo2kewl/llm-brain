@@ -4,6 +4,8 @@
 
 #[cfg(target_os = "linux")]
 mod updates;
+#[cfg(target_os = "linux")]
+mod single_instance;
 mod allow;
 mod config;
 mod hub;
@@ -691,6 +693,8 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            #[cfg(target_os = "linux")]
+            if !single_instance::claim(&handle)? { std::process::exit(0); }
             let cfg_path = app.path().app_config_dir()?.join("hubs.json");
             let cfg = Config::load(&cfg_path);
             let (tx, rx) = mpsc::channel();
