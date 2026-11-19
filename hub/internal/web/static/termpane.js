@@ -100,7 +100,17 @@
       for (var i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 255;
       send(b);
     });
-    if (opts.keys) term.attachCustomKeyEventHandler(opts.keys);
+    // Send the actual modified Enter; Claude's chat:sendNow handles draft and queue together.
+    var provider = opts.provider || "";
+    status(function (s) { provider = s.provider || provider; });
+    function sendNow() { send(provider === "claude" ? "\x1b[13;5u" : "\r"); }
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.key === "Enter" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.type === "keydown") { e.preventDefault(); sendNow(); }
+        return false;
+      }
+      return opts.keys ? opts.keys(e) : true;
+    });
     var rt = null;
     if (window.ResizeObserver) new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(resize, 80); }).observe(el);
     if (window.hubDrop && opts.host) {

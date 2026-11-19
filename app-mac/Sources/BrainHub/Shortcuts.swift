@@ -67,7 +67,7 @@ struct ShortcutsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(["Windows", "Terminals", "Panes"], id: \.self) { group in
                     section(group, Shortcut.all.filter { $0.group == group && !$0.title.hasPrefix("Show Terminal ") }.map { ($0.label, $0.title) }
-                        + (group == "Terminals" ? [("⌘1 … ⌘9", "Show terminal 1 … 9 (sidebar order) in the focused pane")] : [])
+                        + (group == "Terminals" ? [("⌃Enter", "Send draft and queued messages immediately in Claude Code"), ("⌘1 … ⌘9", "Show terminal 1 … 9 (sidebar order) in the focused pane")] : [])
                         + (group == "Windows" ? [(GlobalHotkey.text, "Bring Brain Hub forward from any app (global)")] : []))
                 }
                 section("tmux (prefix \(keys.prefix.description), \(model.keysFile ?? "tmux defaults"))",

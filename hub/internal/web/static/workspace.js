@@ -616,10 +616,17 @@
     if (!t || moving) return;
     if (t.kind === "session") { sayMove("Only hub terminals can move. Continue this session in a terminal first."); return; }
     if (t.host === to) { sayMove((t.title || "This terminal") + " already runs on " + shortHost(to) + "."); return; }
+    var folder = window.prompt("Optional folder on " + shortHost(to) + ":\nLeave blank for the pinned/automatic folder. Enter ~ to use its home folder.\nCode files are not copied.", "");
+    if (folder === null) return;
+    folder = folder.trim();
+    var body = clone ? { to: to, clone: true } : { to: to, close_source: true };
+    if (folder === "~") body.without_folder = true;
+    else if (folder) { body.destination_path = folder; body.pin_path = window.confirm("Pin this folder for future moves from this codebase to " + shortHost(to) + "?"); }
     moving = true;
     var verb = clone ? "Cloning " : "Moving ";
     sayMove(verb + (t.title || "terminal " + id) + " to " + shortHost(to) + "…");
-    fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(clone ? { to: to, clone: true } : { to: to, close_source: true }) })
+    (folder ? fetch("/api/move-folders").then(function (r) { if (!r.ok) throw new Error("update the hub before selecting a folder"); }) : Promise.resolve())
+      .then(function () { return fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { code: r.status, j: j }; }); })
       .then(function (x) {
         if (x.code === 404 || x.code === 405) throw new Error("this hub can't move terminals yet (update the hub)");

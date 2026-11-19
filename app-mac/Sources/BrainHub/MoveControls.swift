@@ -15,8 +15,39 @@ extension AppModel {
         guard t.host != machine else { return failed("\(t.title.isEmpty ? "It" : t.title) already runs on \(machineLabel(machine)).") }
         guard migrations[ref].map(\.done) ?? true else { return }
         Task {
-            do { if let dest = try await migrate(ref, to: machine, clone: clone) { done(dest) } } catch { failed(error.localizedDescription) }
+            do {
+                struct Pins: Decodable { var mappings: [MoveFolderPin] }
+                let c = try HubClient(base: ref.hub)
+                let pins = try? await c.get("/api/move-folders", as: Pins.self)
+                let pinned = pins?.mappings.first { $0.fromHost == t.host && $0.to == machine && Self.portableFolder($0.sourcePath) == Self.portableFolder(t.cwd) }?.destinationPath
+                let alert = NSAlert()
+                alert.messageText = "\(clone ? "Clone" : "Move") to \(machineLabel(machine))"
+                alert.informativeText = "Choose a folder on the destination, or leave it blank for \(pinned.map { "the pinned folder (\($0))" } ?? "automatic folder selection"). Conversation context moves; code files stay on their machine."
+                alert.addButton(withTitle: clone ? "Clone" : "Move")
+                alert.addButton(withTitle: "Cancel")
+                let path = NSTextField(string: "")
+                path.placeholderString = "Optional destination: ~/projects/repo"
+                path.widthAnchor.constraint(equalToConstant: 390).isActive = true
+                let pin = NSButton(checkboxWithTitle: "Pin this path for future moves to this machine", target: nil, action: nil)
+                let home = NSButton(checkboxWithTitle: "Use home folder instead (ignore pinned folder)", target: nil, action: nil)
+                let stack = NSStackView(views: [path, pin, home])
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 10
+                alert.accessoryView = stack
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                let folder = path.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                let useHome = home.state == .on
+                if !useHome && pin.state == .on && folder.isEmpty { throw HubError("Enter a destination folder to pin.") }
+                if pins == nil && (useHome || !folder.isEmpty) { throw HubError("Update this hub before choosing a destination folder.") }
+                if let dest = try await migrate(ref, to: machine, clone: clone, destinationPath: useHome ? "" : folder, pinPath: !useHome && pin.state == .on, withoutFolder: useHome) { done(dest) }
+            } catch { failed(error.localizedDescription) }
         }
+    }
+
+    static func portableFolder(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "^/(Users|home)/[^/]+(?=/|$)", with: "~", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     /// A dropped sidebar row or pane grip: "<hub>#<id>", as text.
@@ -127,4 +158,12 @@ struct PaneGrip: View {
             Button("OK") { failure = nil }
         } message: { Text(failure ?? "") }
     }
+}
+
+struct MoveFolderPin: Decodable {
+    var fromHost: String
+    var sourcePath: String
+    var to: String
+    var destinationPath: String
+    enum CodingKeys: String, CodingKey { case fromHost = "from_host", sourcePath = "source_path", to, destinationPath = "destination_path" }
 }

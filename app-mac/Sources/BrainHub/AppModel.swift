@@ -415,12 +415,14 @@ final class AppModel {
     /// Move a terminal's conversation to another machine. Its hub runs the move as a job (it goes on if the app
     /// quits); this follows the phases. Returns the new terminal; on a failure the old one still runs. A clone forks
     /// the conversation there and keeps the source.
-    func migrate(_ ref: TerminalRef, to machine: String, clone: Bool = false) async throws -> TerminalRef? {
+    func migrate(_ ref: TerminalRef, to machine: String, clone: Bool = false, destinationPath: String = "", pinPath: Bool = false, withoutFolder: Bool = false) async throws -> TerminalRef? {
         struct Started: Decodable { var job: String }
         let c = try HubClient(base: ref.hub)
         let started: Started
         do {
-            let body: [String: any Sendable] = clone ? ["to": machine, "clone": true] : ["to": machine, "close_source": true]
+            var body: [String: any Sendable] = clone ? ["to": machine, "clone": true] : ["to": machine, "close_source": true]
+            if !destinationPath.isEmpty { body["destination_path"] = destinationPath; body["pin_path"] = pinPath }
+            if withoutFolder { body["without_folder"] = true }
             started = try await c.post(Paths.migrate(ref.id), json: body, as: Started.self, timeout: 30)
         } catch let e as HubError where e.message.contains("404") || e.message.contains("405") {
             throw HubError("This hub can't move terminals yet: update the hub.")
