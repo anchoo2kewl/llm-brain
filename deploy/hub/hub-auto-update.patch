@@ -1,24 +1,27 @@
-From 917b9fbbf156d254c3f67cae2478d00887f41eb1 Mon Sep 17 00:00:00 2001
+From 8ce9719df47948c79605cc51be6f310467fc2902 Mon Sep 17 00:00:00 2001
 From: Anshuman Biswas <abiswas@elastio.com>
 Date: Thu, 19 Nov 2026 12:55:35 -0500
 Subject: [PATCH] Add independent hub auto-updates, readiness, rollback and MCP
  controls
 
 ---
- bin/brain-hub-update                | 190 ++++++++++++++++++++++++++++
- bin/brain-mcp                       |  84 +++++++++++-
- hub/internal/web/hub_update.go      | 123 ++++++++++++++++++
- hub/internal/web/hub_update_busy.go |  16 +++
- hub/internal/web/hub_update_test.go |  71 +++++++++++
- hub/internal/web/server.go          |   4 +
- hub/main.go                         |   2 +
- tests/brain_mcp_test.py             |  51 ++++++++
- tests/hub_update_test.py            |  46 +++++++
- 9 files changed, 585 insertions(+), 2 deletions(-)
+ bin/brain-hub-update                       | 190 +++++++++++++++++++++
+ bin/brain-mcp                              |  84 ++++++++-
+ hub/internal/web/hub_update.go             | 123 +++++++++++++
+ hub/internal/web/hub_update_busy.go        |  16 ++
+ hub/internal/web/hub_update_test.go        |  71 ++++++++
+ hub/internal/web/server.go                 |   4 +
+ hub/internal/web/workspace_ctl.go          |  75 ++++++++
+ hub/internal/web/workspace_persist_test.go |  28 +++
+ hub/main.go                                |   2 +
+ tests/brain_mcp_test.py                    |  51 ++++++
+ tests/hub_update_test.py                   |  46 +++++
+ 11 files changed, 688 insertions(+), 2 deletions(-)
  create mode 100755 bin/brain-hub-update
  create mode 100644 hub/internal/web/hub_update.go
  create mode 100644 hub/internal/web/hub_update_busy.go
  create mode 100644 hub/internal/web/hub_update_test.go
+ create mode 100644 hub/internal/web/workspace_persist_test.go
  create mode 100644 tests/hub_update_test.py
 
 diff --git a/bin/brain-hub-update b/bin/brain-hub-update
@@ -614,6 +617,159 @@ index 33550e4..949af0c 100644
  	static, _ := fs.Sub(staticFS, "static")
  	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
  	mux.HandleFunc("GET /{$}", s.home)
+diff --git a/hub/internal/web/workspace_ctl.go b/hub/internal/web/workspace_ctl.go
+index e32fc9c..a0cdb96 100644
+--- a/hub/internal/web/workspace_ctl.go
++++ b/hub/internal/web/workspace_ctl.go
+@@ -4,7 +4,10 @@ import (
+ 	"encoding/json"
+ 	"errors"
+ 	"io"
++	"log"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"slices"
+ 	"strconv"
+ 	"sync"
+@@ -38,6 +41,8 @@ type wsClient struct {
+ }
+ 
+ type workspaceCtl struct {
++	stateFile string
++
+ 	mu      sync.Mutex
+ 	seq     int64
+ 	intents []wsIntent
+@@ -55,6 +60,7 @@ func (c *workspaceCtl) push(i wsIntent) wsIntent {
+ 	if len(c.intents) > wsKeep {
+ 		c.intents = c.intents[len(c.intents)-wsKeep:]
+ 	}
++	c.saveLocked()
+ 	return i
+ }
+ 
+@@ -74,6 +80,7 @@ func (c *workspaceCtl) report(x wsClient) {
+ 	}
+ 	x.At = time.Now()
+ 	c.clients[x.Client] = x
++	c.saveLocked()
+ }
+ 
+ func (c *workspaceCtl) since(n int64) (int64, []wsIntent, []wsClient) {
+@@ -94,6 +101,7 @@ func (c *workspaceCtl) since(n int64) (int64, []wsIntent, []wsClient) {
+ }
+ 
+ func (s *Server) workspaceCtlRoutes(g, p func(string, http.HandlerFunc)) {
++	s.Agents.ws.restore(filepath.Join(s.StateDir, "workspace-clients.json"))
+ 	g("GET /api/workspace", s.workspaceGet)
+ 	p("POST /api/workspace/intent", s.workspaceIntent)
+ 	p("POST /api/workspace/state", s.workspaceState)
+@@ -148,3 +156,70 @@ func (s *Server) workspaceState(w http.ResponseWriter, r *http.Request) {
+ 	s.Agents.ws.report(x)
+ 	w.WriteHeader(http.StatusNoContent)
+ }
++
++// Keep sequence numbers and window reports across hub restarts; existing desktop clients may not
++// re-report an unchanged pane tree and must not lose the first command after a sequence reset.
++type workspaceSaved struct {
++	Seq     int64
++	Intents []wsIntent
++	Clients map[string]wsClient
++}
++
++func (c *workspaceCtl) restore(file string) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.stateFile != "" {
++		return
++	}
++	c.stateFile = file
++	f, err := os.Open(file)
++	if os.IsNotExist(err) {
++		return
++	}
++	if err != nil {
++		log.Printf("workspace restore: %v", err)
++		return
++	}
++	defer f.Close()
++	var state workspaceSaved
++	if err := json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&state); err != nil {
++		log.Printf("workspace restore: %v", err)
++		return
++	}
++	if state.Seq < 0 || len(state.Intents) > wsKeep || len(state.Clients) > wsMaxClients {
++		log.Printf("workspace restore: invalid snapshot")
++		return
++	}
++	c.seq, c.intents, c.clients = state.Seq, state.Intents, state.Clients
++}
++func (c *workspaceCtl) saveLocked() {
++	if c.stateFile == "" {
++		return
++	}
++	data, err := json.Marshal(workspaceSaved{c.seq, c.intents, c.clients})
++	if err != nil {
++		return
++	}
++	if err = os.MkdirAll(filepath.Dir(c.stateFile), 0700); err != nil {
++		log.Printf("workspace save: %v", err)
++		return
++	}
++	f, err := os.CreateTemp(filepath.Dir(c.stateFile), "workspace-*")
++	if err != nil {
++		log.Printf("workspace save: %v", err)
++		return
++	}
++	name := f.Name()
++	defer os.Remove(name)
++	if _, err = f.Write(data); err == nil {
++		err = f.Close()
++	} else {
++		f.Close()
++	}
++	if err == nil {
++		err = os.Rename(name, c.stateFile)
++	}
++	if err != nil {
++		log.Printf("workspace save: %v", err)
++	}
++}
+diff --git a/hub/internal/web/workspace_persist_test.go b/hub/internal/web/workspace_persist_test.go
+new file mode 100644
+index 0000000..9df8e56
+--- /dev/null
++++ b/hub/internal/web/workspace_persist_test.go
+@@ -0,0 +1,28 @@
++package web
++
++import (
++	"path/filepath"
++	"testing"
++)
++
++func TestWorkspaceSurvivesHubRestart(t *testing.T) {
++	file := filepath.Join(t.TempDir(), "workspace.json")
++	var before workspaceCtl
++	before.restore(file)
++	first := before.push(wsIntent{Action: "open", Terminal: 7, Client: "mac:1"})
++	before.report(wsClient{Client: "mac:1", Slots: []int64{7}, Focus: 7})
++	var after workspaceCtl
++	after.restore(file)
++	seq, intents, clients := after.since(0)
++	if seq != first.Seq || len(intents) != 1 || len(clients) != 1 || clients[0].Focus != 7 {
++		t.Fatalf("lost workspace: %d %+v %+v", seq, intents, clients)
++	}
++	next := after.push(wsIntent{Action: "unzoom", Client: "mac:1"})
++	if next.Seq != first.Seq+1 {
++		t.Fatal("sequence reset")
++	}
++	after.restore(file)
++	if n, _, _ := after.since(0); n != next.Seq {
++		t.Fatal("second listener reset workspace")
++	}
++}
 diff --git a/hub/main.go b/hub/main.go
 index 6f668d7..8fefaaa 100644
 --- a/hub/main.go

@@ -35,3 +35,5 @@ Package the deployed migration-service source, preserving its existing session f
     python3 deploy/package-hub-release.py 0.1.0 --source /path/to/migration-service --out /tmp/hub-release-0.1.0
 
 The packager tests the source, builds Darwin/Linux arm64/amd64 binaries, signs Darwin binaries, and creates hub-update.json plus the updater/MCP support assets. It refuses an old public hub snapshot that lacks the installed migration API. Build on a Mac to sign the Darwin assets. Publish all output assets under hub-v0.1.0, marking it as not latest so the desktop client's latest-release endpoint remains client-v0.1.7. Create a draft, upload/verify all assets, and publish only after validation. Future hub releases use the same hub-v channel and manifest schema.
+
+The migration-service update also persists MCP workspace reports and sequence numbers across restarts, so unchanged desktop panes remain discoverable and the first command after an update is retained.
