@@ -12,6 +12,8 @@ let package = Package(
         .executableTarget(
             name: "BrainHub",
             dependencies: ["BrainHubCore", "GhosttyKit"],
+            // Exercise native callback actor boundaries in debug and optimized debug tests.
+            swiftSettings: [.unsafeFlags(["-enable-actor-data-race-checks"], .when(configuration: .debug))],
             linkerSettings: [
                 .linkedLibrary("c++"),
                 .linkedFramework("Carbon"),
@@ -21,5 +23,6 @@ let package = Package(
                 .linkedFramework("IOSurface"),
             ]),
         .testTarget(name: "BrainHubCoreTests", dependencies: ["BrainHubCore"]),
+        .testTarget(name: "BrainHubTests", dependencies: ["BrainHub"]),
     ]
 )
