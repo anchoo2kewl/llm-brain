@@ -60,6 +60,31 @@ final class AppModel {
     }
 
     var hub: String? { config.selected }
+    private var nodeByURL: [String: String] = [:]
+    private var lastIdentityCheck: [String: Date] = [:]
+
+    func machineLabel(_ node: String) -> String {
+        if nodes?.me.node == node, let saved = config.selectedHub { return saved.name }
+        return config.hubs.first { nodeByURL[$0.url] == node }?.name ?? node
+    }
+
+    private func rememberNodes(_ cluster: ClusterNodes, base: String) {
+        nodeByURL[base] = cluster.me.node
+        for peer in cluster.peers where peer.ok {
+            if let url = try? HubURL.validate(peer.url) { nodeByURL[url] = peer.info.node }
+        }
+        // A saved loopback or HTTPS address can differ from the peer's advertised address.
+        for saved in config.hubs where nodeByURL[saved.url] == nil {
+            if let last = lastIdentityCheck[saved.url], Date().timeIntervalSince(last) < 60 { continue }
+            lastIdentityCheck[saved.url] = Date()
+            Task {
+                guard let client = try? HubClient(base: saved.url),
+                      let cluster = try? await client.get(Paths.nodes, as: ClusterNodes.self, timeout: 3)
+                else { return }
+                nodeByURL[saved.url] = cluster.me.node
+            }
+        }
+    }
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
@@ -222,6 +247,7 @@ final class AppModel {
                 }
             }
             guard client.base == hub else { return } // switched hubs meanwhile
+            rememberNodes(nodes, base: client.base)
             let fresh = waiting.subtracting(inboxWaiting)
             (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
             let inFront = NSApp.isActive ? focused : nil

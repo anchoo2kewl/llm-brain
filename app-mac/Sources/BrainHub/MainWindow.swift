@@ -199,7 +199,7 @@ struct Sidebar: View {
                                 let others = model.machines.map(\.name).filter { $0 != e.terminal.host }
                                 if !others.isEmpty {
                                     Menu("Move to Machine") {
-                                        ForEach(others, id: \.self) { n in Button(n) { migrate(e.ref, to: n) } }
+                                        ForEach(others, id: \.self) { n in Button(model.machineLabel(n)) { migrate(e.ref, to: n) } }
                                     }
                                 }
                                 Button("Open in New Window") { openInWindow(e.ref) }
@@ -223,8 +223,8 @@ struct Sidebar: View {
                         }
                     }
                 } header: {
-                    Text(m.name).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                        .help("Drop a terminal here to move its conversation to \(m.name)")
+                    Text(model.machineLabel(m.name)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        .help("Drop a terminal here to move its conversation to \(model.machineLabel(m.name))")
                         .dropDestination(for: String.self) { items, _ in
                             guard let ref = items.first.flatMap(TerminalRef.init(dragText:)) else { return false }
                             migrate(ref, to: m.name)
