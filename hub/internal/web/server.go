@@ -37,6 +37,11 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
+	HubUpdateVersion string
+	HubUpdateCommand string
+
+	ReviewHTTP *http.Client // optional transport for the existing Telegram connector
+
 	Store    *store.Store
 	Engine   *ingest.Engine
 	StateDir string // where status.json lives
@@ -80,6 +85,7 @@ func New(s *store.Store, e *ingest.Engine, stateDir, host string, lg *log.Logger
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.hubUpdateRoutes(mux)
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.home)
@@ -113,6 +119,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerInsights(mux)
 	s.sessionRoutes(mux)
 	s.memoryRoutes(mux)
+	mux.HandleFunc("POST /api/reviews/alert", s.tailnetOnly(s.sameSite(s.reviewAlert)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /api/ship/offsets", s.tailnetOnly(s.shipOffsets))
 	mux.HandleFunc("POST /api/ship/chunk", s.tailnetOnly(s.shipChunk))

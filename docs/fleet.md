@@ -19,7 +19,8 @@ Only one tick runs at a time on a machine. A tick takes a lock in `~/.local/stat
 An issue is a candidate when all of these hold:
 
 - It is open in one of `intake.repos` and assigned to `intake.assignee`.
-- Its author is in `intake.authors`.
+- Its author is in `intake.authors`, or it was filed by a bot that an `intake.bot_authors` rule lets in (the issue
+  has the rule's labels, its repo belongs to one of the rule's owners, and it is assigned to `intake.assignee`).
 - It was created on or after `intake.created_since`.
 - It has none of `intake.skip_labels`, nor the claimed, PR-open or blocked labels.
 
@@ -142,7 +143,7 @@ Names come from `labels.*` in the config.
 
 ## Limits of multi-repo intake
 
-Several intake repos work for dispatch. Some lookups use only the first entry: babysit looks up a PR's issue in `intake.repos[0]`, and the "open PR by hand" check searches only `pr_owners[0]`. Keep the main repo first.
+Several intake repos work for dispatch. Babysit looks up a PR's issue in the PR's own repo when it is an intake repo, otherwise in `intake.repos[0]`. The "open PR by hand" check searches only `pr_owners[0]`. Keep the main repo first.
 
 ## Token discipline
 

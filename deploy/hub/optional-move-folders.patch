@@ -1,0 +1,742 @@
+From 27a9ae8d266b782d3934c955d3a572ecfad44a5e Mon Sep 17 00:00:00 2001
+From: Anshuman Biswas <abiswas@elastio.com>
+Date: Thu, 19 Nov 2026 11:39:48 -0500
+Subject: [PATCH] Support optional destination folders and durable per-machine
+ mappings for session moves
+
+---
+ hub/internal/agent/extended_keys_test.go      |  90 ++++++++++++
+ .../agent/session_destination_test.go         |  40 ++++++
+ hub/internal/agent/sessionput.go              |  56 +++++---
+ hub/internal/agent/term.go                    |   5 +
+ .../store/migrations/0038_move_folders.sql    |   7 +
+ hub/internal/web/find.go                      |  34 ++++-
+ hub/internal/web/migrate.go                   |  58 ++++++--
+ hub/internal/web/move_folders.go              | 132 ++++++++++++++++++
+ hub/internal/web/move_folders_test.go         |  52 +++++++
+ hub/internal/web/static/termpane.js           |  15 +-
+ hub/internal/web/static/workspace.js          |   9 +-
+ 11 files changed, 450 insertions(+), 48 deletions(-)
+ create mode 100644 hub/internal/agent/extended_keys_test.go
+ create mode 100644 hub/internal/agent/session_destination_test.go
+ create mode 100644 hub/internal/store/migrations/0038_move_folders.sql
+ create mode 100644 hub/internal/web/move_folders.go
+ create mode 100644 hub/internal/web/move_folders_test.go
+
+diff --git a/hub/internal/agent/extended_keys_test.go b/hub/internal/agent/extended_keys_test.go
+new file mode 100644
+index 0000000..c67208a
+--- /dev/null
++++ b/hub/internal/agent/extended_keys_test.go
+@@ -0,0 +1,90 @@
++package agent
++
++import (
++	"bytes"
++	"context"
++	"github.com/creack/pty"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strconv"
++	"testing"
++	"time"
++)
++
++// Exercise the actual outer-terminal -> tmux -> application byte path on a separate socket.
++func TestControlEnterBridge(t *testing.T) {
++	bin, err := exec.LookPath("tmux")
++	if err != nil {
++		t.Skip("tmux not installed")
++	}
++	dir := t.TempDir()
++	conf := filepath.Join(dir, "tmux.conf")
++	out := filepath.Join(dir, "key")
++	if err := os.WriteFile(conf, []byte(tmuxConf), 0600); err != nil {
++		t.Fatal(err)
++	}
++	socket := "brain-key-test-" + strconv.Itoa(os.Getpid())
++	run := func(args ...string) *exec.Cmd {
++		return exec.Command(bin, append([]string{"-L", socket, "-f", conf}, args...)...)
++	}
++	command := "stty raw -echo; printf '\\033[>4;2mREADY'; dd bs=1 count=7 of=" + shellQuote(out) + " 2>/dev/null; sleep 1"
++	if b, err := run("new-session", "-d", "-s", "keytest", command).CombinedOutput(); err != nil {
++		t.Fatalf("tmux: %v %s", err, b)
++	}
++	defer run("kill-server").Run()
++	cmd := run("attach-session", "-t", "keytest")
++	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
++	master, err := pty.Start(cmd)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer func() { _ = run("kill-server").Run(); _ = master.Close(); _ = cmd.Wait() }()
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	ready := make(chan error, 1)
++	go func() {
++		var data []byte
++		buf := make([]byte, 4096)
++		for len(data) < 65536 {
++			n, err := master.Read(buf)
++			data = append(data, buf[:n]...)
++			if bytes.Contains(data, []byte("READY")) {
++				ready <- nil
++				return
++			}
++			if err != nil {
++				ready <- err
++				return
++			}
++		}
++		ready <- io.ErrNoProgress
++	}()
++	select {
++	case err := <-ready:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-ctx.Done():
++		t.Fatal("terminal did not become ready")
++	}
++	want := []byte("\x1b[13;5u")
++	if _, err := master.Write(want); err != nil {
++		t.Fatal(err)
++	}
++	for {
++		got, _ := os.ReadFile(out)
++		if len(got) >= len(want) {
++			if !bytes.Equal(got, want) {
++				t.Fatalf("Control+Enter became %q", got)
++			}
++			return
++		}
++		select {
++		case <-ctx.Done():
++			t.Fatalf("Control+Enter collapsed or disappeared: %q", got)
++		case <-time.After(10 * time.Millisecond):
++		}
++	}
++}
+diff --git a/hub/internal/agent/session_destination_test.go b/hub/internal/agent/session_destination_test.go
+new file mode 100644
+index 0000000..8dcd758
+--- /dev/null
++++ b/hub/internal/agent/session_destination_test.go
+@@ -0,0 +1,40 @@
++package agent
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestSessionDestinationSelectedFolder(t *testing.T) {
++	home := t.TempDir()
++	repo := filepath.Join(home, "different", "checkout")
++	if err := os.MkdirAll(repo, 0700); err != nil {
++		t.Fatal(err)
++	}
++	real, _ := filepath.EvalSymlinks(repo)
++	got, err := sessionDestination("~/different/checkout", true, home, Roots{})
++	if err != nil || got != real {
++		t.Fatalf("folder: %s %v", got, err)
++	}
++	if _, err := sessionDestination("~/missing", true, home, Roots{}); err == nil {
++		t.Fatal("selected missing folder silently fell back")
++	}
++	if got, err := sessionDestination("~/missing", false, home, Roots{}); err != nil || got != home {
++		t.Fatalf("legacy fallback: %s %v", got, err)
++	}
++	outside := t.TempDir()
++	link := filepath.Join(home, "outside")
++	if err := os.Symlink(outside, link); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := sessionDestination(link, true, home, Roots{}); err == nil {
++		t.Fatal("accepted symlink outside roots")
++	}
++	parent := t.TempDir()
++	child := filepath.Join(parent, "checkout")
++	_ = os.Mkdir(child, 0700)
++	if _, err := sessionDestination(child, true, home, NewRoots([]string{parent})); err != nil {
++		t.Fatalf("configured root: %v", err)
++	}
++}
+diff --git a/hub/internal/agent/sessionput.go b/hub/internal/agent/sessionput.go
+index 8ca42ef..7b375be 100644
+--- a/hub/internal/agent/sessionput.go
++++ b/hub/internal/agent/sessionput.go
+@@ -24,17 +24,19 @@ const KindSessionPut = "session_put"
+ 
+ // SessionPut is a session_put payload. The file comes from the hub by Token (like file_put).
+ type SessionPut struct {
+-	Token    string `json:"token"`
+-	Provider string `json:"provider"` // claude | codex
+-	UUID     string `json:"uuid"`
+-	Cwd      string `json:"cwd"`     // the folder to run in: absolute or ~/...; missing means the home folder
+-	Started  string `json:"started"` // the conversation's first time (RFC 3339), for the Codex file name
++	Token      string `json:"token"`
++	Provider   string `json:"provider"` // claude | codex
++	UUID       string `json:"uuid"`
++	Cwd        string `json:"cwd"` // the folder to run in: absolute or ~/...; missing means the home folder
++	RequireCwd bool   `json:"require_cwd,omitempty"`
++	Started    string `json:"started"` // the conversation's first time (RFC 3339), for the Codex file name
+ }
+ 
+ // SessionPutResult says where the conversation went and which folder the CLI must run in.
+ type SessionPutResult struct {
+-	Path string `json:"path"`
+-	Cwd  string `json:"cwd"`
++	RequestedCwd string `json:"requested_cwd,omitempty"`
++	Path         string `json:"path"`
++	Cwd          string `json:"cwd"`
+ }
+ 
+ var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
+@@ -53,14 +55,10 @@ func (e *Executor) sessionPut(ctx context.Context, c store.Command) {
+ 		return
+ 	}
+ 	home, _ := os.UserHomeDir()
+-	cwd := strings.TrimSpace(p.Cwd)
+-	if cwd == "" || cwd == "~" {
+-		cwd = home
+-	} else if strings.HasPrefix(cwd, "~/") {
+-		cwd = filepath.Join(home, cwd[2:])
+-	}
+-	if st, err := os.Stat(cwd); err != nil || !st.IsDir() || !strings.HasPrefix(filepath.Clean(cwd)+"/", home+"/") {
+-		cwd = home // the folder is not on this machine: the conversation runs in the home folder
++	cwd, err := sessionDestination(p.Cwd, p.RequireCwd, home, e.Roots)
++	if err != nil {
++		fail(err)
++		return
+ 	}
+ 	var dest string
+ 	switch p.Provider {
+@@ -104,7 +102,7 @@ func (e *Executor) sessionPut(ctx context.Context, c store.Command) {
+ 	if old, err := os.ReadFile(dest); err == nil {
+ 		switch putAction(old, data) {
+ 		case putHave:
+-			e.report(ctx, c.ID, Report{Status: "done", Result: mustJSON(SessionPutResult{Path: dest, Cwd: cwd})})
++			e.report(ctx, c.ID, Report{Status: "done", Result: mustJSON(SessionPutResult{Path: dest, Cwd: cwd, RequestedCwd: p.Cwd})})
+ 			return // this machine already has all of it, and more
+ 		case putDifferent:
+ 			fail(fmt.Errorf("a different conversation with this id is already on this machine (%s); nothing changed", dest))
+@@ -140,7 +138,7 @@ func (e *Executor) sessionPut(ctx context.Context, c store.Command) {
+ 		return
+ 	}
+ 	e.logf("agent: session %s (%s) installed at %s", p.UUID, p.Provider, dest)
+-	e.report(ctx, c.ID, Report{Status: "done", Result: mustJSON(SessionPutResult{Path: dest, Cwd: cwd})})
++	e.report(ctx, c.ID, Report{Status: "done", Result: mustJSON(SessionPutResult{Path: dest, Cwd: cwd, RequestedCwd: p.Cwd})})
+ }
+ 
+ const (
+@@ -171,3 +169,27 @@ func mustJSON(v any) string {
+ 	b, _ := json.Marshal(v)
+ 	return string(b)
+ }
++
++// A selected or pinned path must exist. Automatic legacy moves may fall back to home.
++func sessionDestination(raw string, strict bool, home string, roots Roots) (string, error) {
++	cwd := strings.TrimSpace(raw)
++	if cwd == "" || cwd == "~" {
++		cwd = home
++	} else if strings.HasPrefix(cwd, "~/") {
++		cwd = home + "/" + cwd[2:]
++	}
++	if real, err := roots.Validate(cwd); err == nil {
++		return real, nil
++	}
++	// Managed session migration already permits folders below the user's home.
++	if filepath.Clean(cwd) == filepath.Clean(home) {
++		return home, nil
++	}
++	if real, err := NewRoots([]string{home}).Validate(cwd); err == nil {
++		return real, nil
++	}
++	if strict {
++		return "", fmt.Errorf("selected destination folder %q does not exist or is outside allowed roots", raw)
++	}
++	return home, nil
++}
+diff --git a/hub/internal/agent/term.go b/hub/internal/agent/term.go
+index dfe9b24..c566384 100644
+--- a/hub/internal/agent/term.go
++++ b/hub/internal/agent/term.go
+@@ -231,6 +231,10 @@ set -g escape-time 10
+ set -g default-terminal "xterm-256color"
+ set -g set-clipboard on
+ set -g focus-events on
++# Preserve Control+Enter and other modified keys through the terminal bridge.
++set -s extended-keys on
++set -s extended-keys-format csi-u
++set -as terminal-features ",xterm*:extkeys"
+ set -g allow-passthrough on
+ setw -g aggressive-resize on
+ `
+@@ -521,6 +525,7 @@ func (e *Executor) termCwd(ctx context.Context, id int64, o TermOpen) (string, e
+ 		return filepath.EvalSymlinks(home)
+ 	}
+ 	cwd, err := NewRoots([]string{home}).Validate(want)
++	if err != nil { cwd, err = e.Roots.Validate(want) }
+ 	if err != nil {
+ 		if errors.Is(err, ErrOutside) {
+ 			return "", fmt.Errorf("%s is not in your home folder", o.Cwd)
+diff --git a/hub/internal/store/migrations/0038_move_folders.sql b/hub/internal/store/migrations/0038_move_folders.sql
+new file mode 100644
+index 0000000..99dc661
+--- /dev/null
++++ b/hub/internal/store/migrations/0038_move_folders.sql
+@@ -0,0 +1,7 @@
++CREATE TABLE IF NOT EXISTS move_folders (
++    from_host TEXT NOT NULL,
++    source_path TEXT NOT NULL,
++    to_host TEXT NOT NULL,
++    destination_path TEXT NOT NULL,
++    PRIMARY KEY (from_host, source_path, to_host)
++);
+diff --git a/hub/internal/web/find.go b/hub/internal/web/find.go
+index 2ebcb03..67a5d02 100644
+--- a/hub/internal/web/find.go
++++ b/hub/internal/web/find.go
+@@ -347,9 +347,12 @@ func (s *Server) sessionCards(ctx context.Context, q string, limit int) ([]sessi
+ 
+ // MoveRequest is the body of POST /api/sessions/{id}/move.
+ type MoveRequest struct {
+-	To          string `json:"to"`           // the machine to move to
+-	CloseSource bool   `json:"close_source"` // end the session's terminal on its old machine after the move
+-	Clone       bool   `json:"clone"`        // terminal migrate only: fork the conversation there and keep the source
++	To              string `json:"to"`           // the machine to move to
++	CloseSource     bool   `json:"close_source"` // end the session's terminal on its old machine after the move
++	DestinationPath string `json:"destination_path,omitempty"`
++	PinPath         bool   `json:"pin_path,omitempty"`
++	WithoutFolder   bool   `json:"without_folder,omitempty"`
++	Clone           bool   `json:"clone"` // terminal migrate only: fork the conversation there and keep the source
+ }
+ 
+ // moveAPI: POST /api/sessions/{id}/move moves a Claude Code or Codex conversation to another machine with all its
+@@ -394,10 +397,20 @@ func (s *Server) moveSession(ctx context.Context, id int64, req MoveRequest) (in
+ 	if err != nil {
+ 		return 0, err
+ 	}
+-	put, err := s.putSession(ctx, sess, req.To, data)
++	folder, strict, err := s.moveFolder(ctx, sess.Host, sess.Cwd, req)
+ 	if err != nil {
+ 		return 0, err
+ 	}
++	put, err := s.putSessionAt(ctx, sess, req.To, data, folder, strict)
++	if err != nil {
++		return 0, err
++	}
++	if req.PinPath {
++		if err := s.saveMoveFolder(ctx, MoveFolder{From: sess.Host, SourcePath: portableHome(sess.Cwd), To: req.To, DestinationPath: folder}); err != nil {
++			return 0, err
++		}
++	}
++
+ 	tid, err := s.Agents.Ctl.OpenTerminal(ctx, agent.TermReq{Host: req.To, Provider: sess.Provider, Cwd: put.Cwd, Managed: true,
+ 		Resume: sess.UUID, Title: "Moved: " + truncate(sess.DisplayTitle(), 60)})
+ 	if err != nil {
+@@ -430,6 +443,10 @@ func (s *Server) sessionLines(ctx context.Context, sess store.Session) (data []b
+ 
+ // putSession installs the conversation file on machine to (session_put) and says where the CLI must run there.
+ func (s *Server) putSession(ctx context.Context, sess store.Session, to string, data []byte) (agent.SessionPutResult, error) {
++	return s.putSessionAt(ctx, sess, to, data, portableHome(sess.Cwd), false)
++}
++
++func (s *Server) putSessionAt(ctx context.Context, sess store.Session, to string, data []byte, cwd string, strict bool) (agent.SessionPutResult, error) {
+ 	var put agent.SessionPutResult
+ 	dir := filepath.Join(s.StateDir, "upload-tmp")
+ 	_ = os.MkdirAll(dir, 0o700)
+@@ -447,7 +464,7 @@ func (s *Server) putSession(ctx context.Context, sess store.Session, to string,
+ 	t := s.Agents.xfers.add(tok, tmp.Name())
+ 	defer func() { s.Agents.xfers.take(tok); close(t.gone) }()
+ 	cid, err := s.Agents.Ctl.QueueSessionPut(ctx, to, agent.SessionPut{Token: tok, Provider: sess.Provider, UUID: sess.UUID,
+-		Cwd: portableHome(sess.Cwd), Started: rfc3339(sess.FirstAt)})
++		Cwd: cwd, RequireCwd: strict, Started: rfc3339(sess.FirstAt)})
+ 	if err != nil {
+ 		return put, err
+ 	}
+@@ -463,7 +480,12 @@ func (s *Server) putSession(ctx context.Context, sess store.Session, to string,
+ 	if rep.Status == "failed" {
+ 		return put, fmt.Errorf("%s: %s", to, rep.Error)
+ 	}
+-	_ = json.Unmarshal([]byte(rep.Result), &put)
++	if err := json.Unmarshal([]byte(rep.Result), &put); err != nil {
++		return put, err
++	}
++	if strict && put.RequestedCwd != cwd {
++		return put, fmt.Errorf("destination agent did not confirm the requested folder; update its hub agent")
++	}
+ 	return put, nil
+ }
+ 
+diff --git a/hub/internal/web/migrate.go b/hub/internal/web/migrate.go
+index 1c7d8a1..a12a20a 100644
+--- a/hub/internal/web/migrate.go
++++ b/hub/internal/web/migrate.go
+@@ -37,16 +37,18 @@ type migPhase struct {
+ }
+ 
+ type migration struct {
+-	ID       string     `json:"id"`
+-	Terminal int64      `json:"terminal"`
+-	From     string     `json:"from"`
+-	To       string     `json:"to"`
+-	Mode     string     `json:"mode"` // move | clone
+-	Phases   []migPhase `json:"phases"`
+-	Dest     int64      `json:"dest_terminal,omitempty"`
+-	Done     bool       `json:"done"`
+-	Error    string     `json:"error,omitempty"`
+-	started  time.Time
++	ID              string     `json:"id"`
++	Terminal        int64      `json:"terminal"`
++	From            string     `json:"from"`
++	To              string     `json:"to"`
++	Mode            string     `json:"mode"` // move | clone
++	Phases          []migPhase `json:"phases"`
++	DestinationPath string     `json:"destination_path,omitempty"`
++	FolderMode      string     `json:"folder_mode,omitempty"`
++	Dest            int64      `json:"dest_terminal,omitempty"`
++	Done            bool       `json:"done"`
++	Error           string     `json:"error,omitempty"`
++	started         time.Time
+ }
+ 
+ // migrations holds the jobs in memory.
+@@ -116,6 +118,7 @@ func (ms *migrations) finish(j *migration, err error) {
+ func (s *Server) migrateRoutes(g, p func(string, http.HandlerFunc)) {
+ 	p("POST /api/terminals/{id}/migrate", s.migrateStart)
+ 	g("GET /api/migrations/{job}", s.migrateGet)
++	s.moveFolderRoutes(g, p)
+ }
+ 
+ // migrateStart: POST /api/terminals/{id}/migrate {"to": "<machine>", "close_source": true} → 202 {"job": ...};
+@@ -131,6 +134,10 @@ func (s *Server) migrateStart(w http.ResponseWriter, r *http.Request) {
+ 		jsonErr(w, http.StatusBadRequest, errors.New(`give {"to": "<machine>"}`))
+ 		return
+ 	}
++	if err := validateMoveFolder(req); err != nil {
++		jsonErr(w, http.StatusBadRequest, err)
++		return
++	}
+ 	t, err := s.Store.Terminal(r.Context(), id)
+ 	if err != nil {
+ 		closeErr(w, err)
+@@ -151,7 +158,7 @@ func (s *Server) migrateStart(w http.ResponseWriter, r *http.Request) {
+ 	go func() { // not the request's context: the job outlives the client
+ 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+ 		defer cancel()
+-		err := s.migrate(ctx, j, t, req.CloseSource, req.Clone)
++		err := s.migrate(ctx, j, t, req)
+ 		if err != nil {
+ 			s.Log.Printf("migrate terminal %d to %s: %v", id, req.To, err)
+ 		}
+@@ -170,7 +177,8 @@ func (s *Server) migrateGet(w http.ResponseWriter, r *http.Request) {
+ }
+ 
+ // migrate runs the phases. Each returns before the next starts; the first failure stops the job.
+-func (s *Server) migrate(ctx context.Context, j *migration, t store.Terminal, closeSource, clone bool) error {
++func (s *Server) migrate(ctx context.Context, j *migration, t store.Terminal, req MoveRequest) error {
++	closeSource, clone := req.CloseSource, req.Clone
+ 	ms := &s.Agents.migs
+ 	phase := func(name string, f func() (string, error)) error {
+ 		ms.set(j, name, "running", "")
+@@ -183,12 +191,18 @@ func (s *Server) migrate(ctx context.Context, j *migration, t store.Terminal, cl
+ 		return nil
+ 	}
+ 	var sess store.Session
++	var folder string
++	var strict bool
+ 	if err := phase("check", func() (string, error) {
+ 		var err error
+ 		sess, err = s.migrateReady(ctx, t, j.To)
+ 		if err != nil {
+ 			return "", err
+ 		}
++		folder, strict, err = s.moveFolder(ctx, t.Host, sess.Cwd, req)
++		if err != nil {
++			return "", err
++		}
+ 		return fmt.Sprintf("%s on %s → %s", sess.Provider, t.Host, j.To), nil
+ 	}); err != nil {
+ 		return err
+@@ -210,9 +224,27 @@ func (s *Server) migrate(ctx context.Context, j *migration, t store.Terminal, cl
+ 	var put agent.SessionPutResult
+ 	if err := phase("copy", func() (string, error) {
+ 		var err error
+-		if put, err = s.putSession(ctx, sess, j.To, data); err != nil {
++		if put, err = s.putSessionAt(ctx, sess, j.To, data, folder, strict); err != nil {
+ 			return "", err
+ 		}
++		ms.mu.Lock()
++		j.DestinationPath = put.Cwd
++		j.FolderMode = "automatic"
++		if strict {
++			j.FolderMode = "selected"
++		}
++		if req.WithoutFolder {
++			j.FolderMode = "home"
++		}
++		ms.mu.Unlock()
++		if req.PinPath {
++			if err := s.saveMoveFolder(ctx, MoveFolder{From: t.Host, SourcePath: portableHome(sess.Cwd), To: req.To, DestinationPath: folder}); err != nil {
++				return "", err
++			}
++		}
++		if strict {
++			return "in " + put.Cwd + " (selected folder)", nil
++		}
+ 		if want := portableHome(sess.Cwd); portableHome(put.Cwd) != want {
+ 			return fmt.Sprintf("%s is not on %s: it runs in %s (uncommitted work stays on %s)", want, j.To, put.Cwd, t.Host), nil
+ 		}
+diff --git a/hub/internal/web/move_folders.go b/hub/internal/web/move_folders.go
+new file mode 100644
+index 0000000..5fe5341
+--- /dev/null
++++ b/hub/internal/web/move_folders.go
+@@ -0,0 +1,132 @@
++package web
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"errors"
++	"io"
++	"net/http"
++	"path"
++	"strings"
++
++	"github.com/anchoo2kewl/llm-brain/hub/internal/agent"
++)
++
++// MoveFolder pins a source working folder to its existing checkout on another machine.
++type MoveFolder struct {
++	From            string `json:"from_host"`
++	SourcePath      string `json:"source_path"`
++	To              string `json:"to"`
++	DestinationPath string `json:"destination_path"`
++}
++
++func validMovePath(p string) bool {
++	if len(p) > 4096 || strings.ContainsAny(p, "\x00\r\n") || !(strings.HasPrefix(p, "/") || p == "~" || strings.HasPrefix(p, "~/")) {
++		return false
++	}
++	for _, part := range strings.Split(p, "/") {
++		if part == ".." {
++			return false
++		}
++	}
++	return true
++}
++
++func validateMoveFolder(r MoveRequest) error {
++	if r.WithoutFolder && (r.DestinationPath != "" || r.PinPath) {
++		return agent.InputError{Msg: "without_folder cannot be combined with destination_path or pin_path"}
++	}
++	if r.DestinationPath != "" && !validMovePath(r.DestinationPath) {
++		return agent.InputError{Msg: "destination_path must be absolute or ~/..., without '..'"}
++	}
++	if r.PinPath && r.DestinationPath == "" {
++		return agent.InputError{Msg: "pin_path requires destination_path"}
++	}
++	return nil
++}
++
++func (s *Server) moveFolder(ctx context.Context, from, cwd string, r MoveRequest) (string, bool, error) {
++	if err := validateMoveFolder(r); err != nil {
++		return "", false, err
++	}
++	if r.WithoutFolder {
++		return "~", true, nil
++	}
++	if r.DestinationPath != "" {
++		return r.DestinationPath, true, nil
++	}
++	var dest string
++	err := s.Store.DB.QueryRowContext(ctx, `SELECT destination_path FROM move_folders WHERE from_host=? AND source_path=? AND to_host=?`, from, cleanMovePath(cwd), r.To).Scan(&dest)
++	if errors.Is(err, sql.ErrNoRows) {
++		return portableHome(cwd), false, nil
++	}
++	if err != nil {
++		return "", false, err
++	}
++	return dest, true, nil
++}
++
++func cleanMovePath(p string) string { return path.Clean(portableHome(p)) }
++
++func (s *Server) saveMoveFolder(ctx context.Context, p MoveFolder) error {
++	if p.From == "" || len(p.From) > 128 || p.To == "" || len(p.To) > 128 || !validMovePath(p.SourcePath) || !validMovePath(p.DestinationPath) {
++		return agent.InputError{Msg: "give from_host, source_path, to and an absolute or ~/... destination_path"}
++	}
++	_, err := s.Store.DB.ExecContext(ctx, `INSERT INTO move_folders(from_host,source_path,to_host,destination_path) VALUES(?,?,?,?) ON CONFLICT(from_host,source_path,to_host) DO UPDATE SET destination_path=excluded.destination_path`, p.From, cleanMovePath(p.SourcePath), p.To, p.DestinationPath)
++	return err
++}
++
++func (s *Server) moveFolderRoutes(g, p func(string, http.HandlerFunc)) {
++	g("GET /api/move-folders", func(w http.ResponseWriter, r *http.Request) {
++		rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT from_host,source_path,to_host,destination_path FROM move_folders ORDER BY from_host,source_path,to_host`)
++		if err != nil {
++			jsonErr(w, 500, err)
++			return
++		}
++		defer rows.Close()
++		pins := []MoveFolder{}
++		for rows.Next() {
++			var pin MoveFolder
++			if err := rows.Scan(&pin.From, &pin.SourcePath, &pin.To, &pin.DestinationPath); err != nil {
++				jsonErr(w, 500, err)
++				return
++			}
++			pins = append(pins, pin)
++		}
++		if err := rows.Err(); err != nil {
++			jsonErr(w, 500, err)
++			return
++		}
++		writeJSON(w, 200, map[string]any{"mappings": pins})
++	})
++	p("POST /api/move-folders", func(w http.ResponseWriter, r *http.Request) {
++		var req struct {
++			MoveFolder
++			Action string `json:"action"`
++		}
++		if err := json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&req); err != nil {
++			jsonErr(w, 400, err)
++			return
++		}
++		var err error
++		switch req.Action {
++		case "", "set":
++			err = s.saveMoveFolder(r.Context(), req.MoveFolder)
++		case "remove":
++			if req.From == "" || req.To == "" || !validMovePath(req.SourcePath) {
++				jsonErr(w, 400, errors.New("give from_host, source_path and to"))
++				return
++			}
++			_, err = s.Store.DB.ExecContext(r.Context(), `DELETE FROM move_folders WHERE from_host=? AND source_path=? AND to_host=?`, req.From, cleanMovePath(req.SourcePath), req.To)
++		default:
++			jsonErr(w, 400, errors.New("action must be set or remove"))
++			return
++		}
++		if err != nil {
++			jsonErr(w, 400, err)
++			return
++		}
++		writeJSON(w, 200, map[string]bool{"ok": true})
++	})
++}
+diff --git a/hub/internal/web/move_folders_test.go b/hub/internal/web/move_folders_test.go
+new file mode 100644
+index 0000000..466ce55
+--- /dev/null
++++ b/hub/internal/web/move_folders_test.go
+@@ -0,0 +1,52 @@
++package web
++
++import (
++	"context"
++	"strings"
++	"testing"
++)
++
++func TestMoveFolderPinsAndOverrides(t *testing.T) {
++	r := newSessRig(t)
++	ctx := context.Background()
++	pin := MoveFolder{From: "laptop", SourcePath: "/Users/alice/code/app", To: "studio", DestinationPath: "~/projects/other/app"}
++	if err := r.srv.saveMoveFolder(ctx, pin); err != nil {
++		t.Fatal(err)
++	}
++	for _, tc := range []struct {
++		req    MoveRequest
++		want   string
++		strict bool
++	}{
++		{MoveRequest{To: "studio"}, pin.DestinationPath, true},
++		{MoveRequest{To: "studio", DestinationPath: "~/one-time"}, "~/one-time", true},
++		{MoveRequest{To: "studio", WithoutFolder: true}, "~", true},
++		{MoveRequest{To: "other"}, "~/code/app", false},
++	} {
++		got, strict, err := r.srv.moveFolder(ctx, "laptop", "/Users/alice/code/app", tc.req)
++		if err != nil || got != tc.want || strict != tc.strict {
++			t.Fatalf("%+v: %q %v %v", tc.req, got, strict, err)
++		}
++	}
++	for _, req := range []MoveRequest{{DestinationPath: "relative"}, {DestinationPath: "~/../outside"}, {PinPath: true}, {WithoutFolder: true, DestinationPath: "~/app"}} {
++		if validateMoveFolder(req) == nil {
++			t.Fatalf("accepted %+v", req)
++		}
++	}
++	code, body, _ := r.get(t, "/api/move-folders")
++	if code != 200 || !strings.Contains(body, "~/projects/other/app") {
++		t.Fatalf("list: %d %s", code, body)
++	}
++	resp, err := r.cl.Post(r.ts.URL+"/api/move-folders", "application/json", strings.NewReader(`{"action":"remove","from_host":"laptop","source_path":"~/code/app","to":"studio"}`))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != 200 {
++		t.Fatalf("remove: %d", resp.StatusCode)
++	}
++	_, body, _ = r.get(t, "/api/move-folders")
++	if strings.Contains(body, "~/projects/other/app") {
++		t.Fatal(body)
++	}
++}
+diff --git a/hub/internal/web/static/termpane.js b/hub/internal/web/static/termpane.js
+index fa57617..013feef 100644
+--- a/hub/internal/web/static/termpane.js
++++ b/hub/internal/web/static/termpane.js
+@@ -131,17 +131,10 @@
+         navigator.clipboard.writeText(text).then(function () { say("Copied to your browser clipboard."); }).catch(blocked);
+       } else blocked();
+     }
+-    // Ctrl+Enter sends what is typed now, even while the agent is busy. Each CLI has its own key for sending a
+-    // queued message at once; the hub gives them all this one. Listed here: the keys to press after Enter.
+-    // A CLI that is not listed (and a shell, where Ctrl+S would freeze the output) gets the Enter alone.
+-    var sendNowKeys = { claude: ["\x18", "\x13"] }; // Ctrl+X Ctrl+S
+-    var provider = "";
+-    status(function (s) { provider = s.provider || ""; });
+-    function sendNow() {
+-      send("\r");
+-      // One key at a time, a moment apart: sent together a CLI reads them as pasted text, not as keys.
+-      (sendNowKeys[provider] || []).forEach(function (k, i) { setTimeout(function () { send(k); }, 80 + 60 * i); });
+-    }
++    // Send the actual modified Enter; Claude's chat:sendNow handles draft and queue together.
++    var provider = opts.provider || "";
++    status(function (s) { provider = s.provider || provider; });
++    function sendNow() { send(provider === "claude" ? "\x1b[13;5u" : "\r"); }
+     term.attachCustomKeyEventHandler(function (e) {
+       if (e.key === "Enter" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+         if (e.type === "keydown") { e.preventDefault(); sendNow(); }
+diff --git a/hub/internal/web/static/workspace.js b/hub/internal/web/static/workspace.js
+index d4ae972..f1fe06f 100644
+--- a/hub/internal/web/static/workspace.js
++++ b/hub/internal/web/static/workspace.js
+@@ -627,10 +627,17 @@
+     if (!t || moving) return;
+     if (t.kind === "session") { sayMove("Only hub terminals can move. Continue this session in a terminal first."); return; }
+     if (t.host === to) { sayMove((t.title || "This terminal") + " already runs on " + shortHost(to) + "."); return; }
++    var folder = window.prompt("Optional folder on " + shortHost(to) + ":\nLeave blank for the pinned/automatic folder. Enter ~ to use its home folder.\nCode files are not copied.", "");
++    if (folder === null) return;
++    folder = folder.trim();
++    var body = clone ? { to: to, clone: true } : { to: to, close_source: true };
++    if (folder === "~") body.without_folder = true;
++    else if (folder) { body.destination_path = folder; body.pin_path = window.confirm("Pin this folder for future moves from this codebase to " + shortHost(to) + "?"); }
+     moving = true;
+     var verb = clone ? "Cloning " : "Moving ";
+     sayMove(verb + (t.title || "terminal " + id) + " to " + shortHost(to) + "…");
+-    fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(clone ? { to: to, clone: true } : { to: to, close_source: true }) })
++    (folder ? fetch("/api/move-folders").then(function (r) { if (!r.ok) throw new Error("update the hub before selecting a folder"); }) : Promise.resolve())
++      .then(function () { return fetch("/api/terminals/" + id + "/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); })
+       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { code: r.status, j: j }; }); })
+       .then(function (x) {
+         if (x.code === 404 || x.code === 405) throw new Error("this hub can't move terminals yet (update the hub)");
+-- 
+2.54.0 (Apple Git-157)
+

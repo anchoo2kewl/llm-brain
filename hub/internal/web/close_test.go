@@ -89,7 +89,7 @@ func TestCloseEverywhere(t *testing.T) {
 		{"/chats", []string{`action="/terminals/7/kill"`}},
 		{"/terminals/7", []string{`action="/terminals/7/kill"`, "Close terminal"}},
 		{"/workspace", []string{`/static/workspace.js`}},
-		{"/static/workspace.js", []string{`"/api/sessions/" + t.sid + "/close"`, `"/api/terminals/" + id + "/close"`, "Close?"}},
+		{"/static/workspace.js", []string{`"/api/sessions/" + t.sid + "/close"`, `"/api/terminals/" + id + "/close"`, `"End " + n`}},
 	} {
 		path, want := c.path, c.want
 		code, body, _ := r.get(t, path)

@@ -50,6 +50,9 @@ someone else is taking it, stop: comment on the issue, remove `agent:working`, a
   State unchecked work plainly. Never claim a test failed on the base or passed here unless you ran it and observed that result.
   Update this description after follow-up changes; keep comments for new findings or decisions rather than long progress reports.
   Close exactly one issue. Investigations of other problems go in their own issue, not the PR.
+- Put `Fixes {{REPO}}#{{ISSUE}}` on its own line in the body of the PR that completes the issue (the one in {{REPO}},
+  or the last to merge), so merging it closes the issue. Always use that full `owner/repo#N` form; it works across repos.
+  Companion PRs say `Refs {{REPO}}#{{ISSUE}}` instead, so an early merge doesn't close the issue.
 - End the body with this exact line:
   `<!-- {{MARKER}} -->`
   (the babysitter finds PRs by this marker). **Every** PR you open for this issue gets it, in any repo, including
