@@ -1,6 +1,6 @@
 {{define "content"}}<link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/xterm/xterm.css"><link rel="stylesheet" href="/static/term.css"><link rel="stylesheet" href="/static/files.css"><link rel="stylesheet" href="/static/workspace.css">
 <div class="ws" id="ws">
-<aside class="ws-side" aria-label="Terminals">
+<aside id="ws-side" class="ws-side" aria-label="Terminals">
   <div class="ws-head"><b>Terminals</b><span class="grow"></span><button type="button" class="primary small" id="wsnewbtn" title="New terminal (Ctrl+Shift+N)">+ New</button></div>
   <div class="ws-filter"><input type="search" id="wsq" placeholder="Filter…" aria-label="Filter terminals"></div>
   <ul class="ws-list" id="wslist"></ul>
@@ -19,7 +19,14 @@
       <dt>Ctrl+Shift+N</dt><dd>new terminal</dd><dt>Ctrl+Shift+J</dt><dd>jump to the next one waiting for you</dd></dl></details>
   </div>
 </aside>
-<main class="ws-main"><div class="ws-grid" id="wsgrid" data-layout="1"></div>
+<main class="ws-main"><div class="ws-tools"><button type="button" id="ws-sidebar-toggle" aria-controls="ws-side" aria-expanded="true" title="Toggle terminal sidebar (Ctrl+Shift+B)">Hide sidebar</button>
+<select id="ws-actions" aria-label="Workspace actions"><option value="">Actions…</option>
+<optgroup label="Terminals"><option value="new">New terminal</option><option value="previous">Previous terminal</option><option value="next">Next terminal</option><option value="rename">Rename focused terminal</option></optgroup>
+<optgroup label="Layout"><option value="auto">Two panes (automatic orientation)</option><option value="side">Two side by side</option><option value="stack">Two stacked</option><option value="balance">Reset split sizes</option><option value="zoom">Toggle zoom</option></optgroup>
+<optgroup label="Focus pane"><option value="focus-left">Left</option><option value="focus-right">Right</option><option value="focus-up">Up</option><option value="focus-down">Down</option></optgroup>
+<optgroup label="Move terminal"><option value="move-left">Left</option><option value="move-right">Right</option><option value="move-up">Up</option><option value="move-down">Down</option></optgroup>
+<optgroup label="Grow pane"><option value="resize-left">Left</option><option value="resize-right">Right</option><option value="resize-up">Up</option><option value="resize-down">Down</option></optgroup>
+</select></div><div class="ws-grid" id="wsgrid" data-layout="1"></div>
 <div class="ws-empty" id="wsempty" hidden><p>No terminals yet.</p><button type="button" class="primary" id="wsnewbtn2">Open a terminal</button></div></main>
 </div>
 <dialog id="wsnew" class="ws-dialog"><form method="post" action="/terminals/new" class="newchat-form termform" id="wsnewform">

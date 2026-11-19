@@ -6,7 +6,7 @@
   var grid = document.getElementById("wsgrid"), list = document.getElementById("wslist");
   if (!grid || !list || !window.TermPane) return;
   var KEY = "llmb.workspace.v1", MAX_ATTACHED = 12;
-  var COUNTS = { "1": 1, "2": 2, "3": 3, "4": 4, "6": 6, "9": 9 }, ORDER = ["1", "2", "3", "4", "6", "9"];
+  var COUNTS = { "1": 1, "2": 2, "stack": 2, "3": 3, "4": 4, "6": 6, "9": 9 }, ORDER = ["1", "2", "stack", "3", "4", "6", "9"];
   var narrow = window.matchMedia("(max-width: 760px)");
   var st = load();
   var infos = {}, panes = {}, items = {}, order = [];
@@ -18,9 +18,9 @@
   function load() {
     try {
       var s = JSON.parse(localStorage.getItem(KEY) || "{}");
-      return { layout: COUNTS[s.layout] ? s.layout : "2", slots: Array.isArray(s.slots) ? s.slots : [], focus: s.focus | 0, zoom: !!s.zoom,
+      return { layout: COUNTS[s.layout] ? s.layout : "2", slots: Array.isArray(s.slots) ? s.slots : [], focus: s.focus | 0, zoom: !!s.zoom, sizes: s.sizes && typeof s.sizes === "object" && !Array.isArray(s.sizes) ? s.sizes : {},
         views: s.views && typeof s.views === "object" ? s.views : {} };
-    } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false, views: {} }; }
+    } catch (e) { return { layout: "2", slots: [], focus: 0, zoom: false, sizes: {}, views: {} }; }
   }
   // viewOf: Terminal or Chat for a pane's terminal/session: its own choice, else the viewer's (app.js).
   function viewOf(id) {
@@ -234,6 +234,7 @@
   function layout() {
     var n = count();
     grid.setAttribute("data-layout", narrow.matches || st.zoom ? "1" : st.layout);
+    applySizes();
     document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-layout") === st.layout); });
     if (st.focus >= logical()) st.focus = 0;
     while (slotEls.length < n) slotEls.push(makeSlot(slotEls.length));
@@ -463,6 +464,101 @@
 
   // ------------------------------------------------------------ keys
 
+  var sidebarButton = document.getElementById("ws-sidebar-toggle");
+  function toggleSidebar() {
+    var collapsed = document.getElementById("ws").classList.toggle("sidebar-collapsed");
+    sidebarButton.setAttribute("aria-expanded", String(!collapsed));
+    sidebarButton.textContent = collapsed ? "Show sidebar" : "Hide sidebar";
+  }
+  sidebarButton.onclick = toggleSidebar;
+
+  // Read at most nine rectangles, only when a directional action is requested.
+  function adjacent(direction) {
+    if (st.zoom || logical() < 2) return -1;
+    var origin = slotEls[st.focus].root.getBoundingClientRect();
+    var horizontal = direction === "left" || direction === "right";
+    var forward = direction === "right" || direction === "down";
+    var start = horizontal ? "left" : "top", end = horizontal ? "right" : "bottom";
+    var crossStart = horizontal ? "top" : "left", crossEnd = horizontal ? "bottom" : "right";
+    var best = -1, distance = Infinity, overlap = 0;
+    for (var i = 0; i < logical(); i++) {
+      if (i === st.focus) continue;
+      var box = slotEls[i].root.getBoundingClientRect();
+      var gap = forward ? box[start] - origin[end] : origin[start] - box[end];
+      var shared = Math.min(box[crossEnd], origin[crossEnd]) - Math.max(box[crossStart], origin[crossStart]);
+      if (gap >= 0 && shared > 0 && (gap < distance || (gap === distance && shared > overlap))) {
+        best = i; distance = gap; overlap = shared;
+      }
+    }
+    return best;
+  }
+
+  function applySizes() {
+    var sizes = !st.zoom && !narrow.matches && st.sizes[st.layout];
+    ["gridTemplateColumns", "gridTemplateRows"].forEach(function (axis) {
+      var values = sizes && sizes[axis];
+      grid.style[axis] = Array.isArray(values) && values.length <= 3 &&
+        values.every(function (n) { return Number.isFinite(n) && n > 0; })
+        ? values.map(function (n) { return "minmax(0," + n + "fr)"; }).join(" ") : "";
+    });
+  }
+
+  function resizeTrack(direction) {
+    var dest = adjacent(direction);
+    if (dest < 0) return;
+    var horizontal = direction === "left" || direction === "right";
+    var axis = horizontal ? "gridTemplateColumns" : "gridTemplateRows";
+    var values = getComputedStyle(grid)[axis].split(/\s+/).map(parseFloat);
+    if (values.length < 2 || !values.every(Number.isFinite)) return;
+    var key = horizontal ? "left" : "top";
+    var starts = slotEls.slice(0, logical()).map(function (slot) {
+      return slot.root.getBoundingClientRect()[key];
+    });
+    var tracks = Array.from(new Set(starts)).sort(function (a, b) { return a - b; });
+    var from = tracks.indexOf(starts[dest]), to = tracks.indexOf(starts[st.focus]);
+    if (tracks.length !== values.length || from === to) return;
+    var delta = Math.min((values[from] + values[to]) * 0.05, values[from] - 48);
+    if (delta <= 0) return;
+    values[from] -= delta;
+    values[to] += delta;
+    if (!st.sizes[st.layout] || typeof st.sizes[st.layout] !== "object") st.sizes[st.layout] = {};
+    st.sizes[st.layout][axis] = values;
+    applySizes();
+    save();
+  }
+
+  function runAction(action) {
+    if (action === "new") return openNew();
+    if (action === "previous" || action === "next") return step(action === "next" ? 1 : -1);
+    if (action === "auto") return setLayout(grid.clientWidth >= grid.clientHeight ? "2" : "stack");
+    if (action === "side" || action === "stack") return setLayout(action === "side" ? "2" : "stack");
+    if (action === "zoom") return toggleZoom();
+    var id = st.slots[st.focus];
+    if (action === "rename") {
+      var slot = slotEls[st.zoom ? 0 : st.focus];
+      if (slot && infos[id]) rename(id, slot.title);
+      return;
+    }
+    var parts = action.split("-");
+    if (action === "balance") { delete st.sizes[st.layout]; applySizes(); save(); return; }
+    if (parts[0] === "resize" && slotEls[st.focus]) return resizeTrack(parts[1]);
+    if (!slotEls[st.focus] || (parts[0] !== "move" && parts[0] !== "focus")) return;
+    var dest = adjacent(parts[1]);
+    if (dest < 0) return;
+    if (parts[0] === "move") {
+      st.slots[st.focus] = st.slots[dest] || null;
+      st.slots[dest] = id || null;
+      layout();
+    }
+    focusSlot(dest, true);
+  }
+
+  document.getElementById("ws-actions").onchange = function () {
+    var action = this.value;
+    this.value = "";
+    runAction(action);
+  };
+
   function shortcut(e) { // xterm's key hook and the page's: true = let the terminal have it
     if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
     var k = e.key, n = /^Digit([1-9])$/.exec(e.code);
@@ -471,6 +567,7 @@
     else if (k === "ArrowRight") step(1);
     else if (k === "ArrowUp") focusSlot((st.focus - 1 + logical()) % logical(), true);
     else if (k === "ArrowDown") focusSlot((st.focus + 1) % logical(), true);
+    else if (k.toLowerCase() === "b") { if (!e.repeat) toggleSidebar(); }
     else if (k === "Enter") toggleZoom();
     else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
     else if (k === "N" || k === "n") openNew();

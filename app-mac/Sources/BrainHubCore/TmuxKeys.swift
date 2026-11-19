@@ -68,10 +68,11 @@ public struct Key: Hashable, Sendable, CustomStringConvertible {
 }
 
 public enum Axis: Sendable, Equatable { case horizontal /* side by side */, vertical /* one above the other */ }
-public enum Direction: Sendable, Equatable { case left, right, up, down }
+public enum Direction: String, CaseIterable, Sendable { case left, right, up, down }
 
 /// What a binding does here. A hub terminal plays the part of a tmux window.
 public enum PaneAction: Equatable, Sendable {
+    case splitAutomatically, splitBefore(Axis), move(Direction), balance
     case split(Axis)
     case selectPane(Direction)
     case nextPane(Int)

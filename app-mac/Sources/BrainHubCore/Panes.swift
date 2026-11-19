@@ -37,11 +37,13 @@ public struct PaneTree: Equatable, Sendable {
 
     /// Split the focused pane; the new, empty pane gets the focus. False at the limit.
     @discardableResult
-    public mutating func split(_ axis: Axis) -> Bool {
+    public mutating func split(_ axis: Axis, before: Bool = false) -> Bool {
         guard panes.count < Self.maxPanes else { return false }
         let new = nextID, splitID = nextID + 1
         nextID += 2
-        root = Self.replace(root, focused) { .split(id: splitID, axis: axis, ratio: 0.5, $0, .leaf(new)) }
+        root = Self.replace(root, focused) { old in
+            .split(id: splitID, axis: axis, ratio: 0.5, before ? .leaf(new) : old, before ? old : .leaf(new))
+        }
         zoomed = nil
         focused = new
         return true
@@ -89,6 +91,23 @@ public struct PaneTree: Equatable, Sendable {
             }
         }
         if let best = candidates.min(by: { (gap($0.value), $0.key) < (gap($1.value), $1.key) }) { focus(best.key) }
+    }
+
+    public mutating func move(_ direction: Direction) {
+        let origin = focused
+        focus(direction)
+        guard origin != focused else { return }
+        let moving = terminals[origin]
+        terminals[origin] = terminals[focused]
+        terminals[focused] = moving
+    }
+
+    public mutating func balance() {
+        func balanced(_ node: Node) -> Node {
+            guard case let .split(id, axis, _, first, second) = node else { return node }
+            return .split(id: id, axis: axis, ratio: 0.5, balanced(first), balanced(second))
+        }
+        root = balanced(root)
     }
 
     /// Move the border of the focused pane, as tmux's resize-pane: the nearest split along that axis, `cells`×5%.

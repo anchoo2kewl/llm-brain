@@ -13,7 +13,10 @@ struct BrainHubApp: App {
                 .frame(minWidth: 640, minHeight: 360)
         }
         .defaultSize(width: 1180, height: 760)
-        .commands { HubCommands() }
+        .commands {
+            SidebarCommands()
+            HubCommands()
+        }
 
         Window("Keyboard Shortcuts", id: "shortcuts") { ShortcutsView() }
             .defaultSize(width: 560, height: 720)
@@ -61,6 +64,12 @@ struct HubCommands: Commands {
     @FocusedValue(\.windowActions) private var actions
     @Environment(\.openWindow) private var openWindow
 
+    private func directions(_ perform: @escaping (Direction) -> Void) -> some View {
+        ForEach(Direction.allCases, id: \.rawValue) { direction in
+            Button(direction.rawValue.capitalized) { perform(direction) }
+        }
+    }
+
     var body: some Commands {
         let _ = (AppModel.shared.openMain = { [openWindow] in openWindow(id: "main") })
         // Cmd+W: the focused pane, else whatever window is in front (sheet, Settings, Shortcuts). Never does nothing.
@@ -86,6 +95,18 @@ struct HubCommands: Commands {
             Divider()
             Button(Shortcut.splitRight.title) { actions?.pane(.split(.horizontal)) }.shortcut(.splitRight)
             Button(Shortcut.splitDown.title) { actions?.pane(.split(.vertical)) }.shortcut(.splitDown)
+            Button("Split Automatically") { actions?.pane(.splitAutomatically) }
+            Button("Open Terminal in Separate Window") {
+                if let ref = actions?.selected { openWindow(value: ref) }
+            }.disabled(actions?.selected == nil)
+            Button("Split Left") { actions?.pane(.splitBefore(.horizontal)) }
+            Button("Split Up") { actions?.pane(.splitBefore(.vertical)) }
+            Menu("Focus Pane") { directions { actions?.pane(.selectPane($0)) } }
+            Menu("Move Terminal") { directions { actions?.pane(.move($0)) } }
+            Menu("Resize Pane") { directions { actions?.pane(.resize($0, 1)) } }
+            Button("Balance Splits") { actions?.pane(.balance) }.disabled((actions?.paneCount ?? 0) < 2)
+            Button("Previous Terminal") { actions?.pane(.nextWindow(-1)) }
+            Button("Next Terminal") { actions?.pane(.nextWindow(1)) }
             Button(Shortcut.nextPane.title) { actions?.pane(.nextPane(1)) }.shortcut(.nextPane)
             Button(Shortcut.previousPane.title) { actions?.pane(.nextPane(-1)) }.shortcut(.previousPane)
             Button(Shortcut.zoomPane.title) { actions?.pane(.zoom) }.shortcut(.zoomPane).disabled((actions?.paneCount ?? 0) < 2)

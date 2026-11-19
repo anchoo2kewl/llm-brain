@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor @Observable
 final class WindowPanes {
     var tree = PaneTree()
+    var viewport = CGSize.zero
     var showNew = false
     var showSearch = false
     @ObservationIgnored weak var window: NSWindow?
@@ -17,6 +18,13 @@ final class WindowPanes {
     func perform(_ action: PaneAction) {
         switch action {
         case .split(let axis): if !tree.split(axis) { NSSound.beep() }
+        case .splitAutomatically:
+            let frame = tree.frames()[tree.focused] ?? .zero
+            let sideBySide = viewport.width * frame.width >= viewport.height * frame.height
+            if !tree.split(sideBySide ? .horizontal : .vertical) { NSSound.beep() }
+        case .splitBefore(let axis): if !tree.split(axis, before: true) { NSSound.beep() }
+        case .move(let direction): tree.move(direction)
+        case .balance: tree.balance()
         case .selectPane(let d): tree.focus(d)
         case .nextPane(let n): tree.focusNext(n)
         case .resize(let d, let n): tree.resize(d, cells: n)
@@ -143,10 +151,15 @@ struct PaneTreeView: View {
     @Bindable var panes: WindowPanes
 
     var body: some View {
-        if let z = panes.tree.zoomed {
-            PaneLeaf(panes: panes, id: z)
-        } else {
-            node(panes.tree.root)
+        GeometryReader { geometry in
+            Group {
+                if let z = panes.tree.zoomed {
+                    PaneLeaf(panes: panes, id: z)
+                } else {
+                    node(panes.tree.root)
+                }
+            }
+            .onChange(of: geometry.size, initial: true) { panes.viewport = geometry.size }
         }
     }
 

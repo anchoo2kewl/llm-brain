@@ -114,6 +114,21 @@ import BrainHubCore
         #expect(p.panes.count == 1 && p.focusedTerminal == nil, "the last pane only empties")
     }
 
+    @Test func splitBeforeMoveAndBalance() {
+        var p = PaneTree(terminal: a)
+        p.split(.horizontal, before: true)
+        p.show(b)
+        #expect(p.frames()[p.focused]?.minX == 0)
+        p.move(.right)
+        #expect(p.focusedTerminal == b && p.terminals[1] == a)
+        let afterMove = p
+        p.move(.right)
+        #expect(p == afterMove)
+        p.resize(.left)
+        p.balance()
+        #expect(p == afterMove)
+    }
+
     @Test func atMostNinePanes() {
         var p = PaneTree()
         for i in 0..<8 { let ok = p.split(i % 2 == 0 ? .horizontal : .vertical); #expect(ok) }
