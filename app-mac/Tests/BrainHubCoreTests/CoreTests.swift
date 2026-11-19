@@ -264,3 +264,13 @@ import BrainHubCore
         #expect(ids([9, 2]) == [2, 4, 3, 1]) // a ref no longer open is ignored
     }
 }
+
+@Suite struct SendNowKeys {
+    @Test func claudeGetsEnterThenItsSendNowKeys() {
+        #expect(SendNow.keys(provider: "claude") == [Data([0x0d]), Data([0x18]), Data([0x13])])
+    }
+
+    @Test func shellAndOtherCLIsAreLeftAlone() {
+        for p in ["shell", "codex", ""] { #expect(SendNow.keys(provider: p) == nil, "\(p)") }
+    }
+}
