@@ -76,4 +76,15 @@ class ControlTest(unittest.TestCase):
    out=json.loads(self.call('session_detail',{'id':3,'hub':'studio'})['content'][0]['text']);self.assertEqual(out['base'],'https://studio.example.ts.net')
    out=json.loads(self.call('session_detail',{'id':3,'hub':'mac'})['content'][0]['text']);self.assertEqual(out['base'],'http://127.0.0.1:8787')
    for hub in ('off','https://evil.invalid','nope'):self.assertTrue(self.call('session_detail',{'id':3,'hub':hub})['isError'])
+class ListTest(unittest.TestCase):
+ def test_session_list_spans_online_peers_unless_hub_named(self):
+  nodes={'self':{'node':'mac'},'peers':[{'ok':True,'url':'https://studio.example.ts.net','info':{'node':'studio'}},{'ok':False,'url':'http://10.0.0.9:8787','info':{'node':'off'}}]}
+  def fake(path,payload=None,form=False,timeout=40,base=None):
+   if path=='/api/cluster/nodes':return nodes
+   return [{'id':7}] if base=='https://studio.example.ts.net' else []
+  with patch.dict(os.environ,{'BRAIN_HUB_URL':'http://127.0.0.1:8787'}),patch.object(m,'request',side_effect=fake):
+   rows=json.loads(m.respond({'method':'tools/call','params':{'name':'session_list','arguments':{}}})['content'][0]['text'])
+   self.assertEqual(rows,[{'id':7,'hub':'studio'}])
+   rows=json.loads(m.respond({'method':'tools/call','params':{'name':'session_list','arguments':{'hub':'mac'}}})['content'][0]['text'])
+   self.assertEqual(rows,[])
 if __name__=='__main__':unittest.main()

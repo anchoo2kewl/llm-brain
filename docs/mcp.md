@@ -45,7 +45,7 @@ A deployment can append its own rules to the server's instructions in `~/.config
 | Tool | What it does |
 | --- | --- |
 | `hubs_list` | The configured hub, its peers (node names to pass as `hub`) and the machines sessions run on |
-| `session_list`, `session_detail` | Sessions with machine, folder, provider and state; each row names its hub |
+| `session_list`, `session_detail` | Sessions with machine, folder, provider and state. Without `hub`, `session_list` covers the configured hub and every online peer; each row names its hub |
 | `session_screen`, `session_send` | Read the screen with a hash; send text or keys only against a fresh hash |
 | `session_wait`, `session_wait_many` | Wait on the hub until sessions go quiet, show text or end |
 | `session_create` | Start a Claude Code or Codex session on a machine |
@@ -75,3 +75,5 @@ panes as you choose, so it ignores layout requests). Each window reports what it
 A request reaches only windows that are open; nothing replays when a window opens later.
 
 Hubs without these features answer `HTTP 404` for move, workspace or queue tools.
+
+The bridge in Brain Hub 0.1.5 lists only the configured hub's sessions. If that hub holds none (for example a laptop hub whose terminals live on another hub), pass `hub` from `hubs_list`, or use a newer `bin/brain-mcp`.
