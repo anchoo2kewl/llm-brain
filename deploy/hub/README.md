@@ -29,3 +29,19 @@ existing local credential. Local attachment and session control do not need the 
 
 This patch does not discover a replacement address for a disconnected peer. Configure
 Studio's new Headscale address separately to restore access to Studio-hosted sessions.
+
+## Advisory-only agent policy (hub 0.1.2)
+
+After the 0.1.1 recovery patch, apply `advisory-review-policy.patch` with `git apply`.
+Its base is `d57685e97a87a5b42150cd800cdd8097ecadfd43`. It contains the complete
+publisher/queue enforcement, disabled Telegram approval command, runtime GitHub
+adapter, attribution reconciler, prompts, embedded service assets, and tests.
+Refresh embedded assets with `deploy/stage-agent-policy.py <service-checkout>`;
+the release packager does this automatically before testing and building.
+
+The advanced service's full Python suite has 383 passing tests. Its full Go suite
+passes, including policy installation and prohibition of Telegram GitHub calls.
+The public source's 191 Python tests also pass. A live managed `gh pr review
+--approve` attempt is rejected before contacting GitHub. See
+[`agent-pr-policy.md`](../../docs/agent-pr-policy.md) for the attribution roles and
+the boundary of the workflow adapter.

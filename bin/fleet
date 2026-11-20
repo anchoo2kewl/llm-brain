@@ -518,6 +518,7 @@ case "${1:-}" in
     fi
     echo $$ >"$lock/pid"
     trap 'rm -rf "$lock"' EXIT
+    python3 "$BRAIN_DIR/bin/brain-pr-policy" --reconcile >>"$BRAIN_STATE/logs/agent-attribution.log" 2>&1 || { log "agent attribution reconciliation failed; implementation dispatch paused"; exit 75; }
     log "tick"; "$BRAIN_DIR/bin/chat-watch" 2>>"$BRAIN_STATE/logs/fleet.log" || true; cmd_dispatch || true; cmd_babysit || true; cmd_review_prs || true; cmd_snapshot ;;
   snapshot) cmd_snapshot ;;
   review-prs) cmd_review_prs ;;

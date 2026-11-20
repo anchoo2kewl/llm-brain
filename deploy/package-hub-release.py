@@ -8,6 +8,8 @@ def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('version');p.add_argument('--source',default=str(Path(__file__).resolve().parents[1]));p.add_argument('--out',required=True);a=p.parse_args()
  if not re.fullmatch(r'\d+\.\d+\.\d+',a.version):raise ValueError('Use a stable semantic hub version')
  source=Path(a.source).resolve();out=Path(a.out).resolve();out.mkdir(parents=True,exist_ok=True)
+ if (source/'hub/agent_policy.go').is_file():
+  run(['python3',str(Path(__file__).with_name('stage-agent-policy.py')),str(source)])
  for required in ['hub/internal/web/migrate.go','hub/internal/web/move_folders.go','hub/internal/web/hub_update.go']:
   if not (source/required).is_file():raise RuntimeError('Package the deployed migration-service checkout; missing '+required)
  run(['go','test','./...'],cwd=source/'hub')
