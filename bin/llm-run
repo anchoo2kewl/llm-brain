@@ -8,6 +8,8 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 provider="$1" mode="$2" cwd="$3" prompt_file="$4" name="${5:-llm-brain}"
+export BRAIN_PROVIDER="$provider" BRAIN_AGENT="$name"
+export PATH="$BRAIN_DIR/bin/agent-tools:$PATH"
 prompt="$(cat "$prompt_file")"
 model="${LLM_MODEL:-$(cfg ".providers.$provider.model")}"
 cd "$cwd"

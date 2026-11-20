@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+import json,sys
+from agent_pr_policy import reconcile
+if __name__=='__main__':
+ if sys.argv[1:]!=['--reconcile']:sys.exit('usage: brain-pr-policy --reconcile')
+ print(json.dumps({'tagged':reconcile()}))
