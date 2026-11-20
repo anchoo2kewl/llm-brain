@@ -1,6 +1,6 @@
 # PR review
 
-Every PR that requests you (or @-mentions you) gets a short review that leads with security and performance, once per head commit, until it approves.
+Every PR that requests you (or @-mentions you) is assessed for security, performance, and correctness. Only verified new actionable findings are posted, as advisory comments.
 
 ## Which PRs
 
@@ -41,52 +41,20 @@ Focus order: security (OWASP Top 10), then performance, then correctness.
 
 With `pr_review.post: false` it is a dry run: the review JSON goes to `reviews/<key>/review.json` and the rendered review to `review.md`, and nothing is posted.
 
-## Red and Optional
+## Advisory output
 
-| Class | Blocks approval | What |
-| --- | --- | --- |
-| Red | Yes | Critical or high: bugs, security, tenant or RBAC leaks, data loss, migrations unsafe at production size, a stated outcome not delivered, UI copy that contradicts the API, a real CI failure. |
-| Optional | No | Medium or low. At most 3; the rest are dropped. |
+Agents never submit Approve or Request changes, including high-severity findings.
+CI or quality-score success cannot override this policy. See [agent PR policy](agent-pr-policy.md).
 
-The event is `APPROVE` when there are no Red items (the reviewer's own, or others' that are still open and real) and CI has no real failure. Otherwise `COMMENT`. It never uses `REQUEST_CHANGES`.
+Each published finding identifies the exact changed path/line, a concrete failure
+scenario, and a suggested correction. The review identifies the automated Brain Hub
+agent. Keep it short, with no generic clean-review summary or validation table.
+When there is no new verified finding, post nothing. Resolve missing context in the
+private source-follow-up flow instead of publishing inability-to-verify disclaimers.
 
-The [AI Slop Score](slop-score.md) adds a taste and PR-hygiene score to every review and blocks approval above a threshold.
-
-## Output format
-
-Short and plain, like a note to a teammate. Each item says what breaks, gives an example and the fix. Security items carry their OWASP id, e.g. `(A01)`.
-
-When there is nothing new, one line:
-
-```
-Approving. Nothing to add to <who>'s review.  Files reviewed: X/Y.
-Approving. Nothing found.  Files reviewed: X/Y.
-Not approving yet: <who>'s point on `path:line` is still open.
-```
-
-Otherwise a body of about 100 words:
-
-```
-<optional one sentence: what was verified, or which earlier items are fixed>
-
-**Blocking**
-- `path:line` — one line.
-
-**Optional**
-- `path:line` — one line.
-
-Approving. | Not approving yet: N blocking.  Files reviewed: X/Y.
-```
-
-Red items are always inline comments; Optional items are inline when on a diff line. An inline comment starts with `**🔴 Blocking** · <bug|security|data|contract|test>` or `**Optional** · <category>` and may carry a `suggestion` block. Lines the API rejects move into the body.
-
-The review is posted with `gh api repos/<nwo>/pulls/<n>/reviews` against the reviewed SHA. The worker's last line is:
-
-```
-REVIEWED <url> <APPROVE|COMMENT> red=<n> optional=<n> files=<x>/<y>
-```
-
-The hub and `status.json` read verdicts from that line.
+The GitHub event is always COMMENT, tied to the assessed SHA. A clean assessment
+has private completion state and no GitHub review receipt. It does not trigger an
+approval retry loop. The CLI records COMMENT or SILENT internally.
 
 ## Rule modules
 
