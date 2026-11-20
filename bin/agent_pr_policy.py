@@ -7,6 +7,7 @@ def gh(*args,payload=None):
  return json.loads(p.stdout) if p.stdout.strip() else None
 
 def provider(value):
+ if value=='anthropic':value='claude'
  return value if value in ('claude','codex','gemini','openai') else 'unknown'
 
 def labels_for(who,role):
