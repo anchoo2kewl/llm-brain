@@ -11,6 +11,7 @@ class AgentPolicyTest(unittest.TestCase):
  def test_advisory_and_read_only_paths_stay_available(self):
   for args,data in [(['pr','review','1','--comment','--body','Concrete finding'],''),(['api','repos/o/r/pulls/1/reviews'],''),(['api','repos/o/r/pulls/1/reviews','--input','-'],json.dumps({'event':'COMMENT','body':'Concrete finding'})),(['api','repos/o/r/pulls/1/reviews/2','-X','PUT','--input','-'],json.dumps({'body':'Updated finding'}))]:guard.validate(args,data)
  def test_review_is_not_code_authorship(self):
+  self.assertEqual(policy.labels_for('anthropic','reviewer'),['agent:assisted','agent:reviewer:claude'])
   self.assertEqual(policy.labels_for('openai','reviewer'),['agent:assisted','agent:reviewer:openai'])
   self.assertIsNone(policy.evidence({'body':'Reviewer said Claude found a bug','headRefName':'fix/human'},[]))
   self.assertEqual(policy.evidence({'body':'Generated with Claude Code'},[]),'claude')
