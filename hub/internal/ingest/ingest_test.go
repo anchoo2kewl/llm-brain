@@ -332,7 +332,7 @@ func TestQuotaObservations(t *testing.T) {
 // conversation id, and every model step's tokens land in usage_events, once even when replayed.
 func TestAntigravityTranscriptUsage(t *testing.T) {
 	home := t.TempDir()
-	const id = "dfbb7250-ce42-4067-8b38-568818e6ad8d"
+	const id = "7d1e0c3a-5b2f-4a61-9e8d-2c4b6f0a9e11"
 	p := filepath.Join(home, "brain", id, ".system_generated", "logs", "transcript.jsonl")
 	must(t, os.MkdirAll(filepath.Dir(p), 0o700))
 	appendFile(t, p, `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-22T04:39:15Z","content":"<USER_REQUEST>\nRead note.txt\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: now.\n</ADDITIONAL_METADATA>"}`+"\n"+
