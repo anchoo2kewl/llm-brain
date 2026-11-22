@@ -201,6 +201,14 @@ func KnownProvider(p string) bool {
 	return false
 }
 
+// Bin is the program a provider runs: Antigravity's is agy.
+func Bin(p string) string {
+	if p == "antigravity" {
+		return "agy"
+	}
+	return p
+}
+
 // ProviderName is how pages name a provider.
 func ProviderName(p string) string {
 	switch p {

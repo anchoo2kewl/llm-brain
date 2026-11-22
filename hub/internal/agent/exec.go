@@ -517,7 +517,7 @@ func shownArgs(args []string) []string {
 func AvailableProviders() []string {
 	var out []string
 	for _, p := range Providers {
-		if _, err := lookPath(p, searchPath()); err == nil {
+		if _, err := lookPath(Bin(p), searchPath()); err == nil {
 			out = append(out, p)
 		}
 	}
