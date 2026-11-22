@@ -274,6 +274,8 @@ public enum SendNow {
     public static func keys(provider: String) -> [Data]? {
         switch provider {
         case "claude": [Data([0x0d]), Data([0x18]), Data([0x13])] // Enter, then Ctrl+X Ctrl+S
+        case "codex": [Data([0x0d])] // Codex sends a message typed mid-turn at once
+        case "antigravity": [Data([0x1b, 0x6d])] // Alt+M, in one write: the opposite of agy's default Queue mode
         default: nil
         }
     }

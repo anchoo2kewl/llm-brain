@@ -266,11 +266,13 @@ import BrainHubCore
 }
 
 @Suite struct SendNowKeys {
-    @Test func claudeGetsEnterThenItsSendNowKeys() {
+    @Test func eachCLIGetsItsSendNowKeys() {
         #expect(SendNow.keys(provider: "claude") == [Data([0x0d]), Data([0x18]), Data([0x13])])
+        #expect(SendNow.keys(provider: "codex") == [Data([0x0d])])
+        #expect(SendNow.keys(provider: "antigravity") == [Data([0x1b, 0x6d])])
     }
 
-    @Test func shellAndOtherCLIsAreLeftAlone() {
-        for p in ["shell", "codex", ""] { #expect(SendNow.keys(provider: p) == nil, "\(p)") }
+    @Test func shellAndUnknownCLIsAreLeftAlone() {
+        for p in ["shell", ""] { #expect(SendNow.keys(provider: p) == nil, "\(p)") }
     }
 }
