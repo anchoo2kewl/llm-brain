@@ -32,6 +32,7 @@ const (
 	HSize   = "X-Hub-Size"
 	HMtime  = "X-Hub-Mtime"
 	HTZ     = "X-Hub-Tz"
+	HCwd    = "X-Hub-Cwd"
 	HReset  = "X-Hub-Reset"
 	HEOF    = "X-Hub-Eof"
 )
@@ -71,6 +72,7 @@ func (h *HTTPSink) Chunk(ctx context.Context, c Chunk) (int64, error) {
 	req.Header.Set(HSize, strconv.FormatInt(c.Size, 10))
 	req.Header.Set(HMtime, c.Mtime.UTC().Format(time.RFC3339Nano))
 	req.Header.Set(HTZ, c.TZ)
+	req.Header.Set(HCwd, url.PathEscape(c.Cwd))
 	req.Header.Set(HReset, strconv.FormatBool(c.Reset))
 	req.Header.Set(HEOF, strconv.FormatBool(c.EOF))
 	resp, err := h.Client.Do(req)
@@ -114,6 +116,9 @@ func DecodeChunk(r *http.Request, maxBytes int64) (Chunk, error) {
 		return c, err
 	}
 	c.Host, c.Kind, c.Path, c.TZ = r.Header.Get(HHost), r.Header.Get(HKind), p, r.Header.Get(HTZ)
+	if c.Cwd, err = url.PathUnescape(r.Header.Get(HCwd)); err != nil {
+		return c, err
+	}
 	if c.Offset, err = strconv.ParseInt(r.Header.Get(HOffset), 10, 64); err != nil {
 		return c, fmt.Errorf("bad offset")
 	}

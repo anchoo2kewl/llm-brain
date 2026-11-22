@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -242,8 +243,8 @@ func TestRunLogSplitRune(t *testing.T) {
 }
 
 // The shipper over HTTP lands the same rows, under the shipping host's name, and is idempotent too.
-func TestShipOverHTTP(t *testing.T) {
-	e := newEngine(t)
+// shipServer is the hub half of shipping, in front of e.
+func shipServer(t *testing.T, e *Engine) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/ship/offsets", func(w http.ResponseWriter, r *http.Request) {
 		m, _ := e.Offsets(r.Context(), r.URL.Query().Get("host"))
@@ -276,7 +277,13 @@ func TestShipOverHTTP(t *testing.T) {
 		w.WriteHeader(200)
 	})
 	ts := httptest.NewServer(mux)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestShipOverHTTP(t *testing.T) {
+	e := newEngine(t)
+	ts := shipServer(t, e)
 	home, _ := fixture(t)
 	c := collector(home, NewHTTPSink(ts.URL))
 	ctx := context.Background()
@@ -382,5 +389,49 @@ func TestAntigravityTranscriptUsage(t *testing.T) {
 	if count(t, e, `SELECT count(*) FROM messages WHERE kind = 'tool_use' AND tool_name = 'read_file'`) != 1 ||
 		count(t, e, `SELECT count(*) FROM messages WHERE kind = 'tool_result'`) != 1 {
 		t.Fatal("tool call or result missing")
+	}
+}
+
+// The folder of an Antigravity conversation comes from agy's conversation_summaries.db, not the transcript,
+// and reaches the hub with the chunk. A fresh transcript waits for its folder row; an old one ships anyway.
+func TestAntigravityFolderFromSummaries(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("no sqlite3")
+	}
+	home := t.TempDir()
+	brain := filepath.Join(home, "antigravity-cli", "brain")
+	line := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","created_at":"2026-11-22T04:39:15Z","content":"<USER_REQUEST>hi</USER_REQUEST>"}` + "\n"
+	transcript := func(id string) string {
+		p := filepath.Join(brain, id, ".system_generated", "logs", "transcript.jsonl")
+		must(t, os.MkdirAll(filepath.Dir(p), 0o700))
+		appendFile(t, p, line)
+		return p
+	}
+	known, fresh, old := "7d1e0c3a-5b2f-4a61-9e8d-2c4b6f0a9e11", "8e2f1d4b-6c3a-4b72-8f9e-3d5c7a1b0f22", "9f3a2e5c-7d4b-4c83-9a0f-4e6d8b2c1a33"
+	transcript(known)
+	transcript(fresh)
+	past := time.Now().Add(-time.Hour)
+	must(t, os.Chtimes(transcript(old), past, past))
+	db := filepath.Join(home, "antigravity-cli", "conversation_summaries.db")
+	out, err := exec.Command("sqlite3", db, "CREATE TABLE conversation_summaries (conversation_id text, workspace_uris text NOT NULL);"+
+		"INSERT INTO conversation_summaries VALUES ('"+known+"', '[\"file:///Users/me/work/my%20app\"]');").CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v", out, err)
+	}
+	e := newEngine(t)
+	c := collector(home, NewHTTPSink(shipServer(t, e).URL))
+	c.ClaudeDir, c.AntigravityDir = "", brain
+	must(t, c.Cycle(context.Background()))
+	got := map[string]string{}
+	rows, err := e.S.DB.Query(`SELECT session_uuid, cwd || '|' || project FROM sessions`)
+	must(t, err)
+	for rows.Next() {
+		var id, v string
+		must(t, rows.Scan(&id, &v))
+		got[id] = v
+	}
+	rows.Close()
+	if len(got) != 2 || got[known] != "/Users/me/work/my app|/Users/me/work/my app" || got[old] != "|" {
+		t.Fatalf("sessions %v", got) // fresh waits for its folder row
 	}
 }

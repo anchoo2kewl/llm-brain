@@ -41,6 +41,7 @@ type Chunk struct {
 	Size   int64 // file size when read
 	Mtime  time.Time
 	TZ     string // IANA zone of the machine that wrote the file
+	Cwd    string // the folder the session ran in, when the file itself doesn't say (Antigravity)
 	Reset  bool   // the file shrank: forget what was read from it and start over
 	EOF    bool   // Data reaches the end of the file
 	Data   []byte
@@ -326,6 +327,7 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 			}
 		}
 		setIf(&m.cwd, ev.Cwd)
+		setIf(&m.cwd, c.Cwd)
 		setIf(&m.branch, ev.Branch)
 		setIf(&m.model, ev.Model)
 		setIf(&m.autoTitle, ev.AutoTitle)
@@ -358,7 +360,7 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 			}
 		}
 	}
-	if c.Kind == KindCodex && m.project == "" {
+	if (c.Kind == KindCodex || c.Kind == KindAntigravity) && m.project == "" {
 		m.project = m.cwd
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE sessions SET project = ?, cwd = ?, branch = ?, model = ?, originator = ?, title = ?,
