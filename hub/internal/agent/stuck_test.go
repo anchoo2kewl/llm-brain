@@ -233,6 +233,9 @@ func TestTermScriptResume(t *testing.T) {
 func TestBlockedTerminalSyncAndRestart(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
+	if err := r.st.SetAgentInventory(ctx, "studio", "test", []string{r.repo}, nil, []string{"claude", "codex", "antigravity"}); err != nil {
+		t.Fatal(err)
+	}
 	open := func(provider string) int64 {
 		id, err := r.ctl.OpenTerminal(ctx, TermReq{Host: "studio", Provider: provider, Cwd: "~/play/learn", Ask: true, Model: "opus"})
 		if err != nil {
@@ -240,7 +243,7 @@ func TestBlockedTerminalSyncAndRestart(t *testing.T) {
 		}
 		return id
 	}
-	cl, cx, sh := open("claude"), open("codex"), open("shell")
+	cl, cx, sh, ag := open("claude"), open("codex"), open("shell"), open("antigravity")
 	inv := func(ts ...store.TermSeen) {
 		t.Helper()
 		if err := r.hub.Inventory(ctx, Inventory{Host: "studio", Tmux: true, TermsAt: time.Now().Add(time.Minute), Terminals: ts}); err != nil {
@@ -248,7 +251,7 @@ func TestBlockedTerminalSyncAndRestart(t *testing.T) {
 		}
 	}
 	blk := &store.TermBlock{Reason: "macOS privacy prompt", PID: 101, Proc: "claude", Func: "openat", Since: store.T(time.Now())}
-	inv(store.TermSeen{ID: cl, Blocked: blk}, store.TermSeen{ID: cx}, store.TermSeen{ID: sh})
+	inv(store.TermSeen{ID: cl, Blocked: blk}, store.TermSeen{ID: cx}, store.TermSeen{ID: sh}, store.TermSeen{ID: ag})
 	term, _ := r.st.Terminal(ctx, cl)
 	if b := term.Block(); term.Status != "live" || b == nil || b.Func != "openat" {
 		t.Fatalf("not blocked: %+v", term)
@@ -274,6 +277,17 @@ func TestBlockedTerminalSyncAndRestart(t *testing.T) {
 	_ = json.Unmarshal(c.Payload, &o)
 	if c.Kind != KindTermRestart || c.AgentID != cl || o.Resume != resume || o.SessionID != "" || !o.Ask || o.Model != "opus" || o.Prompt != "" {
 		t.Fatalf("restart command %+v %+v", c, o)
+	}
+	// Antigravity: no conversation id to give, so the restart continues the folder's latest (agy -c).
+	cidA, err := r.ctl.RestartTerminal(ctx, ag, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cA, _ := r.st.Command(ctx, cidA)
+	o = TermOpen{}
+	_ = json.Unmarshal(cA.Payload, &o)
+	if !o.Continue || o.Resume != "" {
+		t.Fatalf("antigravity restart %+v", o)
 	}
 	// Nothing to resume yet: start again under the same Claude session id, so the hub still knows it.
 	cid2, _ := r.ctl.RestartTerminal(ctx, cl, "")
