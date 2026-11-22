@@ -300,7 +300,7 @@ func TestPresence(t *testing.T) {
 			{ID: 10, Host: "gone", Provider: "claude", Key: "issue-1", Target: "https://github.com/acme/api/issues/17446", HostLive: false},
 		},
 		terminals: []store.Terminal{
-			{ID: 5, Host: "studio", Provider: "gemini", Cwd: "/Users/me/work/api/internal", Status: "live", UpdatedAt: store.T(now)},
+			{ID: 5, Host: "studio", Provider: "antigravity", Cwd: "/Users/me/work/api/internal", Status: "live", UpdatedAt: store.T(now)},
 			{ID: 6, Host: "studio", Provider: "claude", Cwd: "/Users/me/work/api", Status: "ended"},
 		},
 	}

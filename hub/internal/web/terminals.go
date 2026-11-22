@@ -21,7 +21,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Terminals: Claude Code, Codex, Gemini or a shell, running interactively in tmux on a host with every
+// Terminals: Claude Code, Codex, Antigravity or a shell, running interactively in tmux on a host with every
 // permission, shown live in the browser (agent/term.go). The browser's websocket and the host agent's
 // websocket meet here: the page opens /terminals/{id}/ws, the hub queues a term_attach with a one-time
 // token, and the host agent dials /api/agent/term/{token}; the hub then copies frames between the two.
@@ -93,7 +93,7 @@ type termForm struct {
 
 type cli struct{ Value, Label, Note string }
 
-var termCLIs = []cli{{"claude", "Claude Code", "claude"}, {"codex", "Codex", "codex"}, {"gemini", "Gemini CLI", "gemini"}, {"shell", "Shell", "your login shell"}}
+var termCLIs = []cli{{"claude", "Claude Code", "claude"}, {"codex", "Codex", "codex"}, {"antigravity", "Antigravity", "agy"}, {"shell", "Shell", "your login shell"}}
 
 // pick is a folder the picker offers: Value is what goes in the box ("~/example"), Label how it reads.
 type pick struct{ Value, Label string }

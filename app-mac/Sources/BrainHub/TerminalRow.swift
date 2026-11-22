@@ -148,7 +148,7 @@ struct Badge: View {
         switch provider {
         case "claude": .orange
         case "codex": .teal
-        case "gemini": .blue
+        case "antigravity": .blue
         default: .gray
         }
     }

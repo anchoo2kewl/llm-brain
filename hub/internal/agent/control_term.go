@@ -22,7 +22,7 @@ type TermReq struct {
 // host resolves it (and refuses one outside the home folder).
 func (c *Control) OpenTerminal(ctx context.Context, r TermReq) (int64, error) {
 	if !KnownTermProvider(r.Provider) {
-		return 0, bad("pick Claude Code, Codex, Gemini or a shell")
+		return 0, bad("pick Claude Code, Codex, Antigravity or a shell")
 	}
 	h, err := c.liveHost(ctx, r.Host)
 	if err != nil {
@@ -140,7 +140,6 @@ func (c *Control) RestartTerminal(ctx context.Context, id int64, resume string) 
 	}
 	o.Provider, o.Prompt, o.Worktree, o.Cwd, o.Resume = t.Provider, "", nil, "", ""
 	switch {
-	case t.Provider == "gemini": // no way to name a conversation to resume: a fresh start in the same folder
 	case resume != "":
 		o.Resume = resume
 	case t.Provider == "claude" && t.SessionUUID != "":

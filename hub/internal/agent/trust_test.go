@@ -33,6 +33,13 @@ Trusting a folder allows Gemini to execute commands it suggests.
   1. Trust folder (learn)
 ● 2. Trust parent folder (play)
   3. Don't trust (esc)`, "Up Enter"},
+		{"antigravity", `Accessing workspace:
+/Users/me/work
+Do you trust the contents of this project?
+Antigravity CLI requires permission to read, edit, and execute files here.
+> Yes, I trust this folder
+  No, exit
+  ↑/↓ Navigate · enter Confirm`, "Enter"},
 		{"codex 0.159", `  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.
 › 1. Trust and continue
   2. Back to Agent Command Center

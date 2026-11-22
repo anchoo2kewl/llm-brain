@@ -30,7 +30,7 @@
 </section>
 
 <div class="set-grid">
-{{if .HasAgents}}<a class="card" href="/settings/updates"><b>Updates</b><span>Keep Homebrew, Claude Code, Codex and Gemini CLI current on every Mac. Daily update: {{if .AutoUpd}}on{{else}}off{{end}}.</span></a>{{end}}
+{{if .HasAgents}}<a class="card" href="/settings/updates"><b>Updates</b><span>Keep Homebrew, Claude Code, Codex and Antigravity current on every Mac. Daily update: {{if .AutoUpd}}on{{else}}off{{end}}.</span></a>{{end}}
 <a class="card" href="/settings/slack"><b>Slack</b><span>{{if .Slack.Connected}}Connected as @{{.Slack.UserName}} in {{.Slack.Team}}.{{else}}Connect a user token to read channels, DMs and mentions.{{end}}</span></a>
 <a class="card" href="/memory"><b>Shared memory</b><span>What every agent reads before it works, and who's working on what.</span></a>
 <a class="card" href="/agents"><b>Hosts &amp; agents</b><span>The Macs that run sessions, their CLIs and the command log.</span></a>

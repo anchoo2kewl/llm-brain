@@ -327,3 +327,60 @@ func TestQuotaObservations(t *testing.T) {
 		t.Fatal("quota should not add transcript blocks")
 	}
 }
+
+// An Antigravity transcript is discovered under brain/<id>/, becomes an "antigravity" session named by the
+// conversation id, and every model step's tokens land in usage_events, once even when replayed.
+func TestAntigravityTranscriptUsage(t *testing.T) {
+	home := t.TempDir()
+	const id = "7d1e0c3a-5b2f-4a61-9e8d-2c4b6f0a9e11"
+	p := filepath.Join(home, "brain", id, ".system_generated", "logs", "transcript.jsonl")
+	must(t, os.MkdirAll(filepath.Dir(p), 0o700))
+	appendFile(t, p, `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-22T04:39:15Z","content":"<USER_REQUEST>\nRead note.txt\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: now.\n</ADDITIONAL_METADATA>"}`+"\n"+
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-22T04:39:15Z","model":"gemini-4-neon-high","input_tokens":8790,"cache_read_tokens":0,"output_tokens":300,"thinking":"look at the file","tool_calls":[{"name":"read_file","args":{"Path":"/w/note.txt"}}]}`+"\n"+
+		`{"step_index":2,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-22T04:39:20Z","content":"1: hello"}`+"\n"+
+		`{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-22T04:39:20Z","model":"gemini-4-neon-high","input_tokens":2450,"cache_read_tokens":6733,"output_tokens":32,"content":"hello"}`+"\n")
+	c := collector(home, nil)
+	c.ClaudeDir, c.AntigravityDir = "", filepath.Join(home, "brain")
+	src := c.Discover()
+	if len(src) != 1 || src[0].kind != KindAntigravity {
+		t.Fatalf("discovered %+v", src)
+	}
+	e := newEngine(t)
+	ctx := context.Background()
+	data, _ := os.ReadFile(p)
+	for range 2 { // a replay from offset 0 (Reset) must not double the usage
+		if _, err := e.Chunk(ctx, Chunk{Host: "laptop", Kind: KindAntigravity, Path: p, Mtime: time.Now(), Data: data, Reset: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var uuid, provider, title, model string
+	must(t, e.S.DB.QueryRow(`SELECT session_uuid, provider, title, model FROM sessions`).Scan(&uuid, &provider, &title, &model))
+	if uuid != id || provider != "antigravity" || title != "Read note.txt" || model != "gemini-4-neon-high" {
+		t.Fatalf("session %q %q %q %q", uuid, provider, title, model)
+	}
+	var n, in, out, cache int
+	must(t, e.S.DB.QueryRow(`SELECT count(*), sum(input), sum(output), sum(cache_read) FROM usage_events`).Scan(&n, &in, &out, &cache))
+	if n != 2 || in != 11240 || out != 332 || cache != 6733 {
+		t.Fatalf("usage rows=%d in=%d out=%d cache=%d", n, in, out, cache)
+	}
+	// A compaction rewrites the transcript shorter, without step 1: the re-read keeps step 1's tokens.
+	lines := strings.SplitAfter(string(data), "\n")
+	short := lines[0] + lines[3]
+	if _, err := e.Chunk(ctx, Chunk{Host: "laptop", Kind: KindAntigravity, Path: p, Mtime: time.Now(), Data: []byte(short), Reset: true}); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, e, `SELECT count(*) FROM usage_events`) != 2 {
+		t.Fatal("a rewritten Antigravity transcript lost the usage of the steps it dropped")
+	}
+	if count(t, e, `SELECT count(*) FROM messages WHERE kind = 'tool_use' AND tool_name = 'read_file'`) != 0 {
+		t.Fatal("messages of the dropped step survived the re-read")
+	}
+	must(t, os.WriteFile(p, data, 0o600))
+	if _, err := e.Chunk(ctx, Chunk{Host: "laptop", Kind: KindAntigravity, Path: p, Mtime: time.Now(), Data: data, Reset: true}); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, e, `SELECT count(*) FROM messages WHERE kind = 'tool_use' AND tool_name = 'read_file'`) != 1 ||
+		count(t, e, `SELECT count(*) FROM messages WHERE kind = 'tool_result'`) != 1 {
+		t.Fatal("tool call or result missing")
+	}
+}

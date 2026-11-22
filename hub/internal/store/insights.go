@@ -60,17 +60,21 @@ const InsightsCursor = "messages"
 
 // ResetSessionInsights drops the derived rows of the transcript at host/path, inside the transaction that
 // deletes its messages (a truncated or replaced file is re-read from the start). Re-ingested messages then
-// roll up again without double counting.
+// roll up again without double counting. keepUsage leaves usage_events alone, for a transcript whose usage
+// ids survive a rewrite (Antigravity: one per step index), so steps a rewrite drops keep their tokens.
 //
 // Message ids are rowids: when the deleted messages were the newest, the re-read ones reuse their ids. The
 // rollup cursor is pulled back to the newest surviving id so those are not skipped (nothing between that id
 // and the old cursor exists any more, so nothing is counted twice).
-func ResetSessionInsights(ctx context.Context, tx *sql.Tx, host, path string) error {
-	for _, q := range []string{
-		`DELETE FROM usage_events WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`,
+func ResetSessionInsights(ctx context.Context, tx *sql.Tx, host, path string, keepUsage bool) error {
+	qs := []string{
 		`DELETE FROM tool_calls WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`,
 		`DELETE FROM activity WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`,
-	} {
+	}
+	if !keepUsage {
+		qs = append(qs, `DELETE FROM usage_events WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`)
+	}
+	for _, q := range qs {
 		if _, err := tx.ExecContext(ctx, q, host, path); err != nil {
 			return err
 		}

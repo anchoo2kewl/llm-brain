@@ -17,7 +17,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Closing a session: ending the process of a Claude Code, Codex or Gemini CLI that runs on some Mac, started
+// Closing a session: ending the process of a Claude Code, Codex or Antigravity CLI that runs on some Mac, started
 // by the hub or not. A hub terminal is ended as a terminal (term_kill); everything else is a session_close
 // for the Mac it runs on, which finds the process and signals it: TERM, then HUP, then KILL.
 //
@@ -28,7 +28,7 @@ import (
 //  3. The one process of that CLI whose working directory is the session's folder; two or more is
 //     ambiguous and nothing is signalled.
 //
-// Only claude/codex/gemini processes are ever signalled, never a headless one (claude -p, codex exec: fleet
+// Only claude/codex/agy processes are ever signalled, never a headless one (claude -p, codex exec: fleet
 // runs and hub tasks have their own stop), and never the hub or this agent or anything they run inside.
 
 const KindSessionClose = store.KindSessionClose
@@ -85,8 +85,8 @@ func (c *Control) CloseSession(ctx context.Context, x store.Session) (int64, err
 		return 0, bad("this is a fleet run; cancel it from its run page")
 	case HeadlessOriginator(x.Originator):
 		return 0, bad("this is a headless run; it ends by itself")
-	case x.Provider != "claude" && x.Provider != "codex" && x.Provider != "gemini":
-		return 0, bad("only Claude, Codex and Gemini sessions can be closed")
+	case x.Provider != "claude" && x.Provider != "codex" && x.Provider != "antigravity":
+		return 0, bad("only Claude, Codex and Antigravity sessions can be closed")
 	}
 	if x.CloseCmd > 0 {
 		if cmd, err := c.S.Command(ctx, x.CloseCmd); err == nil && !store.FinalStatus(cmd.Status) {
@@ -137,7 +137,7 @@ func (e *Executor) procs() Procs {
 // sessionClose finds a session's process and ends it.
 func (e *Executor) sessionClose(ctx context.Context, c store.Command) {
 	var p SessionClose
-	if err := json.Unmarshal(c.Payload, &p); err != nil || (p.Provider != "claude" && p.Provider != "codex" && p.Provider != "gemini") {
+	if err := json.Unmarshal(c.Payload, &p); err != nil || (p.Provider != "claude" && p.Provider != "codex" && p.Provider != "antigravity") {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: "bad payload"})
 		return
 	}
@@ -329,7 +329,7 @@ func trimArgs(a string) string {
 	return a
 }
 
-// cliOf names the CLI a command line runs: claude, codex, gemini or "".
+// cliOf names the CLI a command line runs: claude, codex, antigravity or "".
 func cliOf(args string) string {
 	f := strings.Fields(args)
 	if len(f) == 0 {
@@ -350,8 +350,6 @@ func cliOf(args string) string {
 			return "claude"
 		case strings.Contains(s, "@openai/codex") || filepath.Base(s) == "codex":
 			return "codex"
-		case strings.Contains(s, "gemini-cli") || filepath.Base(s) == "gemini":
-			return "gemini"
 		}
 		return ""
 	}
@@ -360,13 +358,13 @@ func cliOf(args string) string {
 		return "claude"
 	case base == "codex" || strings.HasPrefix(base, "codex-aarch64") || strings.HasPrefix(base, "codex-x86_64"):
 		return "codex"
-	case base == "gemini":
-		return "gemini"
+	case base == "agy" || (base == "antigravity" && strings.Contains(bin, "antigravity-cli")): // the agy wrapper execs the binary
+		return "antigravity"
 	}
 	return ""
 }
 
-// headlessArgs: a non-interactive run (claude -p, codex exec, gemini -p).
+// headlessArgs: a non-interactive run (claude -p, codex exec, agy -p).
 func headlessArgs(cli, args string) bool {
 	f := strings.Fields(args)
 	if len(f) > 0 && (filepath.Base(f[0]) == "node" || filepath.Base(f[0]) == "bun") {
@@ -379,7 +377,7 @@ func headlessArgs(cli, args string) bool {
 	// interactive session look headless, which only ever refuses a close (the safe side).
 	for _, a := range f {
 		switch cli {
-		case "claude", "gemini":
+		case "claude", "antigravity":
 			if a == "-p" || a == "--print" || a == "--prompt" || strings.HasPrefix(a, "--print=") || strings.HasPrefix(a, "--prompt=") ||
 				(cli == "claude" && a == "mcp") {
 				return true

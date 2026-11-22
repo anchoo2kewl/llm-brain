@@ -67,3 +67,15 @@ func TestTermScriptSessionID(t *testing.T) {
 		t.Fatalf("uuid %q", u)
 	}
 }
+
+func TestAntigravityTerminalScript(t *testing.T) {
+	const id = "7d1e0c3a-5b2f-4a61-9e8d-2c4b6f0a9e11"
+	script, _, err := TermScript(TermOpen{Provider: "antigravity", Resume: id, Prompt: "-fix the pager"}, Gateway{}, "/bin/zsh")
+	if err != nil || !strings.HasPrefix(script, "agy --dangerously-skip-permissions --conversation "+id) ||
+		!strings.Contains(script, "--prompt-interactive=") || !strings.Contains(script, "exec /bin/zsh -l") {
+		t.Fatalf("%s %v", script, err)
+	}
+	if !KnownTermProvider("antigravity") || KnownTermProvider("gemini") {
+		t.Fatal("terminal providers")
+	}
+}

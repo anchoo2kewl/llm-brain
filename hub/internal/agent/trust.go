@@ -8,7 +8,8 @@ import (
 )
 
 // A CLI opened in a folder it hasn't seen asks whether to trust it (Claude Code: "Yes, I trust this folder";
-// Codex: "Do you trust the contents of this directory?"; Gemini: "Do you trust this folder?"). Nobody is at
+// Codex: "Do you trust the contents of this directory?"; Antigravity: "Do you trust the contents of this
+// project?"). Nobody is at
 // the Mac's screen, so a hub terminal would sit there until someone answered from the browser. The person
 // picked the folder when they opened the terminal, so the hub answers yes for them.
 
@@ -29,7 +30,7 @@ func trustKeys(screen string) []string {
 		return nil
 	}
 	lines := strings.Split(screen, "\n")
-	for i, l := range lines { // Gemini draws its prompt in a box: "│ ● 1. Trust folder (x) │"
+	for i, l := range lines { // a CLI may draw its prompt in a box: "│ ● 1. Trust folder (x) │"
 		lines[i] = strings.Trim(strings.TrimSpace(l), "│┃║ ")
 	}
 	cur, yes := -1, -1

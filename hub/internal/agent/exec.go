@@ -383,7 +383,7 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 	_ = os.MkdirAll(tmpDir, 0o700)
 	logPath := filepath.Join(logDir, fmt.Sprintf("agent-%d.%s.log", c.AgentID, stamp))
 	gw := Gateway{}
-	if t.Provider != "gemini" {
+	if t.Provider != "antigravity" {
 		gw = e.Config.ResolveGateway(ctx)
 	}
 	route := "the CLI's own login"
@@ -400,7 +400,7 @@ func (e *Executor) runTurn(ctx context.Context, c store.Command, st *turn) {
 	case "codex":
 		spec, err = BuildCodex(t, cwd, prompt, filepath.Join(tmpDir, fmt.Sprintf("%d.last", c.ID)), gw)
 	default:
-		spec, err = BuildGemini(t, cwd, prompt)
+		spec, err = BuildAntigravity(t, cwd, prompt)
 		route = "the CLI's own login"
 	}
 	if err != nil {

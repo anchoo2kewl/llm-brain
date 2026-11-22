@@ -373,10 +373,10 @@ a.searchlink{display:none}
 .tview details.t-more>summary{display:inline-block;padding:2px 0}
 @media (max-width:1100px),(pointer:coarse){.tview details>summary{min-height:var(--tap);display:flex;align-items:center}}
 .tview .t-think .g{color:#a371f7}
-/* the CLIs' own glyphs: Claude ❯ ⏺ ⎿, Codex › • └, Gemini > ✦ ⎿ */
+/* the CLIs' own glyphs: Claude ❯ ⏺ ⎿, Codex › • └, Antigravity > ✦ ⎿ */
 .tview .g-user::before{content:"❯"}.tview .g-asst::before,.tview .g-tool::before{content:"⏺"}.tview .g-res::before{content:"⎿"}
 .tview.p-codex .g-user::before{content:"›"}.tview.p-codex .g-asst::before,.tview.p-codex .g-tool::before{content:"•"}.tview.p-codex .g-res::before{content:"└"}
-.tview.p-gemini .g-user::before{content:">"}.tview.p-gemini .g-asst::before{content:"✦"}.tview.p-gemini .g-tool::before{content:"✓"}
+.tview.p-antigravity .g-user::before{content:">"}.tview.p-antigravity .g-asst::before{content:"✦"}.tview.p-antigravity .g-tool::before{content:"✓"}
 .transcript.tview.hidetools .t-tool,.transcript.tview.hidetools .t-res{display:none}
 .transcript.tview.hidemeta .t-meta{display:none}
 @media (max-width:760px){.transcript.tview{font-size:12.5px;padding:10px;border-radius:var(--r-sm)}.tview .t-user{margin-left:-10px;margin-right:-10px;padding:4px 10px}}

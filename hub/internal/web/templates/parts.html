@@ -126,7 +126,7 @@
 <div class="wide row attachrow"><label class="btn upl small">Attach images or files…<input type="file" id="termattach" multiple hidden></label><span class="mut small">They go to the chosen Mac and the message points the CLI at them.</span></div>
 </div>
 <fieldset class="perms wide"><legend>Permissions</legend>
-<label><input type="radio" name="perm" value="full" {{if eq .F.Perm "full"}}checked{{end}}> <span><b>Full access</b> <span class="mut">no approval prompts, no sandbox: <code>claude --dangerously-skip-permissions</code>, <code>codex --dangerously-bypass-approvals-and-sandbox</code>, <code>gemini --approval-mode yolo</code></span></span></label>
+<label><input type="radio" name="perm" value="full" {{if eq .F.Perm "full"}}checked{{end}}> <span><b>Full access</b> <span class="mut">no approval prompts, no sandbox: <code>claude --dangerously-skip-permissions</code>, <code>codex --dangerously-bypass-approvals-and-sandbox</code>, <code>agy --dangerously-skip-permissions</code></span></span></label>
 <label><input type="radio" name="perm" value="ask" {{if eq .F.Perm "ask"}}checked{{end}}> <span><b>Ask first</b> <span class="mut">the CLI's normal prompts before it edits files or runs commands</span></span></label>
 </fieldset>
 <p class="mut small">When the CLI exits you're left in a shell in the same folder.</p>

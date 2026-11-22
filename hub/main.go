@@ -68,10 +68,10 @@ func usage() {
 }
 
 type common struct {
-	state, claude, codex, host string
-	interval                   time.Duration
-	roots, brain               string
-	agent                      bool
+	state, claude, codex, antigravity, host string
+	interval                                time.Duration
+	roots, brain                            string
+	agent                                   bool
 }
 
 func commonFlags(fs *flag.FlagSet) *common {
@@ -80,9 +80,10 @@ func commonFlags(fs *flag.FlagSet) *common {
 	fs.StringVar(&c.state, "state", filepath.Join(home, ".local/state/llm-brain"), "llm-brain state dir (logs/, runs/, status.json)")
 	fs.StringVar(&c.claude, "claude", filepath.Join(home, ".claude/projects"), "Claude Code transcripts dir ('' to skip)")
 	fs.StringVar(&c.codex, "codex", filepath.Join(home, ".codex/sessions"), "Codex sessions dir ('' to skip)")
+	fs.StringVar(&c.antigravity, "antigravity", filepath.Join(home, ".gemini/antigravity-cli/brain"), "Antigravity CLI conversations dir ('' to skip)")
 	fs.StringVar(&c.host, "host", ingest.ShortHostname(), "this machine's name, as `hostname -s`")
 	fs.DurationVar(&c.interval, "interval", 10*time.Second, "re-scan interval")
-	fs.BoolVar(&c.agent, "agent", true, "run the session agent: start Claude/Codex/Gemini turns the hub queues for this host")
+	fs.BoolVar(&c.agent, "agent", true, "run the session agent: start Claude/Codex/Antigravity turns the hub queues for this host")
 	fs.StringVar(&c.roots, "roots", "", "comma-separated folders sessions may run under (default: the fleet config's work_root if it exists, else ~/projects)")
 	fs.StringVar(&c.brain, "brain", brainDir(), "llm-brain checkout (config/fleet.yaml, bin/review-rules)")
 	return c
@@ -116,7 +117,7 @@ func (c *common) executor(hub agent.Hub, poll time.Duration, lg *log.Logger) *ag
 }
 
 func (c *common) collector(role string, sink ingest.Sink, lg *log.Logger) *ingest.Collector {
-	return &ingest.Collector{Host: c.host, Role: role, ClaudeDir: c.claude, CodexDir: c.codex, StateDir: c.state,
+	return &ingest.Collector{Host: c.host, Role: role, ClaudeDir: c.claude, CodexDir: c.codex, AntigravityDir: c.antigravity, StateDir: c.state,
 		TZ: ingest.LocalTZ(), Sink: sink, Log: lg}
 }
 

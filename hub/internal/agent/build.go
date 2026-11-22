@@ -164,33 +164,33 @@ func BuildCodex(t Turn, cwd, prompt, lastFile string, gw Gateway) (Spec, error) 
 	return Spec{Bin: "codex", Args: args, Env: env, Dir: cwd, Stdin: prompt, LastFile: lastFile}, nil
 }
 
-// BuildGemini: gemini --prompt=<prompt> -o stream-json --approval-mode ... [--resume id]. Gemini reads the
-// prompt from the flag (stdin is only appended to it); the = form keeps a prompt starting with '-' a value.
-// It runs on the CLI's own login: the account gateway speaks the Anthropic and OpenAI APIs.
-func BuildGemini(t Turn, cwd, prompt string) (Spec, error) {
+// BuildAntigravity: agy --print=<prompt> --output-format stream-json [--conversation id]. The = form keeps a
+// prompt starting with '-' a value. It runs on the CLI's own login (one per Mac, in the keychain): the account
+// gateway speaks the Anthropic and OpenAI APIs. agy's default mode approves edits and safe commands; its
+// accept-edits mode waits for a command approval nobody can give headless, and its plan mode writes a plan
+// instead of answering (and --sandbox does not stop file writes), so there is no read-only turn.
+func BuildAntigravity(t Turn, cwd, prompt string) (Spec, error) {
 	if err := checkTurn(t); err != nil {
 		return Spec{}, err
 	}
-	args := []string{"--prompt=" + prompt, "--output-format", "stream-json"}
+	args := []string{"--print=" + prompt, "--output-format", "stream-json"}
 	if t.Resume != "" {
-		args = append(args, "--resume", t.Resume)
+		args = append(args, "--conversation", t.Resume)
 	}
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
 	switch perm, _ := NormPerm(t.Perm); perm {
 	case PermPlan:
-		args = append(args, "--approval-mode", "plan")
-	case PermEdit:
-		args = append(args, "--approval-mode", "auto_edit")
+		return Spec{}, fmt.Errorf("Antigravity has no read-only mode: pick Edits or Bypass, or use Claude or Codex")
 	case PermBypass:
-		args = append(args, "--approval-mode", "yolo")
+		args = append(args, "--dangerously-skip-permissions")
 	}
-	return Spec{Bin: "gemini", Args: args, Dir: cwd}, nil
+	return Spec{Bin: "agy", Args: args, Dir: cwd}, nil
 }
 
 // Providers are the agent CLIs the hub can drive.
-var Providers = []string{"claude", "codex", "gemini"}
+var Providers = []string{"claude", "codex", "antigravity"}
 
 func KnownProvider(p string) bool {
 	for _, x := range Providers {
@@ -208,8 +208,8 @@ func ProviderName(p string) string {
 		return "Claude Code"
 	case "codex":
 		return "Codex (OpenAI)"
-	case "gemini":
-		return "Gemini CLI"
+	case "antigravity":
+		return "Antigravity"
 	}
 	return p
 }
@@ -223,8 +223,8 @@ func ResumeCommand(provider, cwd, sessionID string) string {
 	switch provider {
 	case "codex":
 		return "cd " + q + " && codex resume " + sessionID
-	case "gemini":
-		return "cd " + q + " && gemini --resume " + sessionID
+	case "antigravity":
+		return "cd " + q + " && agy --conversation " + sessionID
 	}
 	return "cd " + q + " && claude --resume " + sessionID
 }

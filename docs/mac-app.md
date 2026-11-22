@@ -48,7 +48,7 @@ their first lines).
 - **Panes**: a window starts with one pane. Split it up to 9 panes. Click a terminal in the sidebar to show it in the
   focused pane. Closing a pane only removes the view: the terminal keeps running on its machine. **End Terminal**
   stops it.
-- **New Terminal** (⌘T): pick the machine, the CLI (Claude Code, Codex, Gemini or a shell), a folder and a title.
+- **New Terminal** (⌘T): pick the machine, the CLI (Claude Code, Codex, Antigravity or a shell), a folder and a title.
 - **Search** (⌘K): conversations on every machine of the cluster. Return continues the selected one in a new terminal;
   **Move** moves the conversation, with its context, to another machine.
 - The terminal reconnects by itself after a network drop or sleep, and says why when the hub or the machine is offline.

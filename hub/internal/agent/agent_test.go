@@ -431,7 +431,7 @@ func TestReviewSendBackFlow(t *testing.T) {
 	if _, err := r.ctl.Start(ctx, StartReq{Host: "studio", Cwd: "/etc", Provider: "claude", Prompt: "x"}); err == nil {
 		t.Fatal("a folder outside the roots was accepted")
 	}
-	if _, err := r.ctl.Start(ctx, StartReq{Host: "studio", Cwd: r.repo, Provider: "gemini", Prompt: "x"}); err == nil {
+	if _, err := r.ctl.Start(ctx, StartReq{Host: "studio", Cwd: r.repo, Provider: "antigravity", Prompt: "x"}); err == nil {
 		t.Fatal("a provider the host doesn't have was accepted")
 	}
 	if _, err := r.ctl.Start(ctx, StartReq{Host: "laptop", Cwd: r.repo, Provider: "claude", Prompt: "x"}); err == nil {
@@ -628,23 +628,29 @@ func TestExecutorRefusesOutsideRoots(t *testing.T) {
 	}
 }
 
-func TestGemini(t *testing.T) {
-	s, err := BuildGemini(Turn{Perm: PermEdit, Model: "gemini-2.5-pro", Resume: "c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10"}, "/w", "-starts with a dash")
+func TestAntigravity(t *testing.T) {
+	s, err := BuildAntigravity(Turn{Perm: PermEdit, Model: "gemini-4-neon-high", Resume: "c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10"}, "/w", "-starts with a dash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Bin != "gemini" || s.Args[0] != "--prompt=-starts with a dash" || !has(s.Args, "--output-format", "stream-json") ||
-		!has(s.Args, "--approval-mode", "auto_edit") || !has(s.Args, "--resume", "c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10") {
-		t.Fatalf("%v", s.Args)
+	if s.Bin != "agy" || s.Args[0] != "--print=-starts with a dash" || !has(s.Args, "--output-format", "stream-json") ||
+		has(s.Args, "--mode", "accept-edits") || has(s.Args, "--mode", "plan") || !has(s.Args, "--conversation", "c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10") {
+		t.Fatalf("%v", s.Args) // edits: agy's default mode; accept-edits would wait for a command approval
+	}
+	if _, err := BuildAntigravity(Turn{Perm: PermPlan}, "/w", "x"); err == nil {
+		t.Fatal("a read-only turn was accepted: agy plan mode writes a plan instead of answering")
+	}
+	if s, _ := BuildAntigravity(Turn{Perm: PermBypass, Bypass: true}, "/w", "x"); !has(s.Args, "--dangerously-skip-permissions") {
+		t.Fatalf("bypass %v", s.Args)
 	}
 	if got := shownArgs(s.Args)[0]; strings.Contains(got, "dash") && len(got) > 80 {
 		t.Error(got)
 	}
-	c := capture(t, "gemini", "gemini_stream.jsonl")
+	c := capture(t, "antigravity", "antigravity_stream.jsonl")
 	if c.SessionID != "c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10" || c.Final != "## Verdict: CLEAN" || c.Err != "" {
 		t.Fatalf("%+v", c)
 	}
-	if Other("gemini") != "claude" || Other("claude") != "codex" || Other("codex") != "claude" {
+	if Other("antigravity") != "claude" || Other("claude") != "codex" || Other("codex") != "claude" {
 		t.Error("reviewer pairing")
 	}
 }

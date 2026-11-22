@@ -12,7 +12,7 @@ import (
 )
 
 // Closing a session from any page: a hub terminal is ended as a terminal, a hub task's running turn is
-// stopped, and any other Claude/Codex/Gemini session (Terminal.app, an IDE, any Mac) gets a session_close
+// stopped, and any other Claude/Codex/Antigravity session (Terminal.app, an IDE, any Mac) gets a session_close
 // that its Mac carries out (agent/close.go). Every Close asks once more before it acts, in the page itself.
 
 func (s *Server) closeRoutes(g, p func(string, http.HandlerFunc)) {
@@ -28,7 +28,7 @@ const closableFor = 72 * time.Hour
 // closable: a session the hub can offer to close.
 func closable(x store.Session) bool {
 	return x.ParentUUID == "" && !x.Closed() && x.RunID == 0 && !strings.HasPrefix(x.AgentName, "fleet-") &&
-		!agent.HeadlessOriginator(x.Originator) && (x.Provider == "claude" || x.Provider == "codex" || x.Provider == "gemini") &&
+		!agent.HeadlessOriginator(x.Originator) && (x.Provider == "claude" || x.Provider == "codex" || x.Provider == "antigravity") &&
 		x.FileMtime >= store.T(time.Now().Add(-closableFor))
 }
 

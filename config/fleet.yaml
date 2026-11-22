@@ -16,9 +16,9 @@ providers:
     enabled: true
     cli: codex
     model: ""          # empty = ~/.codex/config.toml default
-  gemini:
+  antigravity:
     enabled: false
-    cli: gemini
+    cli: agy
     model: ""
 
 # Account gateway (CLIProxyAPI on the Mac Studio). Holds every subscription login;

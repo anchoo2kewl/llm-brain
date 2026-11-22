@@ -338,13 +338,13 @@ public struct Profile: Decodable, Hashable, Sendable {
 
 /// The CLIs a new terminal can run (`cli` form field of `POST /terminals/new`).
 public enum CLI: String, CaseIterable, Identifiable, Sendable {
-    case claude, codex, gemini, shell
+    case claude, codex, antigravity, shell
     public var id: String { rawValue }
     public var label: String {
         switch self {
         case .claude: "Claude Code"
         case .codex: "Codex"
-        case .gemini: "Gemini"
+        case .antigravity: "Antigravity"
         case .shell: "Shell"
         }
     }

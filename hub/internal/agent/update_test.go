@@ -21,8 +21,8 @@ func TestInstallMethod(t *testing.T) {
 		{"brew", "/opt/homebrew/Homebrew/bin/brew", "brew"},
 		{"claude", "/opt/homebrew/Caskroom/claude-code@latest/2.1.300/claude", "cask:claude-code@latest"},
 		{"codex", "/opt/homebrew/Caskroom/codex/0.159.3/bin/codex", "cask:codex"},
-		{"gemini", "/opt/homebrew/Cellar/gemini-cli/0.42.0/bin/gemini", "formula:gemini-cli"},
-		{"gemini", "/usr/local/lib/node_modules/@google/gemini-cli/dist/index.js", "npm:@google/gemini-cli"},
+		{"antigravity", "/opt/homebrew/Caskroom/antigravity-cli/1.5.14,5302690847260672/antigravity", "cask:antigravity-cli"},
+		{"gh", "/opt/homebrew/Cellar/gh/2.80.0/bin/gh", "formula:gh"},
 		{"ocr", "/opt/homebrew/lib/node_modules/@alibaba-group/open-code-review/bin/ocr.js", "npm:@alibaba-group/open-code-review"},
 		{"claude", "/Users/me/.local/share/claude/versions/2.1.3", "self"},
 		{"codex", "/Users/me/.local/share/claude/versions/2.1.3", ""}, // only claude updates itself
@@ -88,7 +88,7 @@ func TestToolUpdateRunsEachWay(t *testing.T) {
 			return []store.ToolInfo{
 				{Name: "brew", Path: "/opt/homebrew/bin/brew", Method: "brew", Version: "4.6.1"},
 				{Name: "claude", Path: "/opt/homebrew/bin/claude", Method: "cask:claude-code@latest", Version: v},
-				{Name: "gemini", Path: "/opt/homebrew/bin/gemini", Method: "formula:gemini-cli", Version: "0.42.0"},
+				{Name: "antigravity", Path: "/opt/homebrew/bin/agy", Method: "cask:antigravity-cli", Version: "1.5.14"},
 				{Name: "gh", Path: "/usr/bin/gh", Version: "2.80.0"}, // installed some other way
 			}
 		},
@@ -99,19 +99,19 @@ func TestToolUpdateRunsEachWay(t *testing.T) {
 			if !hasEnv(env, "HOMEBREW_NO_AUTO_UPDATE=1") {
 				t.Errorf("brew would update itself on every call: %v", env)
 			}
-			if len(args) > 1 && args[1] == "--formula" {
-				return "Error: gemini-cli is pinned", errors.New("exit status 1")
+			if len(args) > 2 && args[2] == "antigravity-cli" {
+				return "Error: antigravity-cli is pinned", errors.New("exit status 1")
 			}
-			if len(args) > 1 && args[1] == "--cask" {
+			if len(args) > 2 && args[2] == "claude-code@latest" {
 				upgraded = true
 			}
 			return "ok\n", nil
 		}}
 	ex.init()
-	payload, _ := json.Marshal(ToolUpdate{Tools: []string{"claude", "gemini", "gh", "codex"}})
+	payload, _ := json.Marshal(ToolUpdate{Tools: []string{"claude", "antigravity", "gh", "codex"}})
 	ex.toolUpdate(context.Background(), store.Command{ID: 7, Kind: KindToolUpdate, Payload: payload})
 
-	want := []string{"brew update --quiet", "brew upgrade --cask claude-code@latest", "brew upgrade --formula gemini-cli"}
+	want := []string{"brew update --quiet", "brew upgrade --cask claude-code@latest", "brew upgrade --cask antigravity-cli"}
 	if strings.Join(ran, "|") != strings.Join(want, "|") {
 		t.Fatalf("ran %q, want %q", ran, want)
 	}
@@ -119,7 +119,7 @@ func TestToolUpdateRunsEachWay(t *testing.T) {
 		t.Fatalf("reports %+v", hub.reps)
 	}
 	final := hub.reps[1]
-	if final.Status != "failed" || !strings.Contains(final.Error, "gemini") {
+	if final.Status != "failed" || !strings.Contains(final.Error, "antigravity") {
 		t.Fatalf("final %+v", final)
 	}
 	var res UpdateResult
@@ -133,8 +133,8 @@ func TestToolUpdateRunsEachWay(t *testing.T) {
 	if c := by["claude"]; !c.OK || c.Before != "2.1.0" || c.After != "2.2.0" || !c.Changed() {
 		t.Errorf("claude %+v", c)
 	}
-	if g := by["gemini"]; g.OK || !strings.Contains(g.Output, "pinned") {
-		t.Errorf("gemini %+v", g)
+	if g := by["antigravity"]; g.OK || !strings.Contains(g.Output, "pinned") {
+		t.Errorf("antigravity %+v", g)
 	}
 	if by["gh"].Skip == "" || by["codex"].Skip != "not installed" {
 		t.Errorf("skips: gh %+v codex %+v", by["gh"], by["codex"])
