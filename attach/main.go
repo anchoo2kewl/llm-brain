@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -20,24 +21,66 @@ import (
 	"golang.org/x/term"
 )
 
+// hubFlags: --hub given once per address of the same hub.
+type hubFlags []string
+
+func (h *hubFlags) String() string     { return strings.Join(*h, " ") }
+func (h *hubFlags) Set(v string) error { *h = append(*h, v); return nil }
+
 func main() {
-	hub := flag.String("hub", "", "hub URL, for example https://hub.<tailnet>.ts.net or http://127.0.0.1:8787")
+	var hubs hubFlags
+	flag.Var(&hubs, "hub", "hub URL, for example https://hub.<tailnet>.ts.net or http://127.0.0.1:8787; repeat it for "+
+		"more addresses of the same hub, and the fastest that answers is used")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: brain-attach --hub <url> <terminal-id>")
+		fmt.Fprintln(os.Stderr, "usage: brain-attach --hub <url> [--hub <url>…] <terminal-id>")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 	id, err := strconv.ParseInt(flag.Arg(0), 10, 64)
-	if *hub == "" || flag.NArg() != 1 || err != nil || id <= 0 {
+	if len(hubs) == 0 || flag.NArg() != 1 || err != nil || id <= 0 {
 		flag.Usage()
 		os.Exit(2)
 	}
-	base, err := hubBase(*hub)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "brain-attach:", err)
-		os.Exit(2)
+	var bases []*url.URL
+	for _, h := range hubs {
+		base, err := hubBase(h)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "brain-attach:", err)
+			os.Exit(2)
+		}
+		bases = append(bases, base)
 	}
-	os.Exit(run(base, id))
+	os.Exit(run(bases, id))
+}
+
+// fastest asks every address for the terminal's status at once and returns the first to answer; with none
+// answering, the first. The addresses are the same hub's (the app checks that), so any answer is the terminal.
+func fastest(bases []*url.URL, id int64) *url.URL {
+	if len(bases) == 1 {
+		return bases[0]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	won := make(chan *url.URL, len(bases))
+	for _, b := range bases {
+		go func() {
+			req, _ := http.NewRequestWithContext(ctx, "GET", statusURL(b, id), nil)
+			if resp, err := client.Do(req); err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					won <- b
+					return
+				}
+			}
+			won <- nil
+		}()
+	}
+	for range bases {
+		if b := <-won; b != nil {
+			return b
+		}
+	}
+	return bases[0]
 }
 
 // The hub is on loopback or the tailnet: no proxy, no redirects to another host.
@@ -48,7 +91,7 @@ var client = &http.Client{
 
 // run attaches until the terminal ends (0) or the first connection fails (1). Later drops reconnect: the hub
 // terminal keeps running, and tmux redraws the screen on reattach.
-func run(base *url.URL, id int64) int {
+func run(bases []*url.URL, id int64) int {
 	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
 		if old, err := term.MakeRaw(fd); err == nil {
 			defer term.Restore(fd, old)
@@ -74,6 +117,7 @@ func run(base *url.URL, id int64) int {
 
 	tries, connected, shown := 0, false, ""
 	for {
+		base := fastest(bases, id) // on every (re)connect: an address that went down is left behind
 		cols, rows := size()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		c, _, err := websocket.Dial(ctx, socketURL(base, id, cols, rows), &websocket.DialOptions{HTTPClient: client})

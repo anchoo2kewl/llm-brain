@@ -50,7 +50,7 @@ struct MainWindow: View {
                     rename: startRename, close: { closing = $0 }, end: end, openInWindow: { openWindow(value: $0) }, failure: $failure)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
-            switch (layout, model.hub.flatMap(URL.init(string:))) {
+            switch (layout, model.hubAddress.flatMap(URL.init(string:))) {
             case (.hub, let url?): HubPage(web: web, url: url)
             case (.both, let url?): HSplitView { HubPage(web: web, url: url); PaneTreeView(panes: panes) }
             default: PaneTreeView(panes: panes)

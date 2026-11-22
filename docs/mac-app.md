@@ -14,6 +14,11 @@ press Open Anyway, or run `xattr -dr com.apple.quarantine "/Applications/Brain H
 The app uses the same bundle identifier and the same hub list file as the Tauri app, so it replaces it on a Mac and keeps
 your hubs: `~/Library/Application Support/app.llmbrain.hub/hubs.json`.
 
+A hub can have several addresses: its URL, plus more DNS names or IPs of the same hub under **Other addresses** in
+Settings (all within the loopback and tailnet allow-list). Every 30 seconds, and whenever a request fails, the app asks
+each address at once and uses the fastest one that answers as the same hub (the same node name). Terminals get every
+address too: `brain-attach` dials the fastest on each connect, so a terminal moves off an address that went down.
+
 ## Build
 
 You need Swift 6 (the Command Line Tools are enough) or Xcode, Go, and libghostty.

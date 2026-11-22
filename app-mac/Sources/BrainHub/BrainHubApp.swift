@@ -185,6 +185,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading) {
                             Text(h.name)
                             Text(h.url).font(.caption).foregroundStyle(.secondary)
+                            HubAddressesField(hub: h) { failure = $0 }
                         }
                         Spacer()
                         Button(role: .destructive) {
@@ -327,5 +328,25 @@ struct KeysSettings: View {
         guard Key(tmux: draft) != nil else { return }
         override = draft
         model.loadKeys()
+    }
+}
+
+/// A hub's other addresses (more DNS names or IPs of the same hub), and the one the app uses now.
+struct HubAddressesField: View {
+    let hub: HubConfig.Hub
+    let failed: (String?) -> Void
+    @ViewState private var text = ""
+
+    var body: some View {
+        TextField("Other addresses", text: $text, prompt: Text("more addresses, space-separated"))
+            .font(.caption)
+            .onAppear { text = (hub.addresses ?? []).joined(separator: " ") }
+            .onSubmit {
+                do { try AppModel.shared.setAddresses(hub.url, text); failed(nil) } catch { failed(error.localizedDescription) }
+            }
+        if hub.all.count > 1 {
+            Text("Using \(HubRoutes.shared.resolve(hub.url)), the fastest that answers")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 }

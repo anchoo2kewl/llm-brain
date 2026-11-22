@@ -30,11 +30,13 @@ final class TerminalSession {
         connect()
     }
 
-    /// `brain-attach --hub <url> <id>`, from the app bundle (Contents/MacOS), else from PATH (`swift run`).
+    /// `brain-attach --hub <url> [--hub <url>…] <id>`, from the app bundle (Contents/MacOS), else from PATH
+    /// (`swift run`). Every address of the hub: brain-attach dials the fastest, on each reconnect too.
     static func command(_ ref: TerminalRef) -> String {
         let bundled = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("brain-attach").path
         let exe = bundled.flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "brain-attach"
-        return [exe, "--hub", ref.hub, String(ref.id)].map(shellQuote).joined(separator: " ")
+        let hubs = HubRoutes.shared.addresses(ref.hub).flatMap { ["--hub", $0] }
+        return ([exe] + hubs + [String(ref.id)]).map(shellQuote).joined(separator: " ")
     }
 
     func connect() {

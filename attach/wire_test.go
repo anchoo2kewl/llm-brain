@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -72,5 +75,27 @@ func TestAfterClose(t *testing.T) {
 		if msg != c.msg || wait != c.wait || ended != c.ended {
 			t.Errorf("afterClose(%d, %q, %+v, %d) = %q, %v, %v", c.code, c.reason, c.st, c.tries, msg, wait, ended)
 		}
+	}
+}
+
+func TestFastest(t *testing.T) {
+	serve := func(delay time.Duration, code int) *url.URL {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(delay)
+			w.WriteHeader(code)
+		}))
+		t.Cleanup(s.Close)
+		u, _ := url.Parse(s.URL)
+		return u
+	}
+	slow, quick, broken := serve(300*time.Millisecond, 200), serve(0, 200), serve(0, 503)
+	if got := fastest([]*url.URL{slow, quick}, 7); got != quick {
+		t.Fatalf("picked %v, want the quicker %v", got, quick)
+	}
+	if got := fastest([]*url.URL{broken, slow}, 7); got != slow {
+		t.Fatalf("picked %v, want the one that answers", got)
+	}
+	if got := fastest([]*url.URL{broken}, 7); got != broken {
+		t.Fatal("a single address is used as is")
 	}
 }

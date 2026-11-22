@@ -49,7 +49,7 @@ public struct HubClient: Sendable {
     }
 
     func send(_ path: String, method: String, body: Data?, contentType: String?, timeout: TimeInterval) async throws -> Data {
-        var req = URLRequest(url: try HubURL.join(base, path), timeoutInterval: timeout)
+        var req = URLRequest(url: try HubURL.join(HubRoutes.shared.resolve(base), path), timeoutInterval: timeout)
         req.httpMethod = method
         req.httpBody = body
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -58,6 +58,8 @@ public struct HubClient: Sendable {
         do {
             (data, resp) = try await Self.session.data(for: req)
         } catch let e as URLError {
+            let base = base
+            Task.detached { await HubRoutes.shared.probe(base) } // another address may still answer
             throw HubError(e.code == .timedOut ? "The hub did not answer in time." : "Hub unreachable: \(e.localizedDescription)")
         }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0

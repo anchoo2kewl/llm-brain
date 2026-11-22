@@ -57,6 +57,7 @@ final class AppModel {
 
     private init() {
         config = HubConfig.load(HubConfig.defaultPath)
+        HubRoutes.shared.configure(config.hubs)
         loadKeys()
         poll()
     }
@@ -72,8 +73,12 @@ final class AppModel {
 
     private func rememberNodes(_ cluster: ClusterNodes, base: String) {
         nodeByURL[base] = cluster.me.node
+        HubRoutes.shared.learn(base, node: cluster.me.node)
         for peer in cluster.peers where peer.ok {
-            if let url = try? HubURL.validate(peer.url) { nodeByURL[url] = peer.info.node }
+            if let url = try? HubURL.validate(peer.url) {
+                nodeByURL[url] = peer.info.node
+                HubRoutes.shared.alias(url, toNode: peer.info.node) // a saved peer hub: use its fastest address
+            }
         }
         // A saved loopback or HTTPS address can differ from the peer's advertised address.
         for saved in config.hubs where nodeByURL[saved.url] == nil {
@@ -84,6 +89,7 @@ final class AppModel {
                       let cluster = try? await client.get(Paths.nodes, as: ClusterNodes.self, timeout: 3)
                 else { return }
                 nodeByURL[saved.url] = cluster.me.node
+                HubRoutes.shared.learn(saved.url, node: cluster.me.node)
             }
         }
     }
@@ -194,6 +200,17 @@ final class AppModel {
         try save(c)
     }
 
+    /// A hub's other addresses, separated by spaces, commas or new lines.
+    func setAddresses(_ url: String, _ text: String) throws {
+        var c = config
+        try c.setAddresses(url, text)
+        try save(c)
+        Task { await HubRoutes.shared.probe(url) }
+    }
+
+    /// The address the selected hub is reached at now.
+    var hubAddress: String? { hub.map { HubRoutes.shared.resolve($0) } }
+
     func removeHub(_ url: String) throws {
         var c = config
         c.remove(url)
@@ -210,6 +227,7 @@ final class AppModel {
         try c.save(configPath)
         let switched = c.selected != config.selected
         config = c
+        HubRoutes.shared.configure(c.hubs)
         if switched {
             terminals = []; live = []; nodes = nil; inboxWaiting = []; primed = false; loaded = false
             poll()
@@ -222,7 +240,12 @@ final class AppModel {
     func poll() {
         poller?.cancel()
         poller = Task { [weak self] in
+            var probed = Date.distantPast
             while !Task.isCancelled {
+                if Date().timeIntervalSince(probed) >= 30 { // which address of each hub is fastest now
+                    probed = Date()
+                    await HubRoutes.shared.probeAll()
+                }
                 await self?.refresh()
                 try? await Task.sleep(for: .seconds(4))
             }
