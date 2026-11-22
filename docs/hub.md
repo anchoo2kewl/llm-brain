@@ -131,7 +131,7 @@ Each Mac's collector reads:
 
 - Claude Code transcripts: `~/.claude/projects/*/*.jsonl` and `*/*/subagents/*.jsonl` (not the `memory/` folders);
 - Codex rollouts: every `.jsonl` under `~/.codex/sessions` (current and 2025 formats);
-- Antigravity CLI conversations: `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl`, with each model step's tokens recorded as usage (one `agy` login per Mac, so profiles add none);
+- Antigravity CLI conversations: `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl`, with each model step's tokens recorded as usage and the folder taken from agy's `conversation_summaries.db` (read with the system `sqlite3`, immutable; a new transcript waits up to 2 minutes for its folder row). One `agy` login per Mac, so profiles add none;
 - fleet logs: `fleet.log`, `chat.log` and every worker log in `<state>/logs/`, and worker prompts from `runs/*.prompt` and `reviews/*/prompt.md`;
 - which workers are alive, from `runs/*.pid`.
 

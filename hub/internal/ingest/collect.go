@@ -3,11 +3,14 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"log"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -35,12 +38,15 @@ type Collector struct {
 	Extra func() []string
 
 	promptSent map[string]time.Time
+	agyCwd     map[string]string // conversation id -> folder, from agy's conversation_summaries.db
+	agyAt      time.Time         // that database's mtime when agyCwd was read
 }
 
 const MaxLine = 64 << 20
 
 type source struct {
 	path, kind string
+	cwd        string // the folder an Antigravity conversation ran in
 }
 
 // Discover lists the files this machine contributes.
@@ -51,7 +57,7 @@ func (c *Collector) Discover() []source {
 			if strings.Contains(p, string(filepath.Separator)+"memory"+string(filepath.Separator)) {
 				continue
 			}
-			out = append(out, source{p, kind})
+			out = append(out, source{path: p, kind: kind})
 		}
 	}
 	if c.ClaudeDir != "" {
@@ -79,9 +85,9 @@ func (c *Collector) Discover() []source {
 		for _, p := range logs {
 			base := filepath.Base(p)
 			if base == "fleet.log" || base == "chat.log" { // chat.log: bin/chat-watch, same line format
-				out = append(out, source{p, KindFleetLog})
+				out = append(out, source{path: p, kind: KindFleetLog})
 			} else if _, ok := parse.ParseRunLogName(base, time.UTC, "", ""); ok {
-				out = append(out, source{p, KindRunLog})
+				out = append(out, source{path: p, kind: KindRunLog})
 			}
 		}
 	}
@@ -101,9 +107,18 @@ func (c *Collector) Cycle(ctx context.Context) error {
 		return err
 	}
 	var firstErr error
+	cwds := c.antigravityCwds()
 	for _, s := range c.Discover() {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if s.kind == KindAntigravity {
+			// agy writes the folder row at the end of a turn: wait for it, so the session gets its folder.
+			if s.cwd = cwds[parse.AntigravitySessionID(s.path)]; s.cwd == "" {
+				if st, err := os.Stat(s.path); err == nil && time.Since(st.ModTime()) < 2*time.Minute {
+					continue
+				}
+			}
 		}
 		off, known := offsets[s.path]
 		if !known && s.kind == KindRunLog {
@@ -174,7 +189,7 @@ func (c *Collector) syncFile(ctx context.Context, s source, off int64) error {
 			break
 		}
 		ch := Chunk{Host: c.Host, Kind: s.kind, Path: s.path, Offset: off, Size: size, Mtime: st.ModTime(), TZ: c.TZ,
-			Reset: reset, EOF: off+int64(len(data)) >= size, Data: data}
+			Cwd: s.cwd, Reset: reset, EOF: off+int64(len(data)) >= size, Data: data}
 		newOff, err := c.Sink.Chunk(ctx, ch)
 		if errors.Is(err, ErrOffset) {
 			retries++
@@ -296,4 +311,51 @@ func ShortHostname() string {
 		h = h[:i]
 	}
 	return h
+}
+
+// antigravityCwds maps each Antigravity conversation to the folder it ran in. agy keeps that only in its own
+// SQLite database, which is read with the system sqlite3 as immutable: no locks, no writes to agy's files.
+// shortcut: a host without sqlite3 (or a newer agy schema) gets no folders; upgrade to a Go reader if needed.
+func (c *Collector) antigravityCwds() map[string]string {
+	if c.AntigravityDir == "" {
+		return nil
+	}
+	db := filepath.Join(filepath.Dir(c.AntigravityDir), "conversation_summaries.db")
+	st, err := os.Stat(db)
+	if err != nil || (c.agyCwd != nil && st.ModTime().Equal(c.agyAt)) {
+		return c.agyCwd
+	}
+	uri := (&url.URL{Scheme: "file", Path: db, RawQuery: "immutable=1"}).String() // escapes '#', '?', '%'
+	out, err := exec.Command("sqlite3", "-readonly", "-json", uri,
+		"SELECT conversation_id AS id, workspace_uris AS uris FROM conversation_summaries").Output()
+	if err == nil {
+		var m map[string]string
+		if m, err = parseAntigravityCwds(out); err == nil {
+			c.agyCwd, c.agyAt = m, st.ModTime()
+		}
+	}
+	if err != nil {
+		c.logf("antigravity folders: %v", err)
+	}
+	return c.agyCwd
+}
+
+func parseAntigravityCwds(out []byte) (map[string]string, error) {
+	var rows []struct{ ID, URIs string }
+	if len(bytes.TrimSpace(out)) > 0 { // sqlite3 prints nothing at all for no rows
+		if err := json.Unmarshal(out, &rows); err != nil {
+			return nil, err
+		}
+	}
+	m := map[string]string{}
+	for _, r := range rows {
+		var uris []string
+		if json.Unmarshal([]byte(r.URIs), &uris) != nil || len(uris) == 0 {
+			continue
+		}
+		if u, err := url.Parse(uris[0]); err == nil && u.Scheme == "file" && u.Path != "" {
+			m[r.ID] = u.Path
+		}
+	}
+	return m, nil
 }
