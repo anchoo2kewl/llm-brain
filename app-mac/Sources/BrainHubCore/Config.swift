@@ -5,8 +5,14 @@ import Foundation
 public struct HubConfig: Codable, Equatable, Sendable {
     public struct Hub: Codable, Equatable, Sendable, Identifiable {
         public var name: String
+        /// The hub's first address. It names the hub everywhere (terminals, panes, sidebar order), whichever
+        /// address is in use.
         public var url: String
+        /// More addresses of the same hub (another DNS name or IP). The app uses whichever answers fastest.
+        public var addresses: [String]? = nil
         public var id: String { url }
+        /// Every address: `url` first.
+        public var all: [String] { [url] + (addresses ?? []).filter { $0 != url } }
     }
 
     public var hubs: [Hub] = []
@@ -32,6 +38,9 @@ public struct HubConfig: Codable, Equatable, Sendable {
             return HubConfig()
         }
         c.hubs.removeAll { (try? HubURL.validate($0.url)) != $0.url }
+        for i in c.hubs.indices {
+            c.hubs[i].addresses = c.hubs[i].addresses?.filter { (try? HubURL.validate($0)) == $0 }
+        }
         c.fixSelection()
         return c
     }
@@ -53,6 +62,19 @@ public struct HubConfig: Codable, Equatable, Sendable {
         hubs.append(Hub(name: try Self.cleanName(name, url: url), url: url))
         fixSelection()
         return url
+    }
+
+    /// Set a hub's other addresses (any separator: spaces, commas or new lines). Returns them normalised.
+    @discardableResult
+    public mutating func setAddresses(_ url: String, _ text: String) throws -> [String] {
+        guard let i = hubs.firstIndex(where: { $0.url == url }) else { throw HubError("No such hub.") }
+        var out: [String] = []
+        for raw in text.split(whereSeparator: { $0 == "," || $0.isWhitespace }) {
+            let a = try HubURL.validate(String(raw))
+            if a != url && !out.contains(a) { out.append(a) }
+        }
+        hubs[i].addresses = out.isEmpty ? nil : out
+        return out
     }
 
     public mutating func remove(_ url: String) {
