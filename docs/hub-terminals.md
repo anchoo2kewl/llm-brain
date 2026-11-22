@@ -97,7 +97,7 @@ The fixes it offers:
 
 1. Click Allow on that Mac (Screen Sharing: `vnc://<Mac>`).
 2. Give the hub agent and tmux Full Disk Access: System Settings, Privacy & Security, Full Disk Access. The page names both paths.
-3. **Restart CLI…**: ends the stuck CLI and starts it again in the same tmux on a fresh pseudo-terminal, so keys typed into the frozen one don't run in the new shell. It continues the conversation (`claude --resume`, `codex resume`); Antigravity starts afresh in the same folder, since its transcripts do not record which folder they ran in.
+3. **Restart CLI…**: ends the stuck CLI and starts it again in the same tmux on a fresh pseudo-terminal, so keys typed into the frozen one don't run in the new shell. It continues the conversation (`claude --resume`, `codex resume`), and for Antigravity the folder's latest conversation (`agy --continue`).
 
 Any change on screen or in CPU time clears it. Without Full Disk Access, don't have an agent search the whole home folder (`find ~`, `rg ~`); see [Troubleshooting](troubleshooting.md#a-terminal-froze).
 

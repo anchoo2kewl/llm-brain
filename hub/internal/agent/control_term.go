@@ -138,10 +138,12 @@ func (c *Control) RestartTerminal(ctx context.Context, id int64, resume string) 
 	if cmd, err := c.S.TermOpenCommand(ctx, id); err == nil {
 		_ = json.Unmarshal(cmd.Payload, &o) // its flags (approvals on or off, the model)
 	}
-	o.Provider, o.Prompt, o.Worktree, o.Cwd, o.Resume = t.Provider, "", nil, "", ""
+	o.Provider, o.Prompt, o.Worktree, o.Cwd, o.Resume, o.Continue = t.Provider, "", nil, "", "", false
 	switch {
 	case resume != "":
 		o.Resume = resume
+	case t.Provider == "antigravity":
+		o.Continue = true
 	case t.Provider == "claude" && t.SessionUUID != "":
 		// Nothing written under its id yet: start it again under the same id, so the hub still knows it.
 		o.SessionID = t.SessionUUID

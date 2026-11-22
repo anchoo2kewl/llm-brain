@@ -151,6 +151,9 @@ type TermOpen struct {
 	Ask       bool      `json:"ask,omitempty"`        // the CLI's normal approval prompts instead of every permission
 	SessionID string    `json:"session_id,omitempty"` // claude --session-id, so the hub knows its transcript
 	Resume    string    `json:"resume,omitempty"`     // continue this conversation (claude --resume, codex resume); restarts only
+	// Continue picks up the folder's latest conversation (agy -c): agy transcripts don't name their folder,
+	// so the hub can't tell a restarted Antigravity terminal its conversation id.
+	Continue bool `json:"continue,omitempty"`
 }
 
 // TermAttach is a term_attach payload.
@@ -378,6 +381,8 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 		}
 		if o.Resume != "" {
 			argv = append(argv, "--conversation", o.Resume)
+		} else if o.Continue {
+			argv = append(argv, "--continue")
 		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)

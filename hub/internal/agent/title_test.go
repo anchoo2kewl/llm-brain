@@ -75,6 +75,10 @@ func TestAntigravityTerminalScript(t *testing.T) {
 		!strings.Contains(script, "--prompt-interactive=") || !strings.Contains(script, "exec /bin/zsh -l") {
 		t.Fatalf("%s %v", script, err)
 	}
+	script, _, _ = TermScript(TermOpen{Provider: "antigravity", Continue: true}, Gateway{}, "/bin/zsh")
+	if !strings.HasPrefix(script, "agy --dangerously-skip-permissions --continue;") {
+		t.Fatalf("restart: %s", script)
+	}
 	if !KnownTermProvider("antigravity") || KnownTermProvider("gemini") {
 		t.Fatal("terminal providers")
 	}
