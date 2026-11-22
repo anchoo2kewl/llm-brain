@@ -33,8 +33,8 @@ func (c *Capture) Line(line string) string {
 	switch c.Provider {
 	case "codex":
 		return c.codex(ev)
-	case "gemini":
-		return c.gemini(ev)
+	case "antigravity":
+		return c.antigravity(ev)
 	}
 	return c.claude(ev)
 }
@@ -218,48 +218,54 @@ func (c *Capture) codex(ev map[string]any) string {
 	return ""
 }
 
-// ---------------------------------------------------------------- gemini -o stream-json
+// ---------------------------------------------------------------- agy --output-format stream-json
 
-func (c *Capture) gemini(ev map[string]any) string {
-	if id := str(ev, "session_id"); id != "" && c.SessionID == "" {
+// antigravity reads {"event":"init"|"step_update"|"result", "<event>":{...}}. An agent_response step streams
+// its text as text_delta; a tool step reports ACTIVE then DONE.
+func (c *Capture) antigravity(ev map[string]any) string {
+	kind := str(ev, "event")
+	body := obj(ev, kind)
+	if id := str(ev, "conversation_id"); id != "" && c.SessionID == "" {
 		c.SessionID = id
 	}
-	switch str(ev, "type") {
+	if id := str(body, "conversation_id"); id != "" && c.SessionID == "" {
+		c.SessionID = id
+	}
+	switch kind {
 	case "init":
-		return "● session " + str(ev, "session_id") + " · " + str(ev, "model")
-	case "message":
-		if str(ev, "role") != "assistant" {
+		return "● conversation " + c.SessionID + " · " + str(body, "permission_mode")
+	case "step_update":
+		switch str(body, "step_type") {
+		case "agent_response":
+			c.Final += str(body, "text_delta")
+			if str(body, "state") == "DONE" {
+				u := obj(body, "usage")
+				in, _ := u["input_tokens"].(float64)
+				out, _ := u["output_tokens"].(float64)
+				return fmt.Sprintf("● step done (%.0f in / %.0f out tokens)", in, out)
+			}
 			return ""
+		case "tool":
+			info := obj(body, "tool_info")
+			if str(body, "state") == "ACTIVE" {
+				in, _ := json.Marshal(info["parameters"])
+				return "→ " + str(body, "tool_name") + " " + oneLine(toolArg(info["parameters"], string(in)), 200)
+			}
+			if str(body, "state") == "ERROR" {
+				return "  ✗ " + str(body, "tool_name")
+			}
+			return "  ← " + str(body, "tool_name")
 		}
-		text := str(ev, "content")
-		if d, _ := ev["delta"].(bool); d {
-			c.Final += text
-		} else {
-			c.Final = text
-		}
-		return "assistant: " + text
-	case "tool_use":
-		in, _ := json.Marshal(ev["parameters"])
-		return "→ " + str(ev, "tool_name") + " " + oneLine(toolArg(ev["parameters"], string(in)), 200)
-	case "tool_result":
-		mark := "  ←"
-		if str(ev, "status") == "error" {
-			mark = "  ✗"
-		}
-		return mark + " " + oneLine(str(ev, "output"), 200)
-	case "error":
-		c.Err = str(ev, "message")
-		return "✗ " + c.Err
 	case "result":
-		if str(ev, "status") != "" && str(ev, "status") != "success" {
-			if c.Err == "" {
-				c.Err = str(obj(ev, "error"), "message")
-			}
-			if c.Err == "" {
-				c.Err = str(ev, "status")
+		if r := str(body, "response"); r != "" {
+			c.Final = r // the whole answer: deltas of a multi-step turn are only its last steps
+		}
+		if st := str(body, "status"); st != "SUCCESS" {
+			if c.Err = str(body, "error"); c.Err == "" {
+				c.Err = st
 			}
 		}
-		return "● result: " + str(ev, "status")
+		return "● result: " + str(body, "status")
 	}
 	return ""
 }

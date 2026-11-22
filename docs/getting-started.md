@@ -7,7 +7,7 @@ Install llm-brain on an always-on Mac (the hub and fleet) and, optionally, on la
 - macOS on Apple silicon. The hub builds for `darwin/arm64` only.
 - [Homebrew](https://brew.sh). `bootstrap.sh` stops if it is missing.
 - [Tailscale](https://tailscale.com), so other Macs and your phone can reach the hub.
-- A GitHub account with `gh` logged in, and at least one of Claude Code, Codex or Gemini CLI logged in.
+- A GitHub account with `gh` logged in, and at least one of Claude Code, Codex or Antigravity CLI (`agy`) logged in.
 - `tmux` if you want hub terminals (`brew install tmux`). Bootstrap does not install it.
 - Python 3 for `bin/chat-watch`, and Python 3.13 or newer for `bin/review-rules` (it uses `PurePosixPath.full_match`). Bootstrap installs neither.
 

@@ -18,7 +18,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Tool updates. Every host agent reports the CLIs it can update (Homebrew, Claude Code, Codex, Gemini CLI, …)
+// Tool updates. Every host agent reports the CLIs it can update (Homebrew, Claude Code, Codex, Antigravity, …)
 // and how each was installed; the hub queues a tool_update command once a day (Updater) or when someone
 // presses "Update now". The agent runs the updates one after another and reports each tool's version before
 // and after, with the tail of its output.
@@ -27,7 +27,7 @@ const KindToolUpdate = store.KindToolUpdate
 
 // Tool is a CLI the agent knows how to find and update.
 type Tool struct {
-	Name  string // as shown and stored: brew, claude, codex, gemini, gh, ocr
+	Name  string // as shown and stored: brew, claude, codex, antigravity, gh, ocr
 	Bin   string // the executable
 	Label string
 }
@@ -38,7 +38,7 @@ var Tools = []Tool{
 	{"brew", "brew", "Homebrew (update, then upgrade everything outdated)"},
 	{"claude", "claude", "Claude Code"},
 	{"codex", "codex", "Codex CLI"},
-	{"gemini", "gemini", "Gemini CLI"},
+	{"antigravity", "agy", "Antigravity CLI"},
 	{"gh", "gh", "GitHub CLI"},
 	{"ocr", "ocr", "open-code-review"},
 }

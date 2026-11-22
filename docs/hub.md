@@ -81,6 +81,7 @@ make -C hub check     # go vet + go test
 | `--state` | `~/.local/state/llm-brain` | State folder (logs, runs, status.json). |
 | `--claude` | `~/.claude/projects` | Claude Code transcripts. `''` skips them. |
 | `--codex` | `~/.codex/sessions` | Codex sessions. `''` skips them. |
+| `--antigravity` | `~/.gemini/antigravity-cli/brain` | Antigravity CLI conversations. `''` skips them. |
 | `--host` | `hostname -s` | This Mac's name. |
 | `--interval` | `10s` | Re-scan interval. |
 | `--agent` | `true` | Run the session agent: terminals, tasks, files, close, updates on this Mac. `--agent=false` makes it read-only. |
@@ -130,6 +131,7 @@ Each Mac's collector reads:
 
 - Claude Code transcripts: `~/.claude/projects/*/*.jsonl` and `*/*/subagents/*.jsonl` (not the `memory/` folders);
 - Codex rollouts: every `.jsonl` under `~/.codex/sessions` (current and 2025 formats);
+- Antigravity CLI conversations: `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl`, with each model step's tokens recorded as usage (one `agy` login per Mac, so profiles add none);
 - fleet logs: `fleet.log`, `chat.log` and every worker log in `<state>/logs/`, and worker prompts from `runs/*.prompt` and `reviews/*/prompt.md`;
 - which workers are alive, from `runs/*.pid`.
 
@@ -188,7 +190,7 @@ The app's shortcuts are Inbox, Now, New terminal and Workspace.
 | Homebrew | `brew update`, then upgrade everything outdated |
 | Claude Code | |
 | Codex | |
-| Gemini CLI | |
+| Antigravity CLI (`agy`) | |
 | GitHub CLI (`gh`) | |
 | open-code-review (`ocr`) | |
 

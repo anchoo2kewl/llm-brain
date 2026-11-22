@@ -47,8 +47,8 @@ One entry per LLM CLI. A provider is available when it is `enabled` and its `cli
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `providers.<p>.enabled` | `true` for claude and codex, `false` for gemini | Whether this machine may use it. |
-| `providers.<p>.cli` | `claude`, `codex`, `gemini` | The command to run. |
+| `providers.<p>.enabled` | `true` for claude and codex, `false` for antigravity | Whether this machine may use it. |
+| `providers.<p>.cli` | `claude`, `codex`, `agy` | The command to run. |
 | `providers.<p>.model` | `""` | Model to pass. Empty means the CLI's own default. `$LLM_MODEL` overrides it for one run. |
 
 ### `gateway`

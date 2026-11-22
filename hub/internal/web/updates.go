@@ -12,7 +12,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Tool updates (/settings/updates): keep brew, Claude Code, Codex, Gemini CLI and friends current on every
+// Tool updates (/settings/updates): keep brew, Claude Code, Codex, Antigravity and friends current on every
 // host, daily or by hand. The agent on each host does the work (agent/update.go).
 
 func (s *Server) updateRoutes(g, p func(string, http.HandlerFunc)) {

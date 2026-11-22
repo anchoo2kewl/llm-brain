@@ -25,10 +25,12 @@ import (
 
 // File kinds.
 const (
-	KindClaude   = "claude"
-	KindCodex    = "codex"
-	KindRunLog   = "runlog"
-	KindFleetLog = "fleetlog"
+	KindClaude = "claude"
+	KindCodex  = "codex"
+	// KindAntigravity is the Antigravity CLI (agy); it is also the session's provider name.
+	KindAntigravity = "antigravity"
+	KindRunLog      = "runlog"
+	KindFleetLog    = "fleetlog"
 )
 
 type Chunk struct {
@@ -146,7 +148,7 @@ func (e *Engine) Chunk(ctx context.Context, c Chunk) (int64, error) {
 		return 0, errors.New("chunk needs host and path")
 	}
 	switch c.Kind {
-	case KindClaude, KindCodex, KindRunLog, KindFleetLog:
+	case KindClaude, KindCodex, KindAntigravity, KindRunLog, KindFleetLog:
 	default:
 		return 0, fmt.Errorf("unknown kind %q", c.Kind)
 	}
@@ -176,7 +178,7 @@ func (e *Engine) Chunk(ctx context.Context, c Chunk) (int64, error) {
 	if n > 0 || c.Kind == KindRunLog {
 		data := c.Data[:n]
 		switch c.Kind {
-		case KindClaude, KindCodex:
+		case KindClaude, KindCodex, KindAntigravity:
 			err = e.applySession(ctx, tx, c, data)
 		case KindRunLog:
 			err = e.applyRunLog(ctx, tx, c, data)
@@ -210,12 +212,12 @@ func (e *Engine) wrote(ctx context.Context) {
 func (e *Engine) reset(ctx context.Context, tx *sql.Tx, c Chunk) error {
 	var err error
 	switch c.Kind {
-	case KindClaude, KindCodex:
+	case KindClaude, KindCodex, KindAntigravity:
 		if _, err = tx.ExecContext(ctx, `DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE host = ? AND path = ?)`, c.Host, c.Path); err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE sessions SET message_count = 0 WHERE host = ? AND path = ?`, c.Host, c.Path)
 		}
 		if err == nil {
-			err = store.ResetSessionInsights(ctx, tx, c.Host, c.Path)
+			err = store.ResetSessionInsights(ctx, tx, c.Host, c.Path, c.Kind == KindAntigravity)
 		}
 	case KindRunLog:
 		_, err = tx.ExecContext(ctx, `UPDATE runs SET log = '', log_bytes = 0 WHERE host = ? AND path = ?`, c.Host, c.Path)
@@ -238,10 +240,14 @@ type sessionMeta struct {
 //
 //	claude: <projects>/<project>/<uuid>.jsonl, subagents at <projects>/<project>/<parent-uuid>/subagents/agent-x.jsonl
 //	codex:  <sessions>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
+//	antigravity: <brain>/<uuid>/.system_generated/logs/transcript.jsonl
 func sessionPathInfo(kind, path string) (uuid, parent, project string) {
 	dir := filepath.Dir(path)
-	if kind == KindCodex {
+	switch kind {
+	case KindCodex:
 		return parse.CodexSessionID(path), "", ""
+	case KindAntigravity:
+		return parse.AntigravitySessionID(path), "", ""
 	}
 	uuid = strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	if filepath.Base(dir) == "subagents" {
@@ -285,9 +291,12 @@ func (e *Engine) applySession(ctx context.Context, tx *sql.Tx, c Chunk, data []b
 		}
 		var ev parse.Event
 		var perr error
-		if c.Kind == KindCodex {
+		switch c.Kind {
+		case KindCodex:
 			ev, perr = parse.Codex(line)
-		} else {
+		case KindAntigravity:
+			ev, perr = parse.Antigravity(line)
+		default:
 			ev, perr = parse.Claude(line)
 		}
 		if perr != nil {

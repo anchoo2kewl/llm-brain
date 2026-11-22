@@ -143,10 +143,10 @@ func TestCloseCodexByOpenFileThenStronger(t *testing.T) {
 
 func TestCloseByCwdRefusals(t *testing.T) {
 	t.Run("ambiguous", func(t *testing.T) {
-		pt := &fakeProcs{procs: []Proc{{PID: 10, PPID: 1, Args: "gemini"}, {PID: 11, PPID: 1, Args: "node /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js"}},
+		pt := &fakeProcs{procs: []Proc{{PID: 10, PPID: 1, Args: "agy"}, {PID: 11, PPID: 1, Args: "/opt/homebrew/Caskroom/antigravity-cli/1.5.14,5302690847260672/antigravity --conversation c2d4e6f8-3333-4c2b-9a51-0d6c3b1f7a10"}},
 			cwd: map[int]string{10: "/w", 11: "/w"}}
 		ex, hub := closeExec(t, pt)
-		r, _ := runClose(t, ex, hub, SessionClose{Provider: "gemini", Cwd: "/w"})
+		r, _ := runClose(t, ex, hub, SessionClose{Provider: "antigravity", Cwd: "/w"})
 		if r.Status != "failed" || !strings.Contains(r.Error, "ambiguous: 2") || len(pt.sent) != 0 {
 			t.Fatalf("%+v sent %v", r, pt.sent)
 		}
@@ -199,7 +199,10 @@ func TestCliOf(t *testing.T) {
 		"/Users/me/.local/share/claude/versions/2.1.296":                                                      "claude",
 		"node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js":                                "claude",
 		"/opt/homebrew/Caskroom/codex/0.159.3/bin/codex":                                                      "codex",
-		"node /opt/homebrew/bin/gemini":                                                                       "gemini",
+		"/opt/homebrew/bin/agy --dangerously-skip-permissions":                                                "antigravity",
+		"/opt/homebrew/Caskroom/antigravity-cli/1.5.14,5302690847260672/antigravity":                          "antigravity",
+		"/Applications/Antigravity.app/Contents/MacOS/Antigravity":                                            "",
+		"node /opt/homebrew/bin/gemini":                                                                       "",
 		"/bin/zsh -c claude --resume":                                                                         "",
 		"/opt/homebrew/Caskroom/claude-code@latest/2.1.295/claude --chrome-native-host":                       "",
 		"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex app-server": "",

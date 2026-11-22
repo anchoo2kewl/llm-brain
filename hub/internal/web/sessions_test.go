@@ -138,7 +138,7 @@ func TestNewAgentChatAndPages(t *testing.T) {
 	if strings.Contains(mbody, `value="agent:`) || strings.Contains(mbody, `name="folder"`) {
 		t.Error("the model chat page offers agents or folders")
 	}
-	if strings.Contains(body, `value="agent:gemini"`) {
+	if strings.Contains(body, `value="agent:antigravity"`) {
 		t.Error("offers a CLI no host has")
 	}
 

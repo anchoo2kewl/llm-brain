@@ -4,7 +4,7 @@ Which LLM does which job, how every vendor CLI is driven through one adapter, an
 
 ## Providers
 
-A provider is one LLM CLI: `claude`, `codex` or `gemini`. It is available on a machine when `providers.<p>.enabled` is true and `providers.<p>.cli` is on `PATH`. Check with:
+A provider is one LLM CLI: `claude`, `codex` or `antigravity`. It is available on a machine when `providers.<p>.enabled` is true and `providers.<p>.cli` is on `PATH`. Check with:
 
 ```sh
 bin/fleet providers
@@ -30,10 +30,10 @@ bin/llm-run <provider> <mode> <cwd> <prompt-file> [session-name]
 
 The only vendor-specific code in the fleet. Modes:
 
-| Mode | claude | codex | gemini |
+| Mode | claude | codex | antigravity |
 | --- | --- | --- | --- |
-| `write` | `-p … --dangerously-skip-permissions` | `exec --dangerously-bypass-approvals-and-sandbox` | `-p … --yolo` |
-| `review` | `--permission-mode plan`, tools limited to Read, Grep, Glob, `git diff/log/show`, `gh pr view/diff` | `exec --sandbox read-only` | `-p …` |
+| `write` | `-p … --dangerously-skip-permissions` | `exec --dangerously-bypass-approvals-and-sandbox` | `--print=… --dangerously-skip-permissions` |
+| `review` | `--permission-mode plan`, tools limited to Read, Grep, Glob, `git diff/log/show`, `gh pr view/diff` | `exec --sandbox read-only` | refused: no read-only mode |
 
 The model is `$LLM_MODEL`, else `providers.<p>.model`, else the CLI's default. The fleet explicitly defaults Claude to `sonnet`, so an interactive Opus/1M preference does not silently apply to automation. `pr_review.model` optionally overrides the model for external PR review workers.
 
@@ -42,7 +42,7 @@ Before running, it:
 - adds the shared-memory context pack and the `brain-remember` instructions when `memory.enabled` is true ([Shared memory](memory.md));
 - routes through the gateway when `gateway.enabled` is true, `CPA_API_KEY` is set in `gateway.env_file`, and `<gateway.url>/v1/models` answers within 3 s. Otherwise it logs "gateway unreachable" and uses the CLI's own login.
 
-Through the gateway, Claude gets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, and Codex gets a `cpa` model provider (`<gateway>/v1`, `wire_api="responses"`). Gemini always uses its own login.
+Through the gateway, Claude gets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, and Codex gets a `cpa` model provider (`<gateway>/v1`, `wire_api="responses"`). Antigravity (`agy`) always uses its own login.
 
 ## The account gateway
 
@@ -83,6 +83,6 @@ These appear on the fleet overview and on [Insights](hub-insights.md). Without t
 
 ### Hub terminals and the gateway
 
-Hub terminals use the CLI's own login by default. Set `terminals.gateway: true` to send interactive Claude and Codex terminals through the gateway too. Claude and Codex hub tasks always use the gateway when it answers, the way `llm-run` does. Gemini uses its own login.
+Hub terminals use the CLI's own login by default. Set `terminals.gateway: true` to send interactive Claude and Codex terminals through the gateway too. Claude and Codex hub tasks always use the gateway when it answers, the way `llm-run` does. Antigravity uses its own login.
 
 For interactive and unattended session budgets, subagent caps, and context limits, see [Claude resource limits](claude-limits.md).

@@ -10,7 +10,7 @@
 <dt>Turns</dt><dd>{{.A.Turns}} · started {{ago .A.CreatedAt}} · last activity {{ago .A.UpdatedAt}}</dd>
 {{with .ReviewOf}}<dt>Reviews</dt><dd><a href="/agents/{{.ID}}">#{{.ID}} {{trunc 80 .Title}}</a></dd>{{end}}
 {{if .Reviews}}<dt>Reviewed by</dt><dd>{{range .Reviews}}<a href="/agents/{{.ID}}">#{{.ID}} {{.Provider}}</a> <span class="pill {{statusClass .Status}}">{{.Status}}</span> {{end}}</dd>{{end}}
-<dt>Transcript</dt><dd>{{if .SessionID}}<a href="/sessions/{{.SessionID}}">full transcript</a>{{else}}<span class="mut">not ingested yet{{if eq .A.Provider "gemini"}} (Gemini transcripts aren't ingested; the turns below are the hub's own record){{end}}</span>{{end}}{{if .RunID}} · <a href="/runs/{{.RunID}}">latest turn's log</a>{{end}}</dd>
+<dt>Transcript</dt><dd>{{if .SessionID}}<a href="/sessions/{{.SessionID}}">full transcript</a>{{else}}<span class="mut">not ingested yet</span>{{end}}{{if .RunID}} · <a href="/runs/{{.RunID}}">latest turn's log</a>{{end}}</dd>
 <dt>Open in terminal</dt><dd>{{if .Resume}}<code class="copy">{{.Resume}}</code> <span class="mut small">on {{.A.Host}}</span>{{else}}<span class="mut">after the first turn starts</span>{{end}}</dd>
 <dt>Session id</dt><dd class="mut small">{{if .A.ProviderSession}}{{.A.ProviderSession}}{{else}}—{{end}}</dd>
 </dl></details>

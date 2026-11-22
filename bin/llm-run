@@ -71,11 +71,13 @@ case "$provider" in
     fi
     exec codex "${args[@]}" "$prompt"
     ;;
-  gemini)
-    args=(-p "$prompt")
-    [[ -n "$model" ]] && args+=(-m "$model")
-    [[ "$mode" == "write" ]] && args+=(--yolo)
-    exec gemini "${args[@]}"
+  antigravity)
+    args=("--print=$prompt")
+    [[ -n "$model" ]] && args+=(--model "$model")
+    # agy has no read-only mode that answers (plan mode writes a plan; --sandbox still writes files)
+    [[ "$mode" == "write" ]] || die "antigravity cannot run read-only $mode turns; use claude or codex"
+    args+=(--dangerously-skip-permissions)
+    cd "$cwd" && exec agy "${args[@]}"
     ;;
   *) die "unknown provider: $provider" ;;
 esac

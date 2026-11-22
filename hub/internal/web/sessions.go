@@ -22,7 +22,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Session control and chats: start Claude/Codex/Gemini sessions on any host with a live agent, continue,
+// Session control and chats: start Claude/Codex/Antigravity sessions on any host with a live agent, continue,
 // stop and cross-review them; plain chats with any model the account gateway serves. Every route here is
 // tailnet-only, and every POST is refused when it comes from another site.
 

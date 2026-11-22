@@ -81,7 +81,7 @@ type Scope struct {
 // Author is who wrote it.
 type Author struct {
 	Agent    string `json:"agent,omitempty"`    // claude-code, codex, fleet-issue-12, a person's name …
-	Provider string `json:"provider,omitempty"` // claude | codex | gemini | human
+	Provider string `json:"provider,omitempty"` // claude | codex | antigravity | human
 	Host     string `json:"host,omitempty"`
 	Session  string `json:"session,omitempty"` // the CLI session id
 }

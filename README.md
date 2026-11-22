@@ -16,7 +16,7 @@ It runs on one Mac you leave on, under launchd. Other Macs ship their sessions t
 | [Hub](docs/hub.md) | Inbox, Now, History, search and insights for every agent on every Mac. |
 | [Mac app](docs/mac-app.md) | Native macOS client: live terminals in panes, tmux keys, cluster search, notifications. |
 | [Desktop app](docs/desktop-app.md) | Linux client (Tauri): hub switcher, global quick search, notifications. |
-| [Terminals and Workspace](docs/hub-terminals.md) | Claude Code, Codex, Gemini or a shell in tmux, live in the browser, many at once. |
+| [Terminals and Workspace](docs/hub-terminals.md) | Claude Code, Codex, Antigravity or a shell in tmux, live in the browser, many at once. |
 | [Tasks and model chats](docs/hub-tasks-and-chats.md) | Start, continue, stop and cross-review headless sessions; chat with any gateway model. |
 | [Files and editor](docs/hub-files-and-editor.md) | Browse a Mac, move files both ways, edit a folder in a Sublime-style Monaco editor. |
 | [Search](docs/hub-search.md) | Full-text search over every message, tool call, run log, chat and event. |

@@ -23,7 +23,7 @@ import (
 	"github.com/anchoo2kewl/llm-brain/hub/internal/store"
 )
 
-// Terminals: an interactive CLI (claude, codex, gemini, or a login shell) in a tmux session on this host,
+// Terminals: an interactive CLI (claude, codex, agy, or a login shell) in a tmux session on this host,
 // with no approvals and no sandbox. tmux keeps it running when the browser, the hub or this agent goes away;
 // anyone on the Mac can attach with AttachCommand. The hub queues three commands:
 //
@@ -123,7 +123,7 @@ func (e *Executor) termCapture(ctx context.Context, c store.Command) {
 const maxCapture = 200 << 10
 
 // TermProviders are what a terminal can run.
-var TermProviders = []string{"claude", "codex", "gemini", "shell"}
+var TermProviders = []string{"claude", "codex", "antigravity", "shell"}
 
 func KnownTermProvider(p string) bool {
 	for _, x := range TermProviders {
@@ -371,10 +371,13 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 		if o.Resume != "" { // codex resume [flags] <id>: the subcommand takes the same flags
 			argv = append([]string{"codex", "resume"}, append(argv[1:], o.Resume)...)
 		}
-	case "gemini":
-		argv = []string{"gemini", "--approval-mode", "yolo"}
-		if o.Ask {
-			argv = []string{"gemini", "--approval-mode", "default"}
+	case "antigravity":
+		argv = []string{"agy", "--dangerously-skip-permissions"}
+		if o.Ask { // edits auto-approved, commands asked
+			argv = []string{"agy", "--mode", "accept-edits"}
+		}
+		if o.Resume != "" {
+			argv = append(argv, "--conversation", o.Resume)
 		}
 		if o.Model != "" {
 			argv = append(argv, "--model", o.Model)
@@ -385,7 +388,7 @@ func TermScript(o TermOpen, gw Gateway, shell string) (string, []string, error) 
 		return "", nil, fmt.Errorf("unknown CLI %q", o.Provider)
 	}
 	if p := strings.TrimSpace(o.Prompt); p != "" {
-		if o.Provider == "gemini" { // the = form keeps a prompt starting with '-' a value
+		if o.Provider == "antigravity" { // the = form keeps a prompt starting with '-' a value
 			argv = append(argv, "--prompt-interactive="+p)
 		} else {
 			argv = append(argv, "--", p)

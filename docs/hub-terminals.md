@@ -1,6 +1,6 @@
 # Hub terminals and Workspace
 
-Claude Code, Codex, Gemini CLI or a login shell, running interactively in tmux on any of your Macs and shown live in the browser.
+Claude Code, Codex, Antigravity or a login shell, running interactively in tmux on any of your Macs and shown live in the browser.
 
 ## Opening a terminal
 
@@ -9,7 +9,7 @@ Claude Code, Codex, Gemini CLI or a login shell, running interactively in tmux o
 | Field | Meaning |
 | --- | --- |
 | Mac | Any host whose agent is live. |
-| CLI | Claude Code, Codex, Gemini or a shell. The CLI must be installed on that Mac. |
+| CLI | Claude Code, Codex, Antigravity or a shell. The CLI must be installed on that Mac. |
 | Folder | A recent folder, a suggestion, or a typed path (absolute or `~/…`, no `..`). Any folder in the home folder works; empty means `~`. |
 | Model | Optional. |
 | First message | Optional. Images and files dropped here are uploaded to that Mac first and added as `Attached: <path>` lines. |
@@ -22,7 +22,7 @@ By default a terminal has every permission:
 | --- | --- | --- |
 | Claude Code | `--dangerously-skip-permissions` | `--permission-mode manual` |
 | Codex | `--dangerously-bypass-approvals-and-sandbox` | `--ask-for-approval on-request --sandbox workspace-write` |
-| Gemini | `--approval-mode yolo` | `--approval-mode default` |
+| Antigravity (`agy`) | `--dangerously-skip-permissions` | `--mode accept-edits` |
 
 When the CLI exits, a login shell stays in the same folder, so the terminal is still a command line.
 
@@ -82,7 +82,7 @@ Every conversation can be read two ways. Switch on the session page, a task's pa
 
 | View | Looks like |
 | --- | --- |
-| Terminal (default) | The CLI itself: `❯` prompts, `⏺` answers and tool calls on one line (`⏺ Bash(gh issue list)`), `⎿` results cut to three lines with `… +N lines` to expand. Markdown stays text with light colour. Codex shows `›`, `•`, `└` and `Ran <command>`; Gemini shows `>` and `✦`. For a hub terminal it is the live terminal. |
+| Terminal (default) | The CLI itself: `❯` prompts, `⏺` answers and tool calls on one line (`⏺ Bash(gh issue list)`), `⎿` results cut to three lines with `… +N lines` to expand. Markdown stays text with light colour. Codex shows `›`, `•`, `└` and `Ran <command>`; Antigravity shows `>` and `✦`. For a hub terminal it is the live terminal. |
 | Chat | Cards with rendered markdown. On a hub terminal it shows the transcript over the live terminal; what you type still goes to the terminal. |
 
 The choice is kept per browser (`hub_view` cookie and localStorage). A Workspace pane can override it, and `?view=term` or `?view=chat` on a URL shows that view once.
@@ -97,7 +97,7 @@ The fixes it offers:
 
 1. Click Allow on that Mac (Screen Sharing: `vnc://<Mac>`).
 2. Give the hub agent and tmux Full Disk Access: System Settings, Privacy & Security, Full Disk Access. The page names both paths.
-3. **Restart CLI…**: ends the stuck CLI and starts it again in the same tmux on a fresh pseudo-terminal, so keys typed into the frozen one don't run in the new shell. It continues the conversation (`claude --resume`, `codex resume`); Gemini starts afresh in the same folder.
+3. **Restart CLI…**: ends the stuck CLI and starts it again in the same tmux on a fresh pseudo-terminal, so keys typed into the frozen one don't run in the new shell. It continues the conversation (`claude --resume`, `codex resume`); Antigravity starts afresh in the same folder, since its transcripts do not record which folder they ran in.
 
 Any change on screen or in CPU time clears it. Without Full Disk Access, don't have an agent search the whole home folder (`find ~`, `rg ~`); see [Troubleshooting](troubleshooting.md#a-terminal-froze).
 
@@ -107,7 +107,7 @@ Every page that shows a session or terminal can close it: Now, Inbox, Sessions, 
 
 - A hub terminal is ended as a terminal (its tmux session is killed). If its Mac's agent is offline, the page tells you the `tmux -L llm-brain kill-session` command to run there.
 - A hub task's running turn is stopped.
-- Any other Claude, Codex or Gemini session, even one started in Terminal.app or an IDE on another Mac, is closed by that Mac's agent.
+- Any other Claude, Codex or Antigravity session, even one started in Terminal.app or an IDE on another Mac, is closed by that Mac's agent.
 
 To find that process, the agent tries, most certain first:
 

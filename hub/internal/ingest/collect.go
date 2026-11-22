@@ -24,11 +24,13 @@ type Collector struct {
 	Role      string // serve | ship
 	ClaudeDir string // ~/.claude/projects
 	CodexDir  string // ~/.codex/sessions
-	StateDir  string // ~/.local/state/llm-brain
-	TZ        string
-	Sink      Sink
-	ChunkMax  int // bytes per chunk; a single longer line grows the chunk up to MaxLine
-	Log       *log.Logger
+	// AntigravityDir is ~/.gemini/antigravity-cli/brain.
+	AntigravityDir string
+	StateDir       string // ~/.local/state/llm-brain
+	TZ             string
+	Sink           Sink
+	ChunkMax       int // bytes per chunk; a single longer line grows the chunk up to MaxLine
+	Log            *log.Logger
 	// Extra, when set, adds run keys that are alive but have no pid file (the session agent's turns).
 	Extra func() []string
 
@@ -67,6 +69,10 @@ func (c *Collector) Discover() []source {
 			return nil
 		})
 		add(KindCodex, cx)
+	}
+	if c.AntigravityDir != "" {
+		ag, _ := filepath.Glob(filepath.Join(c.AntigravityDir, "*", ".system_generated", "logs", "transcript.jsonl"))
+		add(KindAntigravity, ag)
 	}
 	if c.StateDir != "" {
 		logs, _ := filepath.Glob(filepath.Join(c.StateDir, "logs", "*.log"))

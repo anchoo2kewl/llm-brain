@@ -141,7 +141,7 @@ func payload(t Turn) json.RawMessage {
 // Start creates an agent session and queues its first turn.
 func (c *Control) Start(ctx context.Context, r StartReq) (int64, error) {
 	if !KnownProvider(r.Provider) {
-		return 0, bad("pick Claude, Codex or Gemini")
+		return 0, bad("pick Claude, Codex or Antigravity")
 	}
 	scratch := strings.TrimSpace(r.Cwd) == ""
 	if scratch && r.Perm == "" {
@@ -363,7 +363,7 @@ func (c *Control) SendBack(ctx context.Context, reviewID int64) (int64, error) {
 // Adopt gives an ingested session (started anywhere) an agent session, so the hub can continue it.
 func (c *Control) Adopt(ctx context.Context, s store.Session, perm string, bypass bool) (int64, error) {
 	if !KnownProvider(s.Provider) {
-		return 0, bad("only Claude, Codex and Gemini sessions can be continued")
+		return 0, bad("only Claude, Codex and Antigravity sessions can be continued")
 	}
 	if s.UUID == "" || s.ParentUUID != "" {
 		return 0, bad("this transcript can't be resumed (no session id, or a subagent)")
