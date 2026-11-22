@@ -325,19 +325,28 @@ func (c *Collector) antigravityCwds() map[string]string {
 	if err != nil || (c.agyCwd != nil && st.ModTime().Equal(c.agyAt)) {
 		return c.agyCwd
 	}
-	out, err := exec.Command("sqlite3", "-readonly", "-json", "file:"+db+"?immutable=1",
+	uri := (&url.URL{Scheme: "file", Path: db, RawQuery: "immutable=1"}).String() // escapes '#', '?', '%'
+	out, err := exec.Command("sqlite3", "-readonly", "-json", uri,
 		"SELECT conversation_id AS id, workspace_uris AS uris FROM conversation_summaries").Output()
+	if err == nil {
+		var m map[string]string
+		if m, err = parseAntigravityCwds(out); err == nil {
+			c.agyCwd, c.agyAt = m, st.ModTime()
+		}
+	}
 	if err != nil {
 		c.logf("antigravity folders: %v", err)
-		return c.agyCwd
 	}
-	c.agyCwd, c.agyAt = parseAntigravityCwds(out), st.ModTime()
 	return c.agyCwd
 }
 
-func parseAntigravityCwds(out []byte) map[string]string {
+func parseAntigravityCwds(out []byte) (map[string]string, error) {
 	var rows []struct{ ID, URIs string }
-	_ = json.Unmarshal(out, &rows) // sqlite3 prints nothing at all for no rows
+	if len(bytes.TrimSpace(out)) > 0 { // sqlite3 prints nothing at all for no rows
+		if err := json.Unmarshal(out, &rows); err != nil {
+			return nil, err
+		}
+	}
 	m := map[string]string{}
 	for _, r := range rows {
 		var uris []string
@@ -348,5 +357,5 @@ func parseAntigravityCwds(out []byte) map[string]string {
 			m[r.ID] = u.Path
 		}
 	}
-	return m
+	return m, nil
 }

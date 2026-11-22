@@ -398,7 +398,7 @@ func TestAntigravityFolderFromSummaries(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("no sqlite3")
 	}
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "my #1 home") // a path the sqlite3 URI must escape
 	brain := filepath.Join(home, "antigravity-cli", "brain")
 	line := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","created_at":"2026-11-22T04:39:15Z","content":"<USER_REQUEST>hi</USER_REQUEST>"}` + "\n"
 	transcript := func(id string) string {
