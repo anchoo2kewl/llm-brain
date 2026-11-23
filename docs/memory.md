@@ -36,7 +36,7 @@ Or `POST /api/memory` with JSON:
 ```json
 {"kind": "gotcha", "title": "…", "body": "…", "confidence": "high",
  "scope": {"repo": "acme/api", "issue": 12, "files": ["db/replica.go"]},
- "author": {"agent": "codex", "provider": "codex", "host": "studio"}}
+ "author": {"agent": "codex", "provider": "codex", "host": "desk-1"}}
 ```
 
 The hub checks every write:
@@ -92,15 +92,37 @@ With `memory.enabled: true`, `bin/llm-run` adds to every worker prompt:
 
 It fails open: with no hub, the prompt is unchanged.
 
-## TaskAI copy
+## Between hubs
 
-Every memory is also one page in a TaskAI project, so people can read and search it there.
+Each Hub keeps its own memory database. There is no distributed database: a write always lands on the Hub you talk to, so a laptop that is offline keeps writing.
 
+Every minute, each Hub asks the other Hubs of its cluster (the peers in `cluster.peers`) for the memories written on them since the newest one it holds from each (`GET /api/cluster/memories?after=<id>`). A Hub that was offline catches up when it is back. Replacements follow, the same lesson written on two Hubs is kept once, and every row is checked again for credentials before it is stored. This ships in hub 0.1.8.
+
+## At session start
+
+Every Hub terminal (Claude Code and Codex; Antigravity when it starts with a first prompt) gets the context pack for its folder, who else is working there, and how to search and save, in the CLI's instructions rather than as a message. The Hub also imports this machine's Claude Code memory files every hour (see below).
+
+## TaskAI
+
+[TaskAI](https://taskai.cc) is an optional copy that people can read and search. Without a TaskAI API key, memories stay on the Hubs and nothing is sent.
+
+### Today: one page per memory
+
+- Key: `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`) in `~/.config/llm-brain/taskai.env`, or in `secrets.env` next to it, read when `hub serve` starts.
 - Project: `--memory-project` (default "Agent memory"), found or created on first use. A number is taken as a project id.
-- Server: `--taskai` (default `https://taskai.cc`). `''` keeps memories on the hub.
-- Key: `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`) in `~/.config/llm-brain/taskai.env`, or in `secrets.env` next to it. With no key, memories stay on the hub.
+- Server: `--taskai` (default `https://taskai.cc`). `''` keeps memories on the Hub.
 
-The hub is the outbox. A write lands on the hub first and is forwarded with retries, waiting 30 s and doubling up to an hour, so a write never fails because TaskAI is slow or down. A superseded memory's page is retitled `[superseded]`.
+The Hub is the outbox. A write lands on the Hub first and is forwarded with retries, waiting 30 s and doubling up to an hour, so a write never fails because TaskAI is slow or down. A superseded memory's page is retitled `[superseded]`. TaskAI's search is merged into context packs when it answers within 150 ms.
+
+### Next: the TaskAI Memory Protocol
+
+[biswas-dev/taskai#50](https://github.com/biswas-dev/taskai/pull/50) makes memories an open, versioned protocol (v1) that any app or LLM can use over REST or MCP. The Hub is one client among many. It is not live yet, and the Hub keeps the page copy until it is.
+
+- **Per user.** Memories belong to a user and their API keys, private by default. An owner can share their whole store read-only with chosen collaborators.
+- **Hybrid search.** Full text plus vector search, merged with reciprocal rank fusion; full text alone when the embedding is slow.
+- **Quota.** 1 GiB per user. Writes warn at 80% and are refused past the quota, after one compaction.
+- **Compaction.** Deterministic: drops superseded and expired memories, folds exact copies, and merges old low-confidence notes. Near-duplicates are left alone, because a similar-looking note can say the opposite; replacing a lesson is an explicit supersede.
+- **Idempotent from many hubs.** Each write carries its origin hub and id, so replicated Hubs that send the same memory update one row.
 
 ## Importing Claude's memories
 
@@ -110,4 +132,4 @@ hub memory import [--to http://<hub>:8787] [--dir ~/.claude/projects] [--host NA
 
 Run it on the Mac that has the files. It reads `~/.claude/projects/*/memory/*.md` (one fact per file, with name, description and type front matter) and posts each one to the hub. It prints how many files were new, updated, unchanged, refused and failed; `-v` lists the refused ones.
 
-It is safe to run again: an unchanged file is a no-op, an edited file supersedes its earlier import, and a file an agent has since improved is left alone.
+`hub serve` runs the same import every hour. It is safe to run again: an unchanged file is a no-op, an edited file supersedes its earlier import, and a file an agent has since improved is left alone.

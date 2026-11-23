@@ -60,7 +60,7 @@ The terminal page has a touch key row (Esc, Tab, ⇧Tab, arrows, ⌃C, ⌃D, Ent
 
 ### Send now
 
-Ctrl+Enter passes a distinct modified Enter to Claude Code’s send-now action, sending the draft and queued messages immediately. Other providers and shells receive plain Enter. Ctrl+Shift+Enter still reaches the Workspace zoom shortcut. The hub’s tmux bridge preserves the extended key; no Ctrl+S is sent to a shell.
+Ctrl+Enter sends what you typed right away, even while the agent is busy. Claude Code gets its send-now action (a distinct modified Enter), sending the draft and queued messages. In the Mac app (0.1.10) Codex gets Enter, which Codex sends at once mid-turn, and Antigravity gets Alt+M, the opposite of its default Queue mode. Shells receive plain Enter. Ctrl+Shift+Enter still reaches the Workspace zoom shortcut. The hub’s tmux bridge preserves the extended key; no Ctrl+S is sent to a shell.
 
 ### Workspace shortcuts
 

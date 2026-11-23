@@ -117,6 +117,21 @@ make -C hub check     # go vet + go test
 | `--once` | `false` | Ship once and exit. |
 | `--poll` | `3s` | How often the session agent asks the hub for commands. |
 
+## Cluster
+
+Run a Hub on each machine and list the others as peers, with the same cluster name, in `~/.config/llm-brain/local.yaml`:
+
+```yaml
+node:
+  role: permanent       # ephemeral on a laptop you shut down
+cluster:
+  name: home
+  peers: [https://desk-1.<tailnet>.ts.net, https://laptop.<tailnet>.ts.net]
+  replica_days: 30      # how much of the other machines' history an ephemeral node keeps
+```
+
+Each Hub sends its own machine's transcripts to every peer (a full mesh), so every Hub can search the whole cluster when the others are offline. A Hub joins only peers of its own cluster. [Memories](memory.md#between-hubs) and the [hive](hive.md) replicate the same way. This is in the `hub-v*` release binaries.
+
 ## Network and security
 
 - The hub binds only to `127.0.0.1` and the Mac's Tailscale IPv4. If Tailscale is not up yet, it serves on localhost and retries every 30 s.
@@ -193,8 +208,9 @@ The app's shortcuts are Inbox, Now, New terminal and Workspace.
 | Antigravity CLI (`agy`) | |
 | GitHub CLI (`gh`) | |
 | open-code-review (`ocr`) | |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | Upgrades a pipx install, then copies its new skill for Claude Code, Codex and Antigravity (hub 0.1.7) |
 
-Each host agent reports how each tool was installed (cask, formula, npm or Claude's own installer) and updates it that way. You can turn the daily update on or off, pick the hour, the tools and the hosts, or press **Update now** for one tool, one host or all. Each run keeps the versions before and after and the tail of its output. A failure lands in the inbox.
+Each host agent reports how each tool was installed (cask, formula, npm or Claude's own installer) and updates it that way. The daily update runs after 04:00 local time by default. You can turn it on or off, pick the hour, the tools and the hosts, or press **Update now** for one tool, one host or all. Each run keeps the versions before and after and the tail of its output. A failure lands in the inbox.
 
 ## Data
 
@@ -205,4 +221,4 @@ Each host agent reports how each tool was installed (cask, formula, npm or Claud
 | `<state>/assets/` | Kept files and chat uploads. |
 | `<state>/logs/agent-<id>.<time>.log` | Task turn logs. |
 
-`hub.db` grows with your transcripts. There is no retention yet.
+`retention.days` (default 90) deletes older history; `hub compact` makes `hub.db` smaller afterwards (in the `hub-v*` release binaries).
