@@ -66,6 +66,11 @@ final class AppModel {
     private var nodeByURL: [String: String] = [:]
     private var lastIdentityCheck: [String: Date] = [:]
 
+    /// Hubs of the selected hub's cluster that are not saved here, for settings that go to every hub.
+    var unsavedClusterHubs: [(node: String, url: String)] {
+        MemoryKey.clusterPeers(nodes?.peers ?? [], savedNodes: Set(config.hubs.compactMap { nodeByURL[$0.url] }))
+    }
+
     func machineLabel(_ node: String) -> String {
         if nodes?.me.node == node, let saved = config.selectedHub { return saved.name }
         return config.hubs.first { nodeByURL[$0.url] == node }?.name ?? node

@@ -13,10 +13,15 @@ struct MemorySettings: View {
     @ViewState private var busy = false
     @ViewState private var invalid = false
 
-    /// The hubs a change goes to; a hub removed meanwhile is never one of them.
+    /// Every hub this app can reach: the saved ones, then the cluster's others (named by node).
+    private var hubs: [(name: String, url: String)] {
+        model.config.hubs.map { ($0.name, $0.url) } + model.unsavedClusterHubs.map { ($0.node, $0.url) }
+    }
+
+    /// The hubs a change goes to; a hub gone meanwhile is never one of them.
     private var chosen: [String] {
-        let hubs = model.config.hubs.map(\.url)
-        return target == Self.allHubs ? hubs : hubs.filter { $0 == target }
+        let all = hubs.map(\.url)
+        return target == Self.allHubs ? all : all.filter { $0 == target }
     }
 
     var body: some View {
@@ -26,8 +31,8 @@ struct MemorySettings: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section("Hubs") {
-                if model.config.hubs.isEmpty { Text("Add a hub first.").foregroundStyle(.secondary) }
-                ForEach(model.config.hubs) { h in
+                if hubs.isEmpty { Text("Add a hub first.").foregroundStyle(.secondary) }
+                ForEach(hubs, id: \.url) { h in
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading) {
                             Text(h.name)
@@ -40,8 +45,8 @@ struct MemorySettings: View {
             }
             Section("Set, replace or remove the key") {
                 Picker("On", selection: $target) {
-                    Text("Every hub").tag(Self.allHubs)
-                    ForEach(model.config.hubs) { h in Text(h.name).tag(h.url) }
+                    Text("Every hub in the cluster").tag(Self.allHubs)
+                    ForEach(hubs, id: \.url) { h in Text(h.name).tag(h.url) }
                 }
                 SecureField("TaskAI API key", text: $key)
                     .onSubmit(save)
@@ -69,7 +74,7 @@ struct MemorySettings: View {
         .formStyle(.grouped)
         .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
-        .task(id: model.config.hubs.map(\.url)) {
+        .task(id: hubs.map(\.url)) {
             if !chosen.contains(target) && target != Self.allHubs { target = Self.allHubs }
             await refresh()
         }
@@ -88,10 +93,10 @@ struct MemorySettings: View {
         }
     }
 
-    private func name(of hub: String) -> String { model.config.hubs.first { $0.url == hub }?.name ?? hub }
+    private func name(of hub: String) -> String { hubs.first { $0.url == hub }?.name ?? hub }
 
     private func refresh() async {
-        for o in await MemoryKey.apply(to: model.config.hubs.map(\.url), MemoryKey.status) { statuses[o.hub] = o.result }
+        for o in await MemoryKey.apply(to: hubs.map(\.url), MemoryKey.status) { statuses[o.hub] = o.result }
     }
 
     private func save() {

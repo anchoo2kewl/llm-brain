@@ -26,6 +26,21 @@ import BrainHubCore
         #expect(MemoryKey.explain(HubError(refused)) == "The hub answered 422: TaskAI rejected the API key from settings (HTTP 401); it was not saved")
     }
 
+    @Test func everyHubIncludesTheClustersUnsavedPeers() throws {
+        // laptop twice (one address kept), studio saved already, down not answering, odd not at a hub address.
+        let json = #"""
+        {"self":{"node":"studio"},"peers":[
+         {"url":"http://100.64.0.2:8787","info":{"node":"laptop"},"ok":true},
+         {"url":"http://100.64.0.3:8787","info":{"node":"studio"},"ok":true},
+         {"url":"http://100.64.0.4:8787","info":{"node":"down"},"ok":false},
+         {"url":"https://evil.example","info":{"node":"odd"},"ok":true},
+         {"url":"http://100.64.0.5:8787","info":{"node":"laptop"},"ok":true}]}
+        """#
+        let cluster = try JSONDecoder().decode(ClusterNodes.self, from: Data(json.utf8))
+        let out = MemoryKey.clusterPeers(cluster.peers, savedNodes: ["studio"])
+        #expect(out.map(\.node) == ["laptop"] && out.map(\.url) == ["http://100.64.0.2:8787"])
+    }
+
     @Test func appliesToEveryHubAndReportsEach() async {
         let hubs = ["http://127.0.0.1:8787", "http://100.64.0.2:8787", "http://100.64.0.3:8787"]
         let out = await MemoryKey.apply(to: hubs) { hub in
