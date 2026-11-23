@@ -114,7 +114,10 @@ Session-control routes (tasks, chats, terminals, files, close, rename, updates) 
 
 | Method and path | Guard | Does |
 | --- | --- | --- |
-| `POST /api/memory` | Tailnet, same-site | Save a memory. |
+| `POST /api/memory` | Tailnet, same-site | Save a memory. From 0.1.10: 409 while shared memory is off. |
+| `GET /api/memory/status` | Tailnet | Hub 0.1.10: `{enabled, source, error, message, protocol, settable}`; never the key. |
+| `POST /api/memory/key` | Tailnet, same-site | Hub 0.1.10: `{"key": "…"}`, checked with TaskAI and saved (0600); 422 if refused. The key is never echoed. |
+| `DELETE /api/memory/key` | Tailnet, same-site | Hub 0.1.10: remove the saved key. |
 | `GET /api/memory?limit=` | Tailnet | Recent memories. |
 | `GET /api/memory/context?repo=&issue=&pr=&folder=&files=&q=&k=&self=&format=md` | Tailnet | Context pack. `cwd=` works for `folder=`. |
 | `GET /api/presence?repo=&issue=&cwd=` | Tailnet | Who is working on what. |

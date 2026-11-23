@@ -105,8 +105,10 @@ make -C hub check     # go vet + go test
 | `--slack-env` | `~/.config/llm-brain/slack.env` | `SLACK_TOKEN`, read only when the hub has no token yet. |
 | `--chat-interval` | `2m` | How often to read Slack. `0` disables chat. |
 | `--chat-backfill` | `24h` | How far back a newly watched conversation is read. |
-| `--taskai` | `https://taskai.cc` | Where memories are copied. `''` keeps them on the hub. |
+| `--taskai` | `https://taskai.cc` | Where memories are copied. `''` keeps them on the hub (from 0.1.10: turns shared memory off). |
 | `--taskai-env` | `~/.config/llm-brain/taskai.env` | File with `TASKAI_API_KEY`. |
+| `--taskai-key-file` | none | Hub 0.1.10: a file (mode 0600) with the TaskAI API key. See [memory.md](memory.md#shared-memory-needs-a-taskai-api-key). |
+| `--taskai-protocol` | `wiki` | Hub 0.1.10: `wiki` (one page per memory) or `1` (TaskAI Memory Protocol, once it ships). |
 | `--memory-project` | `Agent memory` | TaskAI project name or id for memories. |
 
 ### ship only

@@ -231,7 +231,8 @@ Not in the default file. Used only by `bootstrap.sh`.
 | `~/.config/llm-brain/PAUSE` | Present = this machine is paused. |
 | `~/.config/llm-brain/cpa.env` | `CPA_API_KEY`, `CPA_MGMT_KEY` for the gateway. |
 | `~/.config/llm-brain/slack.env` | `SLACK_TOKEN=…`, read once to seed the hub. |
-| `~/.config/llm-brain/taskai.env` | `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`) for the memory copy in TaskAI. `secrets.env` next to it is tried too. |
+| `~/.config/llm-brain/taskai.key` | Hub 0.1.10: the TaskAI API key saved from Settings, the desktop app or `hub memory key set` (mode 0600). Shared memory is on only with a key; see [memory.md](memory.md#shared-memory-needs-a-taskai-api-key). |
+| `~/.config/llm-brain/taskai.env` | `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`) for the memory copy in TaskAI, the lowest-precedence key source. `secrets.env` next to it is tried too. |
 | `~/.local/state/llm-brain/` | State: `runs/` (pid and prompt per worker), `prs/` (fingerprints, review marks), `logs/`, `reviews/`, `notes/`, `chat/`, `status.json`, `tick.lock`. |
 | `~/.local/state/llm-brain/hub.db` | The hub's Turso database. |
 | `~/.local/state/llm-brain/hub.bleve` | The search index. |

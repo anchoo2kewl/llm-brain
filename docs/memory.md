@@ -96,27 +96,42 @@ It fails open: with no hub, the prompt is unchanged.
 
 Each Hub keeps its own memory database. There is no distributed database: a write always lands on the Hub you talk to, so a laptop that is offline keeps writing.
 
-Every minute, each Hub asks the other Hubs of its cluster (the peers in `cluster.peers`) for the memories written on them since the newest one it holds from each (`GET /api/cluster/memories?after=<id>`). A Hub that was offline catches up when it is back. Replacements follow, the same lesson written on two Hubs is kept once, and every row is checked again for credentials before it is stored. This ships in hub 0.1.8.
+Every minute, each Hub asks the other Hubs of its cluster (the peers in `cluster.peers`) for the memories written on them since the newest one it holds from each (`GET /api/cluster/memories?after=<id>`). A Hub that was offline catches up when it is back. Replacements follow, the same lesson written on two Hubs is kept once, and every row is checked again for credentials before it is stored. This ships in hub 0.1.8. From 0.1.10 a Hub without a TaskAI API key neither pulls nor serves memories ([see below](#shared-memory-needs-a-taskai-api-key)).
 
 ## At session start
 
-Every Hub terminal (Claude Code and Codex; Antigravity when it starts with a first prompt) gets the context pack for its folder, who else is working there, and how to search and save, in the CLI's instructions rather than as a message. The Hub also imports this machine's Claude Code memory files every hour (see below).
+Every Hub terminal (Claude Code and Codex; Antigravity when it starts with a first prompt) gets the context pack for its folder, who else is working there, and how to search and save, in the CLI's instructions rather than as a message. From 0.1.10 there is no such note while the Hub's shared memory is off. The Hub also imports this machine's Claude Code memory files every hour (see below).
 
 ## TaskAI
 
-[TaskAI](https://taskai.cc) is an optional copy that people can read and search. Without a TaskAI API key, memories stay on the Hubs and nothing is sent.
+[TaskAI](https://taskai.cc) holds a copy of the memories that people can read and search.
+
+### Shared memory needs a TaskAI API key
+
+From hub 0.1.10 ([release notes](https://github.com/anchoo2kewl/llm-brain/releases/tag/hub-v0.1.10)), shared memory is on only while the Hub has a TaskAI API key. Without one it is off: no context pack, no `memory_write`, no copying between Hubs, no import of Claude's memory files, and no shared-memory note in new sessions. The Hub's Settings page, its Memory and MCP pages, and `GET /api/memory/status` say "Add a TaskAI API key to enable shared memory". Earlier Hubs ran shared memory without a key and only skipped the TaskAI copy.
+
+Ways to set the key, highest precedence first. The first source that holds a key decides; if TaskAI refuses that key, memory is off with an error instead of falling back to a lower source.
+
+| Source | How | Without a restart? |
+|---|---|---|
+| The Hub's key store, `~/.config/llm-brain/taskai.key` (mode 0600) | The Hub's **Settings → Shared memory** page; the desktop app's **Settings → Memory** (0.1.11), on one Hub or every Hub in the cluster; or `hub memory key set < key.txt` (reads stdin; also `status`, `remove`, and `--to URL` for another Hub) | Yes, at once |
+| `hub serve --taskai-key-file PATH` | A file (mode 0600) holding the key, or `TASKAI_API_KEY=…` | Yes, within 15 s of the file changing |
+| The `TASKAI_API_KEY` environment variable | For example the launchd plist's `EnvironmentVariables` | No: restart the Hub |
+| `~/.config/llm-brain/taskai.env`, then `secrets.env` next to it | `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`), as before 0.1.10 | Yes, within 15 s |
+
+A new key is checked with TaskAI before it is saved. A refused key is not saved. If TaskAI does not answer, the key is saved, memory is on, and memories wait on the Hub until TaskAI answers. Removing the stored key hands over to a key file or environment key when one exists, and the status names the source in use. The key is never logged, never passed in command arguments, and never shown after saving. Memories written while a Hub had no key are sent once it has one.
 
 ### Today: one page per memory
 
-- Key: `TASKAI_API_KEY` (or `TASKAI_X_API_KEY`) in `~/.config/llm-brain/taskai.env`, or in `secrets.env` next to it, read when `hub serve` starts.
+- Protocol: `--taskai-protocol wiki`, the default. Each memory is one page in a TaskAI project.
 - Project: `--memory-project` (default "Agent memory"), found or created on first use. A number is taken as a project id.
-- Server: `--taskai` (default `https://taskai.cc`). `''` keeps memories on the Hub.
+- Server: `--taskai` (default `https://taskai.cc`). `''` turns shared memory off.
 
 The Hub is the outbox. A write lands on the Hub first and is forwarded with retries, waiting 30 s and doubling up to an hour, so a write never fails because TaskAI is slow or down. A superseded memory's page is retitled `[superseded]`. TaskAI's search is merged into context packs when it answers within 150 ms.
 
 ### Next: the TaskAI Memory Protocol
 
-[biswas-dev/taskai#50](https://github.com/biswas-dev/taskai/pull/50) makes memories an open, versioned protocol (v1) that any app or LLM can use over REST or MCP. The Hub is one client among many. It is not live yet, and the Hub keeps the page copy until it is.
+[biswas-dev/taskai#50](https://github.com/biswas-dev/taskai/pull/50) makes memories an open, versioned protocol (v1) that any app or LLM can use over REST or MCP. The Hub is one client among many. It is not live yet. Hub 0.1.10 has a client for it, but it stays off: the Hub keeps the page copy (`wiki`) until #50 ships, and then switches with `--taskai-protocol 1`. With protocol 1, each memory is written to `/api/memories` with the Hub's node name as `origin_host` and its Hub id as `origin_id`, so retries and replicated Hubs update one record. Existing pages move with `POST /api/memories/import-wiki`, using the same `origin_host`.
 
 - **Per user.** Memories belong to a user and their API keys, private by default. An owner can share their whole store read-only with chosen collaborators.
 - **Hybrid search.** Full text plus vector search, merged with reciprocal rank fusion; full text alone when the embedding is slow.
