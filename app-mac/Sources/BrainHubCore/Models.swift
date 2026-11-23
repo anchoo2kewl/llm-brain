@@ -295,6 +295,8 @@ public enum Paths {
     public static func migrate(_ id: Int64) -> String { "/api/terminals/\(id)/migrate" }
     public static func workspace(since: Int64) -> String { "/api/workspace?since=\(since)" }
     public static let workspaceState = "/api/workspace/state"
+    public static let memoryStatus = "/api/memory/status"
+    public static let memoryKey = "/api/memory/key"
     public static func migration(_ job: String) -> String {
         "/api/migrations/" + (job.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
     }

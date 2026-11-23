@@ -28,6 +28,7 @@ struct BrainHubApp: App {
                 SettingsView().tabItem { Label("Hubs", systemImage: "server.rack") }
                 KeysSettings().tabItem { Label("Keys", systemImage: "keyboard") }
                 MCPSettings().tabItem { Label("MCP", systemImage: "point.3.connected.trianglepath.dotted") }
+                MemorySettings().tabItem { Label("Memory", systemImage: "brain") }
             }
         }
 
