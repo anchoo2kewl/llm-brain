@@ -60,4 +60,4 @@ Before a change is done, pushed or put in a PR, the author runs:
 
 It reviews everything since the merge base with the default branch with every other CLI (Claude Code in plan mode, Codex in a read-only sandbox, Antigravity in plan mode) plus the OpenAI API and Jev review, in parallel and read-only. The author checks each finding against the code, fixes the real ones and records why it dismissed the rest. A reviewer that did not answer is a gap, not a pass.
 
-The OpenAI API and Jev part is `cheap-review`: small focused requests to the official API with a fixed budget, used instead of a CLI review before a merge.
+The OpenAI API and Jev part is `cheap-review`: small focused requests to the official API with a fixed budget. Cross-review runs it next to the CLIs; it can also run alone, for example before a merge.

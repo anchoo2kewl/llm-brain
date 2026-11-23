@@ -48,7 +48,7 @@ every LLM call   -> account gateway (personal first, then work) -> usage and quo
 | [Hub](docs/hub.md) | Inbox, Now, History, [search](docs/hub-search.md), [insights](docs/hub-insights.md), [tasks and chats](docs/hub-tasks-and-chats.md), [files and editor](docs/hub-files-and-editor.md). |
 | [Desktop app](docs/desktop-app.md) | macOS ([native](docs/mac-app.md)) and Linux clients: live terminals, hub switcher, quick search, notifications. |
 | [MCP control](docs/mcp.md) | Manage hubs, sessions, moves, clones and memory from any MCP client. |
-| [Tool updates](docs/hub-auto-updates.md) | The Hub updates itself from `hub-v*` releases; a daily job updates Homebrew, Claude Code, Codex, Antigravity, gh, open-code-review and Graphify. |
+| [Tool updates](docs/hub.md#tool-updates) | A daily job updates Homebrew, Claude Code, Codex, Antigravity, gh, open-code-review and Graphify on every machine. The Hub [updates itself](docs/hub-auto-updates.md) from `hub-v*` releases. |
 | [Team chat](docs/chat.md) | Reads Slack; a trusted teammate's note about an issue reaches its worker. |
 | [Jev](docs/jev.md) | Typed yes/no decisions from any agent. |
 
@@ -61,7 +61,17 @@ git clone https://github.com/anchoo2kewl/llm-brain ~/projects/llm-brain
 mkdir -p ~/projects/llm-brain-overlay
 cp -R ~/projects/llm-brain/examples/overlay/. ~/projects/llm-brain-overlay/
 $EDITOR ~/projects/llm-brain-overlay/config.yaml   # who you are, who hands you work, which repos
-~/projects/llm-brain/bootstrap.sh                  # tools, hub, fleet loop
+~/projects/llm-brain/bootstrap.sh                  # tools, hub (from hub/), fleet loop
+```
+
+`bootstrap.sh` builds the older `hub/` snapshot. For the hive, memory replication and the rest, install the release binary and let it update itself:
+
+```sh
+cd ~/projects/llm-brain
+gh release download hub-v0.1.8 -p hub-darwin-arm64 -p brain-hub-update -D /tmp/hub-release
+deploy/install-hub-macos.sh /tmp/hub-release/hub-darwin-arm64
+install -m 755 /tmp/hub-release/brain-hub-update bin/
+python3 deploy/install-hub-auto-update.py --brain ~/projects/llm-brain
 ```
 
 Open `http://<this-machine>:8787`. Details: [Getting started](docs/getting-started.md). Every doc: [docs/](docs/README.md).
