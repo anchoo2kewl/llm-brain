@@ -1,6 +1,6 @@
 # Hub service automatic updates
 
-Hub updates are separate from desktop client updates. The hub daemon follows stable GitHub releases tagged hub-v*, never client-v*. Client 0.1.7 and its update preference are unaffected.
+Hub updates are separate from desktop client updates. The hub daemon follows stable GitHub releases tagged hub-v*, never client-v*. Desktop client updates and their preference are unaffected.
 
 Automatic updates are enabled by default. A short-lived scheduler wakes every 15 minutes, but normal release checks occur every six hours. A deferred update retries on the next wakeup. There is no additional resident updater process.
 
@@ -20,11 +20,11 @@ Settings/status are local files under the hub state directory: hub-update.json a
 
 The updated Brain MCP bridge exposes hub_update. Use hubs_list to get the node name for hub; each request controls that selected hub only.
 
-    {"action":"status","hub":"AnshumaacStudio"}
-    {"action":"check","hub":"AnshumaacStudio"}
-    {"action":"install","hub":"AnshumaacStudio"}
-    {"action":"settings","auto_enabled":false,"hub":"AnshumaacStudio"}
-    {"action":"settings","auto_enabled":true,"interval_hours":6,"hub":"AnshumaacStudio"}
+    {"action":"status","hub":"desk-1"}
+    {"action":"check","hub":"desk-1"}
+    {"action":"install","hub":"desk-1"}
+    {"action":"settings","auto_enabled":false,"hub":"desk-1"}
+    {"action":"settings","auto_enabled":true,"interval_hours":6,"hub":"desk-1"}
 
 Install queues the independent updater job; read status to follow checking, available, deferred, installing, up_to_date or rolled_back. Disabling automatic updates does not disable explicit check/install. Reconnect existing MCP clients to refresh tool schemas. The API is GET/POST /api/hub-update; GET /api/hub-update/health exposes the running daemon version and readiness.
 
