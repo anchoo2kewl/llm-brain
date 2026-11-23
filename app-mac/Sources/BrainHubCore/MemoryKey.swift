@@ -6,21 +6,19 @@ public struct MemoryStatus: Decodable, Equatable, Sendable {
     public var source: String?
     public var error: String?
     public var message: String
-    public var settable: Bool?
 
-    public init(enabled: Bool, source: String? = nil, error: String? = nil, message: String, settable: Bool? = nil) {
-        (self.enabled, self.source, self.error, self.message, self.settable) = (enabled, source, error, message, settable)
+    public init(enabled: Bool, source: String? = nil, error: String? = nil, message: String) {
+        (self.enabled, self.source, self.error, self.message) = (enabled, source, error, message)
     }
 }
 
 /// Setting, replacing and removing a hub's TaskAI API key. The app keeps no copy: the key goes in the POST body
 /// to each chosen hub over the tailnet, and the field is cleared after.
 public enum MemoryKey {
-    /// One hub's answer to a change.
+    /// One hub's answer: its status after, or why it failed.
     public struct Outcome: Equatable, Sendable {
         public var hub: String
-        public var status: MemoryStatus?
-        public var error: String?
+        public var result: Result<MemoryStatus, HubError>
     }
 
     /// The key as typed, trimmed; nil when it can't be one (empty, spaces inside, too long).
@@ -42,7 +40,9 @@ public enum MemoryKey {
         await withTaskGroup(of: Outcome.self) { group in
             for hub in hubs {
                 group.addTask {
-                    do { return Outcome(hub: hub, status: try await change(hub)) } catch { return Outcome(hub: hub, error: explain(error)) }
+                    do { return Outcome(hub: hub, result: .success(try await change(hub))) } catch {
+                        return Outcome(hub: hub, result: .failure(HubError(explain(error))))
+                    }
                 }
             }
             var out: [Outcome] = []

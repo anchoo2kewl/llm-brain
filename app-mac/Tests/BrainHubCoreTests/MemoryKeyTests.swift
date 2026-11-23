@@ -9,12 +9,14 @@ import BrainHubCore
         #expect(MemoryKey.clean("short") == nil)
         #expect(MemoryKey.clean("two words here") == nil)
         #expect(MemoryKey.clean(String(repeating: "k", count: 513)) == nil)
+        #expect(MemoryKey.clean(String(repeating: "k", count: 512)) != nil && MemoryKey.clean("12345678") != nil && MemoryKey.clean("1234567") == nil)
+        #expect(MemoryKey.clean("abcd\tefgh") == nil && MemoryKey.clean("          ") == nil)
     }
 
     @Test func decodesTheHubsStatus() throws {
         let on = try JSONDecoder().decode(MemoryStatus.self, from: Data(#"{"enabled":true,"source":"settings","message":"Shared memory is on (TaskAI key from settings)","protocol":"wiki","settable":true}"#.utf8))
-        #expect(on.enabled && on.source == "settings" && on.settable == true)
-        let off = try JSONDecoder().decode(MemoryStatus.self, from: Data(#"{"enabled":false,"message":"Add a TaskAI API key to enable shared memory","settable":true}"#.utf8))
+        #expect(on.enabled && on.source == "settings")
+        let off = try JSONDecoder().decode(MemoryStatus.self, from: Data(#"{"enabled":false,"message":"Add a TaskAI API key to enable shared memory"}"#.utf8))
         #expect(!off.enabled && off.message == "Add a TaskAI API key to enable shared memory" && off.error == nil)
     }
 
@@ -32,8 +34,8 @@ import BrainHubCore
             return MemoryStatus(enabled: true, source: "settings", message: "Shared memory is on (TaskAI key from settings)")
         }
         #expect(out.map(\.hub) == hubs)
-        #expect(out[0].status?.enabled == true && out[0].error == nil)
-        #expect(out[1].status == nil && out[1].error == "Hub unreachable: timed out")
-        #expect(out[2].error?.contains("0.1.10") == true)
+        #expect((try? out[0].result.get())?.enabled == true)
+        #expect(out[1].result == .failure(HubError("Hub unreachable: timed out")))
+        if case .failure(let e) = out[2].result { #expect(e.message.contains("0.1.10")) } else { Issue.record("old hub") }
     }
 }

@@ -13,8 +13,10 @@ struct MemorySettings: View {
     @ViewState private var busy = false
     @ViewState private var invalid = false
 
+    /// The hubs a change goes to; a hub removed meanwhile is never one of them.
     private var chosen: [String] {
-        target == Self.allHubs ? model.config.hubs.map(\.url) : [target]
+        let hubs = model.config.hubs.map(\.url)
+        return target == Self.allHubs ? hubs : hubs.filter { $0 == target }
     }
 
     var body: some View {
@@ -45,17 +47,21 @@ struct MemorySettings: View {
                     .onSubmit(save)
                 if invalid { Text("That is not a TaskAI API key.").foregroundStyle(.red).font(.callout) }
                 HStack {
-                    Button("Remove", role: .destructive, action: remove).disabled(busy || model.config.hubs.isEmpty)
+                    Button("Remove", role: .destructive, action: remove).disabled(busy || chosen.isEmpty)
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
-                    Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(busy || key.isEmpty || model.config.hubs.isEmpty)
+                    Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(busy || key.isEmpty || chosen.isEmpty)
                 }
                 ForEach(results, id: \.hub) { r in
                     HStack(alignment: .firstTextBaseline) {
                         Text(name(of: r.hub))
                         Spacer()
-                        if let e = r.error { Text(e).foregroundStyle(.red).font(.callout).multilineTextAlignment(.trailing) }
-                        else if let s = r.status { Text(s.enabled ? "On" : s.message).foregroundStyle(s.enabled ? .green : .orange).font(.callout) }
+                        switch r.result {
+                        case .failure(let e): Text(e.message).foregroundStyle(.red).font(.callout).multilineTextAlignment(.trailing)
+                        case .success(let s):
+                            Text(s.error ?? s.message).foregroundStyle(s.error != nil ? .orange : s.enabled ? .green : .secondary)
+                                .font(.callout).multilineTextAlignment(.trailing)
+                        }
                     }
                 }
             }
@@ -63,7 +69,10 @@ struct MemorySettings: View {
         .formStyle(.grouped)
         .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
-        .task { await refresh() }
+        .task(id: model.config.hubs.map(\.url)) {
+            if !chosen.contains(target) && target != Self.allHubs { target = Self.allHubs }
+            await refresh()
+        }
     }
 
     @ViewBuilder private func statusLabel(_ r: Result<MemoryStatus, HubError>?) -> some View {
@@ -82,33 +91,31 @@ struct MemorySettings: View {
     private func name(of hub: String) -> String { model.config.hubs.first { $0.url == hub }?.name ?? hub }
 
     private func refresh() async {
-        let hubs = model.config.hubs.map(\.url)
-        await withTaskGroup(of: (String, Result<MemoryStatus, HubError>).self) { group in
-            for hub in hubs {
-                group.addTask {
-                    do { return (hub, .success(try await MemoryKey.status(hub))) } catch { return (hub, .failure(HubError(MemoryKey.explain(error)))) }
-                }
-            }
-            for await (hub, r) in group { statuses[hub] = r }
-        }
+        for o in await MemoryKey.apply(to: model.config.hubs.map(\.url), MemoryKey.status) { statuses[o.hub] = o.result }
     }
 
     private func save() {
+        guard !busy, !chosen.isEmpty else { return } // Return in the field while a change is under way
         guard let clean = MemoryKey.clean(key) else { invalid = true; return }
         invalid = false
         key = "" // never kept: the field is cleared before the hubs answer
         run { hub in try await MemoryKey.set(clean, on: hub) }
     }
 
-    private func remove() { run { hub in try await MemoryKey.remove(on: hub) } }
+    private func remove() {
+        guard !busy, !chosen.isEmpty else { return }
+        run { hub in try await MemoryKey.remove(on: hub) }
+    }
 
+    /// One change at a time: busy until every hub answered and the statuses are read again.
     private func run(_ change: @escaping @Sendable (String) async throws -> MemoryStatus) {
         let hubs = chosen
         busy = true
         Task {
             results = await MemoryKey.apply(to: hubs, change)
-            busy = false
+            for o in results { statuses[o.hub] = o.result }
             await refresh()
+            busy = false
         }
     }
 }
