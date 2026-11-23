@@ -68,7 +68,15 @@ gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@body.md
 - `tmux is not installed on this Mac`: `brew install tmux`. Bootstrap doesn't install it.
 - The Mac must have a live agent (it polled in the last 30 s). Check `/agents` or `/hosts`.
 - The CLI must be installed on that Mac.
+- `tmux new-session: exit status 1: command too long`: the memory note or the first prompt made the tmux command too long. Hub 0.1.11 and later put the start script in a private file ([release notes](https://github.com/anchoo2kewl/llm-brain/releases/tag/hub-v0.1.11)). Update the hub. Hub 0.1.10 and earlier have this problem with a large context pack.
 - If the agent is offline, Close can't end a terminal; the page gives you the `tmux -L llm-brain kill-session -t llmb-<id>` command to run there.
+
+## A hub update rolls back
+
+- `launchctl bootstrap ... returned non-zero exit status 5` in `hub-update-status.json`, with state `rolled_back`: on macOS, `launchctl bootout` returns before the old hub stops. The updater of hub 0.1.10 and earlier tried `bootstrap` for 2 seconds only. The old hub can take 5 seconds to stop while a stream is open. The rollback then starts the previous hub, and that hub is healthy.
+- Hub 0.1.11 fixes this ([release notes](https://github.com/anchoo2kewl/llm-brain/releases/tag/hub-v0.1.11)). The updater waits until launchd does not have the service (30 seconds maximum). Then it tries `bootstrap` again for 30 seconds maximum. The hub also stops in less than 1 second.
+- Do the one-time step in the 0.1.11 release notes on each Mac that has hub 0.1.9 or 0.1.10. The installed updater is the old one, and the updater replaces itself only after a good install. The step downloads the new `brain-hub-update`, checks its SHA-256 against `hub-update.json`, and runs it with `--install`.
+- The automatic job does not try a failed version again until a newer version is published. A manual `--install` ignores that block.
 
 ## Tasks refuse a folder
 

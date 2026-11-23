@@ -68,7 +68,7 @@ $EDITOR ~/projects/llm-brain-overlay/config.yaml   # who you are, who hands you 
 
 ```sh
 cd ~/projects/llm-brain
-gh release download hub-v0.1.8 -p hub-darwin-arm64 -p brain-hub-update -D /tmp/hub-release
+gh release download hub-v0.1.11 -p hub-darwin-arm64 -p brain-hub-update -D /tmp/hub-release
 deploy/install-hub-macos.sh /tmp/hub-release/hub-darwin-arm64
 install -m 755 /tmp/hub-release/brain-hub-update bin/
 python3 deploy/install-hub-auto-update.py --brain ~/projects/llm-brain
