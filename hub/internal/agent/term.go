@@ -82,7 +82,7 @@ func (e *Executor) termSend(ctx context.Context, c store.Command) {
 	}
 	name := "=" + TmuxName(c.AgentID) + ":"
 	if r.Text != "" {
-		if _, err := t.run(ctx, "send-keys", "-t", name, "-l", "--", r.Text); err != nil {
+		if err := t.typeText(ctx, c.AgentID, fmt.Sprint("hub-send-", c.ID), r.Text, len(r.Keys) > 0); err != nil {
 			e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
 			return
 		}
@@ -94,6 +94,108 @@ func (e *Executor) termSend(ctx context.Context, c store.Command) {
 		}
 	}
 	e.report(ctx, c.ID, Report{Status: "done"})
+}
+
+// pasteOver: longer or multi-line text is pasted, not typed. Typed fast, a CLI takes a long text for a paste
+// in pieces and keeps only the last one (Claude Code), and a newline may submit early.
+const pasteOver = 200
+
+// typeText puts text into the terminal's input. A long or multi-line text goes in as one bracketed paste
+// (one piece for the CLI, a newline does not submit); before keys are pressed (check), it waits until the
+// screen shows the text or the CLI's paste placeholder, so Enter never sends half of it.
+func (t tmux) typeText(ctx context.Context, id int64, buf, text string, check bool) error {
+	name := "=" + TmuxName(id) + ":"
+	if len(text) <= pasteOver && !strings.ContainsAny(text, "\r\n") {
+		_, err := t.run(ctx, "send-keys", "-t", name, "-l", "--", text)
+		return err
+	}
+	before, err := t.capture(ctx, id, 0)
+	if err != nil {
+		return err
+	}
+	// tmux turns each \n into \r as it pastes: a \r\n would become two line breaks.
+	if _, err := t.runIn(ctx, strings.ReplaceAll(text, "\r\n", "\n"), "load-buffer", "-b", buf, "-"); err != nil {
+		return err
+	}
+	if _, err := t.run(ctx, "paste-buffer", "-p", "-d", "-b", buf, "-t", name); err != nil {
+		_, _ = t.run(ctx, "delete-buffer", "-b", buf)
+		return err
+	}
+	if !check {
+		return nil
+	}
+	for end := time.Now().Add(5 * time.Second); ; {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+		after, err := t.capture(ctx, id, 0)
+		if err != nil {
+			return err
+		}
+		if pasteShown(before, after, text) {
+			break
+		}
+		if time.Now().After(end) {
+			return errors.New("the text did not show in the input within 5 s, so no key was pressed; it may be in the input: check the screen before sending again")
+		}
+	}
+	select { // the CLI is still taking the paste in when it draws it
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(300 * time.Millisecond):
+	}
+	return nil
+}
+
+// pasteShown tells if the screen went from before to after by showing text: a new paste placeholder (Claude
+// Code "[Pasted text #2]", Codex "[Pasted Content 1454 chars]"), or the end of the text on the lines that
+// changed. Spaces and box borders are ignored, as the input wraps and indents; only the text's last line is
+// looked for, as a shell draws a prompt before each line.
+func pasteShown(before, after, text string) bool {
+	if strings.Count(after, "[Pasted") > strings.Count(before, "[Pasted") {
+		return true
+	}
+	old := map[string]int{} // counted, as the input may repeat a line already on screen ("}")
+	for _, l := range strings.Split(before, "\n") {
+		old[l]++
+	}
+	var changed []string // what scrolled in or was redrawn; an older copy of the same end may scroll away
+	for _, l := range strings.Split(after, "\n") {
+		if old[l] > 0 {
+			old[l]--
+		} else {
+			changed = append(changed, l)
+		}
+	}
+	for _, l := range changed {
+		if strings.Contains(l, "[Pasted") {
+			return true
+		}
+	}
+	var tail []rune // the last lines, enough of them that a short one ("}") is not found by chance
+	lines := strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == '\r' })
+	for i := len(lines) - 1; i >= 0 && len(tail) < 8; i-- {
+		tail = append([]rune(squash(lines[i])), tail...)
+	}
+	if len(tail) == 0 {
+		return len(changed) > 0 // only spaces and borders: any change will do
+	}
+	if len(tail) > 24 {
+		tail = tail[len(tail)-24:]
+	}
+	return strings.Contains(squash(strings.Join(changed, "\n")), string(tail))
+}
+
+// squash drops spaces and input box borders.
+func squash(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '│' || r == '┃' || r == '|' {
+			return -1
+		}
+		return r
+	}, strings.Join(strings.Fields(s), ""))
 }
 
 // termCapture returns the terminal's screen as plain text.
@@ -108,15 +210,21 @@ func (e *Executor) termCapture(ctx context.Context, c store.Command) {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
 		return
 	}
-	out, err := t.run(ctx, "capture-pane", "-p", "-J", "-t", "="+TmuxName(c.AgentID)+":", "-S", strconv.Itoa(-r.Scrollback))
+	out, err := t.capture(ctx, c.AgentID, r.Scrollback)
 	if err != nil {
 		e.report(ctx, c.ID, Report{Status: "failed", Error: err.Error()})
 		return
 	}
+	e.report(ctx, c.ID, Report{Status: "done", Result: out})
+}
+
+// capture is the terminal's screen, with scrollback lines above it, newest kept when long.
+func (t tmux) capture(ctx context.Context, id int64, scrollback int) (string, error) {
+	out, err := t.run(ctx, "capture-pane", "-p", "-J", "-t", "="+TmuxName(id)+":", "-S", strconv.Itoa(-scrollback))
 	if len(out) > maxCapture { // keep the newest: the screen is at the end
 		out = "…(earlier lines cut)\n" + out[len(out)-maxCapture:]
 	}
-	e.report(ctx, c.ID, Report{Status: "done", Result: out})
+	return out, err
 }
 
 // maxCapture stays under the hub's 256 KiB cap on a report's result.
@@ -228,10 +336,16 @@ func (t tmux) cmd(args ...string) *exec.Cmd {
 }
 
 func (t tmux) run(ctx context.Context, args ...string) (string, error) {
+	return t.runIn(ctx, "", args...)
+}
+
+// runIn runs tmux with stdin as its input.
+func (t tmux) runIn(ctx context.Context, stdin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	c := exec.CommandContext(ctx, t.bin, append([]string{"-L", t.sock, "-f", t.conf}, args...)...)
 	c.Env = termEnv(nil)
+	c.Stdin = strings.NewReader(stdin)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("tmux %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
