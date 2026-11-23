@@ -37,8 +37,10 @@ import BrainHubCore
          {"url":"http://100.64.0.5:8787","info":{"node":"laptop"},"ok":true}]}
         """#
         let cluster = try JSONDecoder().decode(ClusterNodes.self, from: Data(json.utf8))
-        let out = MemoryKey.clusterPeers(cluster.peers, savedNodes: ["studio"])
+        let out = MemoryKey.clusterPeers(cluster.peers, savedNodes: ["studio"], savedURLs: [])
         #expect(out.map(\.node) == ["laptop"] && out.map(\.url) == ["http://100.64.0.2:8787"])
+        // A saved hub whose node is not known yet is still recognised by its address.
+        #expect(MemoryKey.clusterPeers(cluster.peers, savedNodes: ["studio"], savedURLs: ["http://100.64.0.2:8787"]).map(\.url) == ["http://100.64.0.5:8787"])
     }
 
     @Test func appliesToEveryHubAndReportsEach() async {

@@ -21,13 +21,13 @@ public enum MemoryKey {
         public var result: Result<MemoryStatus, HubError>
     }
 
-    /// The cluster's other hubs to include in "every hub": peers that answer, at a valid address, whose node is
-    /// not already a saved hub (`savedNodes`: the node each saved hub answered as), one address per node.
-    public static func clusterPeers(_ peers: [ClusterNodes.Peer], savedNodes: Set<String>) -> [(node: String, url: String)] {
+    /// The cluster's other hubs to include in "every hub": peers that answer, at a valid address, that are not a
+    /// saved hub (by the node it answered as, or by address), one address per node.
+    public static func clusterPeers(_ peers: [ClusterNodes.Peer], savedNodes: Set<String>, savedURLs: Set<String>) -> [(node: String, url: String)] {
         var seen = savedNodes
         var out: [(node: String, url: String)] = []
         for p in peers where p.ok && !seen.contains(p.info.node) {
-            guard let url = try? HubURL.validate(p.url) else { continue }
+            guard let url = try? HubURL.validate(p.url), !savedURLs.contains(url) else { continue }
             seen.insert(p.info.node)
             out.append((p.info.node, url))
         }

@@ -68,7 +68,10 @@ final class AppModel {
 
     /// Hubs of the selected hub's cluster that are not saved here, for settings that go to every hub.
     var unsavedClusterHubs: [(node: String, url: String)] {
-        MemoryKey.clusterPeers(nodes?.peers ?? [], savedNodes: Set(config.hubs.compactMap { nodeByURL[$0.url] }))
+        var saved = Set(config.hubs.compactMap { nodeByURL[$0.url] })
+        if config.selectedHub != nil, let me = nodes?.me.node { saved.insert(me) } // the peers are the selected hub's
+        let urls = Set(config.hubs.flatMap(\.all).compactMap { try? HubURL.validate($0) })
+        return MemoryKey.clusterPeers(nodes?.peers ?? [], savedNodes: saved, savedURLs: urls)
     }
 
     func machineLabel(_ node: String) -> String {

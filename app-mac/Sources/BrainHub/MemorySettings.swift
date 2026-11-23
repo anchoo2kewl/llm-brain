@@ -6,12 +6,14 @@ import SwiftUI
 struct MemorySettings: View {
     private var model: AppModel { AppModel.shared }
     private static let allHubs = "*"
+    private static let none = "" // the chosen hub went away: nothing until another is picked
     @ViewState private var target = MemorySettings.allHubs
     @ViewState private var key = ""
     @ViewState private var statuses: [String: Result<MemoryStatus, HubError>] = [:]
     @ViewState private var results: [MemoryKey.Outcome] = []
     @ViewState private var busy = false
     @ViewState private var invalid = false
+    @ViewState private var refreshes = 0 // only the newest status read may write
 
     /// Every hub this app can reach: the saved ones, then the cluster's others (named by node).
     private var hubs: [(name: String, url: String)] {
@@ -45,6 +47,7 @@ struct MemorySettings: View {
             }
             Section("Set, replace or remove the key") {
                 Picker("On", selection: $target) {
+                    if target == Self.none { Text("Choose a hub").tag(Self.none) }
                     Text("Every hub in the cluster").tag(Self.allHubs)
                     ForEach(hubs, id: \.url) { h in Text(h.name).tag(h.url) }
                 }
@@ -75,7 +78,7 @@ struct MemorySettings: View {
         .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
         .task(id: hubs.map(\.url)) {
-            if !chosen.contains(target) && target != Self.allHubs { target = Self.allHubs }
+            if !chosen.contains(target) && target != Self.allHubs { target = Self.none } // never widen to every hub
             await refresh()
         }
     }
@@ -96,7 +99,11 @@ struct MemorySettings: View {
     private func name(of hub: String) -> String { hubs.first { $0.url == hub }?.name ?? hub }
 
     private func refresh() async {
-        for o in await MemoryKey.apply(to: hubs.map(\.url), MemoryKey.status) { statuses[o.hub] = o.result }
+        refreshes += 1
+        let mine = refreshes
+        let out = await MemoryKey.apply(to: hubs.map(\.url), MemoryKey.status)
+        guard !Task.isCancelled, mine == refreshes else { return } // a newer read or a change owns the statuses now
+        for o in out { statuses[o.hub] = o.result }
     }
 
     private func save() {
@@ -112,14 +119,15 @@ struct MemorySettings: View {
         run { hub in try await MemoryKey.remove(on: hub) }
     }
 
-    /// One change at a time: busy until every hub answered and the statuses are read again.
+    /// One change at a time: busy until every chosen hub answered. A hub's answer is its status after; a failed
+    /// change leaves the status shown as it was.
     private func run(_ change: @escaping @Sendable (String) async throws -> MemoryStatus) {
         let hubs = chosen
         busy = true
+        refreshes += 1 // a status read still running is older than this change
         Task {
             results = await MemoryKey.apply(to: hubs, change)
-            for o in results { statuses[o.hub] = o.result }
-            await refresh()
+            for o in results { if case .success = o.result { statuses[o.hub] = o.result } }
             busy = false
         }
     }
