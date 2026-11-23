@@ -25,6 +25,11 @@ public struct HubClient: Sendable {
         return try decode(try await send(path, method: "POST", body: body, contentType: "application/json", timeout: timeout))
     }
 
+    /// DELETE a resource (`/api/memory/key`).
+    public func delete<T: Decodable>(_ path: String, as: T.Type = T.self, timeout: TimeInterval = 30) async throws -> T {
+        try decode(try await send(path, method: "DELETE", body: nil, contentType: nil, timeout: timeout))
+    }
+
     /// POST a form (`/terminals/new`, `/terminals/{id}/rename`).
     public func post<T: Decodable>(_ path: String, form: [(String, String)], as: T.Type = T.self,
                                    timeout: TimeInterval = 60) async throws -> T {
