@@ -30,14 +30,34 @@
     var s = ((now === undefined ? Date.now() : now) - ms) / 1000;
     return s < 60 ? 1 : s < 600 ? 0.85 : s < 3600 ? 0.7 : s < 86400 ? 0.55 : 0.4;
   }
-  // The dot pulses red only while the agent waits for the owner (a question, a permission prompt, an error) and the
-  // owner has not opened it yet. A finished turn ("done") is a report: it never pulses.
+  // The dot pulses red only while the agent waits for the owner (a question or a permission prompt) and the owner has
+  // not opened it yet. The hub's needs_owner decides; an older hub: blocked, or waiting on a question. A finished turn
+  // or an error is a report: it never pulses.
   function pulses(t, opened) {
     if (opened) return false;
-    if (t.blocked || t.state === "blocked") return true;
-    return t.state === "waiting" && !!t.ask_kind && t.ask_kind !== "done";
+    if (typeof t.needs_owner === "boolean") return t.needs_owner;
+    return !!t.blocked || t.state === "blocked" || (t.state === "waiting" && t.ask_kind === "question");
   }
-  var api = { newestFirst: newestFirst, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity, pulses: pulses };
+  // The session tree: each row under its parent, (parent_hub, parent_id) = (hub, id). A hub without these fields, or a
+  // child whose parent is not listed, gives a flat list. `rows` is already newest first; `open` holds the ids of the
+  // parents whose children show. Returns the rows to show: {t, depth, kids, otherHub}.
+  function treeRows(rows, open) {
+    function key(h, id) { return h + "#" + id; }
+    var have = {}, kids = {}, out = [];
+    rows.forEach(function (t) { if (t.hub && t.kind !== "session") have[key(t.hub, t.id)] = true; });
+    function parentOf(t) { return t.parent_hub && t.parent_id > 0 && have[key(t.parent_hub, t.parent_id)] ? key(t.parent_hub, t.parent_id) : null; }
+    rows.forEach(function (t) { var p = parentOf(t); if (p) (kids[p] = kids[p] || []).push(t); });
+    function walk(t, depth, parentHub, seen) {
+      var k = t.hub ? key(t.hub, t.id) : null, ks = k && !seen[k] ? kids[k] || [] : []; // seen: stop on a loop in bad data
+      out.push({ t: t, depth: depth, kids: ks.length, otherHub: depth > 0 && t.hub !== parentHub ? t.hub : "" });
+      if (!ks.length || !open[t.id]) return;
+      var next = Object.assign({}, seen); next[k] = true;
+      ks.forEach(function (c) { walk(c, depth + 1, t.hub, next); });
+    }
+    rows.forEach(function (t) { if (!parentOf(t)) walk(t, 0, "", {}); });
+    return out;
+  }
+  var api = { newestFirst: newestFirst, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity, pulses: pulses, treeRows: treeRows };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;
 })(this);

@@ -67,9 +67,13 @@ fn require_local(w: &WebviewWindow) -> Result<(), String> {
     }
 }
 
-/// One of the app's own pages: `tauri://localhost/…`, or `http://tauri.localhost/…` on Windows.
+/// One of the app's own pages: `http://tauri.localhost/…` (no port) on Windows, `tauri://localhost/…` elsewhere.
+/// Elsewhere `tauri.localhost` can be a real local service, so it is not an app page there.
 fn app_page(url: &Url) -> bool {
-    url.scheme() == "tauri" || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+    #[cfg(windows)]
+    return url.scheme() == "http" && url.host_str() == Some("tauri.localhost") && url.port().is_none();
+    #[cfg(not(windows))]
+    return url.scheme() == "tauri" && url.host_str() == Some("localhost");
 }
 
 fn selected_url(state: &AppState) -> Option<String> {
@@ -870,12 +874,15 @@ mod tests {
         let u = |s: &str| Url::parse(s).unwrap();
         assert!(navigation_allowed(&u("http://127.0.0.1:8787/inbox")));
         assert!(navigation_allowed(&u("https://studio.tail1.ts.net/sessions/1")));
-        assert!(navigation_allowed(&u("tauri://localhost/hubs.html")));
-        assert!(navigation_allowed(&u("http://tauri.localhost/hubs.html")));
         assert!(navigation_allowed(&u(LOCAL_HUBS_PAGE)));
         assert!(app_page(&u(LOCAL_HUBS_PAGE)));
         assert!(!app_page(&u("http://127.0.0.1:8787/")));
         assert!(!app_page(&u("http://tauri.localhost.example.com/")));
+        assert!(!app_page(&u("http://tauri.localhost:8080/hubs.html")), "a port is a local service, not the app");
+        #[cfg(not(windows))]
+        assert!(!app_page(&u("http://tauri.localhost/hubs.html")));
+        #[cfg(windows)]
+        assert!(!app_page(&u("tauri://localhost/hubs.html")));
         assert!(navigation_allowed(&u("about:blank")));
         assert!(!navigation_allowed(&u("file:///etc/passwd")));
         assert!(!navigation_allowed(&u("javascript:alert(1)")));

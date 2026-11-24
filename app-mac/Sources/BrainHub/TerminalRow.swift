@@ -9,6 +9,15 @@ struct TerminalRow: View {
     /// The one row the window shows. Only it gets the accent bar and the bold title.
     var selected = false
     @Binding var expanded: Set<TerminalRef>
+    /// Where the row sits in the session tree.
+    struct Tree {
+        var depth = 0
+        var children = 0
+        var open = false
+        var hub: String?
+        var toggle: (() -> Void)?
+    }
+    var tree = Tree()
     /// One click on × ends the terminal (its CLI stops on its machine).
     var end: (() -> Void)?
     @ViewState private var hovering = false
@@ -28,6 +37,18 @@ struct TerminalRow: View {
                 // Attention is the dot and the title colour, never a row background: only the selection looks selected.
                 Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
                     .foregroundStyle(wants ? AnyShapeStyle(SessionStyle.attention) : AnyShapeStyle(.primary))
+                if let hub = tree.hub {
+                    Text(hub).font(.appCaption2).foregroundStyle(.secondary).help("This child session runs on the hub \(hub)")
+                }
+                if tree.children > 0 {
+                    Button { tree.toggle?() } label: {
+                        Label("\(tree.children)", systemImage: tree.open ? "chevron.down" : "chevron.right")
+                            .font(.appCaption2).labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help(tree.open ? "Hide the child sessions (←)" : "Show the \(tree.children) child session\(tree.children == 1 ? "" : "s") (→)")
+                    .accessibilityLabel("\(tree.children) child sessions, \(tree.open ? "shown" : "hidden")")
+                }
                 Spacer(minLength: 0)
                 if let n = t.subagents, n > 0 {
                     Label("\(n)", systemImage: "arrow.triangle.branch").font(.appCaption2).foregroundStyle(.secondary)
@@ -65,7 +86,7 @@ struct TerminalRow: View {
             // Always two lines, empty or not, so a row keeps its height when its agent starts or stops asking.
             let ask = (state == .waiting || state == .blocked) ? (t.ask ?? t.fix).flatMap { $0.isEmpty ? nil : $0 } : nil
             Text(ask.map { "\(AppModel.headline(t)): \($0)" } ?? " ").font(.appCaption)
-                .lineLimit(open ? 6 : 2, reservesSpace: true)
+                .lineLimit(open ? 6 : 2, reservesSpace: !open)
                 .foregroundStyle(wants ? AnyShapeStyle(state == .blocked || t.askKind == "error" ? .red : SessionStyle.attention) : AnyShapeStyle(.secondary))
                 .padding(.leading, 16)
             if let m = model.migrations[ref], let p = m.current {
@@ -77,6 +98,7 @@ struct TerminalRow: View {
             if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
+        .padding(.leading, CGFloat(tree.depth) * 14)
         .opacity(state == .ended ? SessionStyle.endedOpacity : 1)
         .overlay(alignment: .leading) {
             if selected { RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3).padding(.leading, -8) }
@@ -141,8 +163,14 @@ struct StateDot: View {
                 .opacity(pulse || state == .working ? 1 : Recency.dotOpacity(age, now: ctx.date))
         }
         .opacity(moving && dim ? (pulse ? 0.45 : 0.3) : 1)
-        .animation(moving ? .easeInOut(duration: pulse ? 1 : 0.9).repeatForever(autoreverses: true) : .default, value: dim)
-        .onAppear { dim = true }
+        // Start again whenever the dot starts or stops moving, or changes from a beat to a pulse.
+        .onChange(of: [moving, pulse], initial: true) { _, now in
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { dim = false }
+            guard now[0] else { return }
+            withAnimation(.easeInOut(duration: now[1] ? 1 : 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
     }
 
     private var color: SwiftUI.Color {

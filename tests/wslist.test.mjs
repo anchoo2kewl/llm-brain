@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { newestFirst, lastActive, shortAge, dotOpacity, pulses } = createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
+const { newestFirst, lastActive, shortAge, dotOpacity, pulses, treeRows } = createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
 const ids = (xs) => xs.slice().sort(newestFirst).map((x) => x.id);
 
 test("hub terminals: newest opened first, ties by the higher id", () => {
@@ -41,8 +41,24 @@ test("recency: short times, the later of activity and input, the dot fades", () 
 test("only needs-you pulses, and it stops once opened", () => {
   assert.ok(pulses({ state: "waiting", ask_kind: "question" }, false));
   assert.ok(pulses({ blocked: { kind: "tcc" } }, false));
-  assert.ok(pulses({ state: "waiting", ask_kind: "error" }, false));
+  assert.ok(!pulses({ state: "waiting", ask_kind: "error" }, false) && !pulses({ state: "waiting" }, false));
+  assert.ok(pulses({ state: "waiting", ask_kind: "done", needs_owner: true }, false), "the hub's needs_owner decides");
+  assert.ok(!pulses({ state: "waiting", ask_kind: "question", needs_owner: false }, false));
   assert.ok(!pulses({ state: "waiting", ask_kind: "done" }, false), "a finished turn is calm");
   assert.ok(!pulses({ state: "working" }, false) && !pulses({}, false));
   assert.ok(!pulses({ state: "waiting", ask_kind: "question" }, true));
+});
+
+test("session tree: children under their parent, newest first, collapsed until opened", () => {
+  const rows = [
+    { id: 9, hub: "studio", parent_hub: "studio", parent_id: 77, started: "2026-01-01T00:00:05Z" }, // parent not listed
+    { id: 1, hub: "laptop", parent_hub: "studio", parent_id: 2, started: "2026-01-01T00:00:04Z" }, // same id elsewhere
+    { id: 3, hub: "studio", parent_hub: "studio", parent_id: 1, started: "2026-01-01T00:00:03Z" },
+    { id: 2, hub: "studio", parent_hub: "studio", parent_id: 1, started: "2026-01-01T00:00:02Z" },
+    { id: 1, hub: "studio", started: "2026-01-01T00:00:01Z" },
+  ].sort(newestFirst);
+  const view = (open) => treeRows(rows, open).map((r) => `${r.t.hub}#${r.t.id}/${r.depth}/${r.kids}${r.otherHub ? "@" + r.otherHub : ""}`);
+  assert.deepEqual(view({}), ["studio#9/0/0", "studio#1/0/2"]);
+  assert.deepEqual(view({ 1: true, 2: true }), ["studio#9/0/0", "studio#1/0/2", "studio#3/1/0", "studio#2/1/1", "laptop#1/2/0@laptop"]);
+  assert.deepEqual(treeRows([{ id: 2 }, { id: 1 }], {}).map((r) => r.t.id), [2, 1], "an older hub: flat");
 });

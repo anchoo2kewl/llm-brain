@@ -11,7 +11,7 @@
   "use strict";
   var enc = new TextEncoder();
   // The bundled JetBrainsMono Nerd Font (tokens.css). The platform monospace font if it does not load.
-  var MONO = '"JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  var FALLBACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', MONO = '"JetBrainsMono Nerd Font", ' + FALLBACK;
   var fontReady = document.fonts && document.fonts.load ? document.fonts.load('13px "JetBrainsMono Nerd Font"').catch(function () {}) : null;
   var dark = window.hubDark ? window.hubDark() : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
@@ -22,7 +22,8 @@
     (opts.parent || document.body).appendChild(el);
     var term = new window.Terminal({
       cursorBlink: true, scrollback: 10000, allowProposedApi: true, macOptionIsMeta: true,
-      fontFamily: MONO, fontSize: opts.fontSize || (window.innerWidth < 640 ? 12 : 13),
+      // xterm ignores setting the same family again, so start from the fallback until the font is there.
+      fontFamily: document.fonts && document.fonts.check && document.fonts.check('13px "JetBrainsMono Nerd Font"') ? MONO : FALLBACK, fontSize: opts.fontSize || (window.innerWidth < 640 ? 12 : 13),
       theme: dark ? { background: "#0d1117", foreground: "#e6edf3" } : { background: "#ffffff", foreground: "#1f2328", cursor: "#1f2328", selectionBackground: "#b6d7ff" }
     });
     var fit = new window.FitAddon.FitAddon();
@@ -30,7 +31,7 @@
     if (window.WebLinksAddon) term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
     term.open(el);
     // xterm measures the cell once: measure again when the web font arrives, so columns and line height match it.
-    if (fontReady) fontReady.then(function () { term.options.fontFamily = MONO; resize(); });
+    if (fontReady) fontReady.then(function () { if (term.options.fontFamily !== MONO) { term.options.fontFamily = MONO; resize(); } });
     var ws = null, wanted = true, tries = 0, timer = null, queued = [], visible = opts.visible !== false;
     var lastOut = 0, lastIn = 0, answered = false, state = "connecting", seen = true;
 
@@ -106,18 +107,19 @@
     var strip = null;
     function preview(f) {
       if (!strip) { strip = document.createElement("div"); strip.className = "pasted-strip"; el.appendChild(strip); }
-      var url = URL.createObjectURL(f), box = document.createElement("div"), img = document.createElement("img"), x = document.createElement("button");
-      box.className = "pasted"; img.src = url; img.alt = f.name || "pasted image"; box.title = f.name || "";
+      var box = document.createElement("div"), img = document.createElement("img"), x = document.createElement("button");
+      var reader = new FileReader();
+      reader.onload = function () { img.src = reader.result; }; // a data: URL: the pages' CSP allows data:, not blob:
+      reader.readAsDataURL(f);
+      box.className = "pasted"; img.alt = f.name || "pasted image"; box.title = f.name || "";
       x.type = "button"; x.className = "pasted-x"; x.textContent = "×"; x.setAttribute("aria-label", "Hide preview of " + (f.name || "image"));
       x.title = "Hide this preview. The image stays in the message; delete its path in the terminal to leave it out.";
-      x.addEventListener("click", function (e) { e.stopPropagation(); URL.revokeObjectURL(url); box.remove(); term.focus(); });
+      x.addEventListener("click", function (e) { e.stopPropagation(); box.remove(); term.focus(); });
       box.append(img, x);
       strip.appendChild(box);
     }
     function clearPreviews() {
-      if (!strip || !strip.firstChild) return;
-      strip.querySelectorAll("img").forEach(function (i) { URL.revokeObjectURL(i.src); });
-      strip.textContent = "";
+      if (strip) strip.textContent = "";
     }
     term.onBinary(function (d) {
       var b = new Uint8Array(d.length);

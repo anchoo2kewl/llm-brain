@@ -264,6 +264,25 @@ import BrainHubCore
         #expect(ids([term(1, started: nil), term(3, started: nil), term(2, started: nil)]) == [3, 2, 1], "an older hub: by id")
     }
 
+    @Test func childrenNestUnderTheirParentNewestFirst() {
+        func node(_ id: Int64, _ hub: String, parent: (String, Int64)? = nil, started: String) -> Terminal {
+            var t = term(id, started: started)
+            (t.hubNode, t.parentHub, t.parentId) = (hub, parent?.0, parent?.1)
+            return t
+        }
+        let ts = [node(1, "studio", started: "2026-01-01T00:00:01Z"),
+                  node(2, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:02Z"),
+                  node(3, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:03Z"),
+                  node(1, "laptop", parent: ("studio", 2), started: "2026-01-01T00:00:04Z"), // same id, another hub
+                  node(9, "studio", parent: ("studio", 77), started: "2026-01-01T00:00:05Z")] // parent not listed
+        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        #expect(top.map(\.terminal.id) == [9, 1])
+        #expect(top[1].children.map(\.terminal.id) == [3, 2])
+        #expect(top[1].children[1].children.map { $0.terminal.hubNode } == ["laptop"])
+        #expect(top[1].all.count == 4)
+        #expect(ids([term(1, started: nil), term(2, started: nil)]) == [2, 1], "an older hub: flat")
+    }
+
     @Test func activityAndStateNeverReorder() {
         let before = [term(1, started: "2026-01-01T00:00:01Z"), term(2, started: "2026-01-01T00:00:02Z")]
         let after = [term(1, started: "2026-01-01T00:00:01Z", updated: "2026-01-02T00:00:00Z", state: .waiting),

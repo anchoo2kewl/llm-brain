@@ -45,7 +45,7 @@ import BrainHubCore
         var t = Terminal(id: 1, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: "2026-01-01T00:00:00Z")
         #expect(t.lastActive == ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z"))
         (t.lastActivity, t.lastInput) = ("2026-01-02T00:00:00Z", "2026-01-03T00:00:00.5Z")
-        #expect(Recency.short(t.lastActive, now: ISO8601DateFormatter().date(from: "2026-01-03T00:02:00Z")!) == "2m")
+        #expect(Recency.short(t.lastActive, now: ISO8601DateFormatter().date(from: "2026-01-03T00:02:30Z")!) == "2m")
     }
 
     @Test func onlyNeedsYouPulses() {
@@ -54,7 +54,13 @@ import BrainHubCore
         }
         #expect(Recency.pulses(t(.waiting, "question"), opened: false))
         #expect(Recency.pulses(t(.blocked, nil), opened: false))
-        #expect(Recency.pulses(t(.waiting, "error"), opened: false))
+        #expect(!Recency.pulses(t(.waiting, "error"), opened: false) && !Recency.pulses(t(.waiting, nil), opened: false))
+        var hub = t(.waiting, "done")
+        hub.needsOwner = true
+        #expect(Recency.pulses(hub, opened: false), "the hub's needs_owner decides")
+        hub = t(.waiting, "question")
+        hub.needsOwner = false
+        #expect(!Recency.pulses(hub, opened: false))
         #expect(!Recency.pulses(t(.waiting, "done"), opened: false), "a finished turn is calm")
         #expect(!Recency.pulses(t(.working, nil), opened: false) && !Recency.pulses(t(.idle, nil), opened: false) && !Recency.pulses(t(nil, nil), opened: false))
         #expect(!Recency.pulses(t(.waiting, "question"), opened: true), "stops once opened")

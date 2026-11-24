@@ -110,7 +110,10 @@ final class AppModel {
     }
 
     /// Order of the sidebar, for Cmd+1…9.
+    /// The top-level rows, in sidebar order: ⌘1…9 and next/previous. Child sessions open from their parent's row.
     var orderedRefs: [TerminalRef] { machines.flatMap { $0.terminals.map(\.ref) } }
+    /// Every row, child sessions too.
+    var allRefs: [TerminalRef] { machines.flatMap { $0.terminals.flatMap(\.all).map(\.ref) } }
 
     /// The agent's state: the hub's answer. A hub that sends none (an older one) is read from its inbox and the bell.
     func state(_ ref: TerminalRef) -> AgentState {
@@ -128,7 +131,7 @@ final class AppModel {
         guard let t = terminal(ref), t.state != nil else { return true }
         return t.needsAnswer || !seen.contains(ref)
     }
-    var waitingCount: Int { orderedRefs.filter(wantsYou).count }
+    var waitingCount: Int { allRefs.filter(wantsYou).count }
     /// The dot pulses red: the agent waits for you and you have not opened it since.
     func pulses(_ ref: TerminalRef) -> Bool {
         terminal(ref).map { Recency.pulses($0, opened: seen.contains(ref) || focused == ref) } ?? false

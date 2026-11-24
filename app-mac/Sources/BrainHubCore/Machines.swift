@@ -5,7 +5,11 @@ public struct Machine: Identifiable, Equatable, Sendable {
     public struct Entry: Identifiable, Hashable, Sendable {
         public var ref: TerminalRef
         public var terminal: Terminal
+        /// Its child sessions, newest first. A child whose parent is not listed shows at the top level.
+        public var children: [Entry] = []
         public var id: TerminalRef { ref }
+        /// This row and every row under it, depth first.
+        public var all: [Entry] { [self] + children.flatMap(\.all) }
     }
     public var name: String
     public var terminals: [Entry]
@@ -35,11 +39,13 @@ func parseHubTime(_ s: String) -> Date? {
 /// conversations running elsewhere (higher id first).
 public func machines(terminals: [(hub: String, terminal: Terminal)], live: [LiveSession], nodes: [String],
                      keep: Set<TerminalRef>) -> [Machine] {
-    var byHost: [String: [Machine.Entry]] = [:]
+    var shown: [Machine.Entry] = []
     for (hub, t) in terminals {
         let ref = TerminalRef(hub: hub, id: t.id)
-        if t.isOpen || keep.contains(ref) { byHost[t.host, default: []].append(.init(ref: ref, terminal: t)) }
+        if t.isOpen || keep.contains(ref) { shown.append(.init(ref: ref, terminal: t)) }
     }
+    var byHost: [String: [Machine.Entry]] = [:]
+    for e in sessionTree(shown) { byHost[e.terminal.host, default: []].append(e) }
     let liveByHost = Dictionary(grouping: live, by: \.host)
     var names: [String] = []
     for n in nodes where !names.contains(n) { names.append(n) }
@@ -49,4 +55,25 @@ public func machines(terminals: [(hub: String, terminal: Terminal)], live: [Live
                 terminals: (byHost[name] ?? []).sorted { newestFirst($0.terminal, $1.terminal) },
                 elsewhere: (liveByHost[name] ?? []).sorted { $0.id > $1.id })
     }
+}
+
+/// Nest each session under its parent: (`parent_hub`, `parent_id`) = (`hub`, `id`). A hub without these fields, or
+/// a child whose parent is not in the list, gives a flat list. Every level is newest first.
+public func sessionTree(_ entries: [Machine.Entry]) -> [Machine.Entry] {
+    struct Key: Hashable { var hub: String; var id: Int64 }
+    let keys = Set(entries.compactMap { e in e.terminal.hubNode.map { Key(hub: $0, id: e.terminal.id) } })
+    func parent(_ t: Terminal) -> Key? {
+        guard let h = t.parentHub, let p = t.parentId, p > 0, keys.contains(Key(hub: h, id: p)) else { return nil }
+        return Key(hub: h, id: p)
+    }
+    let byParent = Dictionary(grouping: entries.filter { parent($0.terminal) != nil }) { parent($0.terminal)! }
+    func build(_ e: Machine.Entry, _ seen: Set<Key>) -> Machine.Entry {
+        var e = e
+        guard let node = e.terminal.hubNode else { return e }
+        let key = Key(hub: node, id: e.terminal.id)
+        guard !seen.contains(key) else { return e } // a loop in bad data: stop there
+        e.children = (byParent[key] ?? []).sorted { newestFirst($0.terminal, $1.terminal) }.map { build($0, seen.union([key])) }
+        return e
+    }
+    return entries.filter { parent($0.terminal) == nil }.sorted { newestFirst($0.terminal, $1.terminal) }.map { build($0, []) }
 }

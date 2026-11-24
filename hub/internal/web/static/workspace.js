@@ -146,8 +146,11 @@
     var top = list.scrollTop; // emptying the list would scroll it to the top
     list.textContent = "";
     var header = false;
-    order.forEach(function (id) {
-      var t = infos[id];
+    // A search shows every match flat; otherwise the session tree, children collapsed until opened.
+    var rows = q ? order.map(function (id) { return { t: infos[id], depth: 0, kids: 0, otherHub: "" }; })
+      : window.wsList.treeRows(order.map(function (id) { return infos[id]; }), treeOpen);
+    rows.forEach(function (r) {
+      var t = r.t, id = t.id;
       if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
       if (t.kind === "session" && !header) {
         header = true;
@@ -159,20 +162,39 @@
       var li = items[id] || makeItem(id);
       list.appendChild(li);
       paintItem(id);
+      li.style.marginLeft = r.depth ? r.depth * 14 + "px" : "";
+      li.parts.kids.hidden = !r.kids;
+      li.parts.kids.textContent = (treeOpen[id] ? "▾ " : "▸ ") + r.kids;
+      li.parts.kids.title = treeOpen[id] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
+      li.parts.kids.setAttribute("aria-expanded", treeOpen[id] ? "true" : "false");
+      li.parts.hub.textContent = r.otherHub;
+      li.parts.hub.hidden = !r.otherHub;
+      li.kids = r.kids;
     });
     list.scrollTop = top;
   }
+  var treeOpen = {}; // parents whose child sessions show
+  function setTree(id, open) { if (open) treeOpen[id] = true; else delete treeOpen[id]; renderList(); if (items[id]) items[id].focus(); }
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Terminals");
   // Up and Down move the selection through the list, like a native sidebar.
   list.addEventListener("keydown", function (e) {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].indexOf(e.key) < 0) return;
     var rows = Array.prototype.filter.call(list.children, function (li) { return li.classList.contains("ws-item"); });
-    var next = rows[rows.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1)];
+    var at = rows.indexOf(e.target); // only from a row itself: not while renaming, not from its buttons
+    if (at < 0) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") { // open or close a parent's child sessions
+      var pid = order.filter(function (k) { return items[k] === e.target; })[0];
+      if (pid === undefined || !e.target.kids || !!treeOpen[pid] === (e.key === "ArrowRight")) return;
+      e.preventDefault();
+      setTree(pid, e.key === "ArrowRight");
+      return;
+    }
+    var next = rows[at + (e.key === "ArrowDown" ? 1 : -1)];
     if (!next) return;
     e.preventDefault();
-    var id = Object.keys(items).filter(function (k) { return items[k] === next; })[0];
-    if (id) show(id);
+    var id = order.filter(function (k) { return items[k] === next; })[0]; // the id as the list keeps it (a number)
+    if (id !== undefined) show(id);
     next.focus({ preventScroll: false });
   });
   function makeItem(id) {
@@ -181,7 +203,10 @@
     li.setAttribute("role", "option");
     var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
     var age = el("span", "ws-it-age"); age.title = "Last activity or input";
-    top.append(dot, title, age, num);
+    var hub = el("span", "bdg host"); hub.hidden = true; hub.title = "This child session runs on this hub";
+    var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
+    kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[id]); });
+    top.append(dot, title, hub, kids, age, num);
     var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
     li.append(top, badges, meta, prev);
     li.addEventListener("click", function () { show(id); });
@@ -197,7 +222,7 @@
     var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; });
     top.insertBefore(x, num);
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x, age: age };
+    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x, age: age, kids: kids, hub: hub };
     return li;
   }
   var seenIds = {}, seenKey = {};

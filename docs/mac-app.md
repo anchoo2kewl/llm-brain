@@ -50,7 +50,8 @@ their first lines).
 - **Sidebar**: each machine of the cluster and its open terminals, newest first. The order never changes when an
   agent works or waits; only a new terminal (on top) or an ended one changes it. One row is selected: the accent bar
   and the bold title. The dot says what the agent does: blue working, orange waiting for you, a slow red pulse when
-  it needs an answer, grey ended. The time (`now`, `2m`, `1h`) is the last activity or input. See [design.md](design.md). "Running elsewhere" lists Claude
+  it needs an answer, grey ended. The time (`now`, `2m`, `1h`) is the last activity or input. Child sessions show under their parent: click the
+  count, or press → and ←. See [design.md](design.md). "Running elsewhere" lists Claude
   Code and Codex conversations that run outside the hub; double-click one to continue it in a hub terminal.
 - **Panes**: a window starts with one pane. Split it up to 9 panes. Click a terminal in the sidebar to show it in the
   focused pane. Closing a pane only removes the view: the terminal keeps running on its machine. **End Terminal**

@@ -33,6 +33,14 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// The agent's last output and the owner's last input (hub 0.1.12); an older hub sends only `updated`.
     public var lastActivity: String?
     public var lastInput: String?
+    /// The session tree (hub 0.1.12): the node of the hub that owns this row, and its parent session's hub node and
+    /// terminal id there. An id alone is not unique across hubs. `childCount` is the parent's live children.
+    public var hubNode: String?
+    public var parentHub: String?
+    public var parentId: Int64?
+    public var childCount: Int?
+    /// Set by the hub only when the session waits on you: a question or a permission prompt.
+    public var needsOwner: Bool?
     /// The login profile it runs with (nil = the machine's default login), and who that login is.
     public var profile: String?
     public var account: String?
@@ -41,6 +49,7 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
         case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
         case contextUsed = "context_used", contextWindow = "context_window", subagents, started, profile, account
         case lastActivity = "last_activity_at", lastInput = "last_input_at"
+        case hubNode = "hub", parentHub = "parent_hub", parentId = "parent_id", childCount = "children", needsOwner = "needs_owner"
     }
 
     public init(id: Int64, title: String, host: String, cli: String, provider: String, cwd: String,
@@ -98,9 +107,12 @@ public enum Recency {
         }
     }
 
-    /// The dot pulses red only while the agent waits for the owner (a question, a permission prompt, an error) and
-    /// the owner has not opened it yet. A finished turn is a report: it never pulses.
-    public static func pulses(_ t: Terminal, opened: Bool) -> Bool { t.needsAnswer && !opened }
+    /// The dot pulses red only while the agent waits for the owner (a question or a permission prompt) and the owner
+    /// has not opened it yet. The hub's `needs_owner` decides; an older hub: blocked, or waiting on a question.
+    /// A finished turn or an error is a report: it never pulses.
+    public static func pulses(_ t: Terminal, opened: Bool) -> Bool {
+        !opened && (t.needsOwner ?? (t.state == .blocked || (t.state == .waiting && t.askKind == "question")))
+    }
 }
 
 /// `GET /api/terminals/{id}/detail`: what an expanded row shows.

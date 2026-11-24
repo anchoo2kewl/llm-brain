@@ -15,9 +15,6 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-it-title{font-weight:400;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;outline:none}
 .ws-it-title[contenteditable=true]{white-space:normal;background:var(--bg);border-radius:4px;padding:0 3px;outline:1px solid var(--acc)}
 .ws-it-age{font-size:11px;color:var(--mut);font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none}
-/* Needs you: a slow, low-contrast red pulse on the dot only; steady with reduced motion. */
-.dot-s.needs{background:var(--st-failed);box-shadow:none;animation:wsneeds 2s ease-in-out infinite}
-@keyframes wsneeds{0%,100%{opacity:1}50%{opacity:.45}}
 .ws-it-num{font-size:11px;color:var(--mut);font-family:ui-monospace,Menlo,monospace}
 .ws-it-meta{font-size:11.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 15px}
 .ws-it-prev{font-size:11.5px;font-family:var(--mono);color:var(--fg);opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:3px 0 0 15px;min-height:1.4em}
@@ -27,7 +24,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .dot-s.waiting{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 30%,transparent)}
 .dot-s.idle{background:var(--ok)}.dot-s.ended{background:var(--bad)}.dot-s.connecting{background:var(--mut)}
 @keyframes wspulse{50%{opacity:.35}}
-@media (prefers-reduced-motion:reduce){.dot-s.working,.dot-s.needs{animation:none}}
+@media (prefers-reduced-motion:reduce){.dot-s.working{animation:none}}
 .ws-foot{border-top:1px solid var(--line);padding:8px 12px 10px}
 .ws-layouts{display:flex;gap:4px}
 .ws-layouts button{padding:5px 6px;line-height:0;color:var(--mut)}.ws-layouts button svg{opacity:.85}.ws-layouts button.on{border-color:var(--acc);background:var(--bg)}
@@ -120,3 +117,10 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-movestatus{margin:0 0 6px}.ws-phases{margin:4px 0;padding-left:4px;list-style:none}.ws-phases .ph-failed{color:var(--bad)}.ws-phases .ph-running{font-weight:600}
 .ws-item[draggable=true]{cursor:grab}
 .ws-grip{cursor:grab;opacity:.55;padding:0 4px;user-select:none}.ws-grip:hover{opacity:1}.ws-grip:active{cursor:grabbing}
+/* Needs you (docs/design.md): a slow, low-contrast red pulse on the dot only, after every state colour so it wins;
+   steady with reduced motion. */
+.ws-item .dot-s.needs{background:var(--st-failed);box-shadow:none;animation:wsneeds 2s ease-in-out infinite}
+@keyframes wsneeds{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.ws-item .dot-s.needs{animation:none}}
+.ws-kids{border:0;background:none;color:var(--mut);font:600 11px/1 var(--mono);padding:2px 4px;border-radius:4px;cursor:pointer;flex:none}
+.ws-kids:hover{color:var(--acc)}.ws-kids:focus-visible{outline:2px solid var(--acc)}

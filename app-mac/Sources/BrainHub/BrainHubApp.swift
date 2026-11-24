@@ -149,7 +149,7 @@ struct MenuBarContent: View {
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
-        let waiting = model.orderedRefs.filter(model.wantsYou)
+        let waiting = model.allRefs.filter(model.wantsYou)
         if waiting.isEmpty { Text("No agent is waiting for you") }
         ForEach(waiting, id: \.self) { ref in
             Button {
