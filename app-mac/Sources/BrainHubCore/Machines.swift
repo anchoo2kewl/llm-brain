@@ -24,13 +24,17 @@ public func newestFirst(_ a: Terminal, _ b: Terminal) -> Bool {
     return x != y ? x > y : a.id > b.id
 }
 
-/// A hub time: RFC 3339 with or without fractional seconds.
-func parseHubTime(_ s: String) -> Date? {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let d = f.date(from: s) { return d }
-    f.formatOptions = [.withInternetDateTime]
-    return f.date(from: s)
+/// A hub time: RFC 3339 UTC, with or without fractional seconds (the hub writes `2026-11-23T15:04:05.000Z`).
+func parseHubTime(_ s: String) -> Date? { HubTime.fractional.date(from: s) ?? HubTime.whole.date(from: s) }
+
+/// Made once: a sort compares many times. ISO8601DateFormatter is thread-safe.
+private enum HubTime {
+    nonisolated(unsafe) static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) static let whole = ISO8601DateFormatter()
 }
 
 /// Group terminals by machine. `nodes` (the cluster's machines, this hub first) come first even with nothing open,
@@ -67,13 +71,17 @@ public func sessionTree(_ entries: [Machine.Entry]) -> [Machine.Entry] {
         return Key(hub: h, id: p)
     }
     let byParent = Dictionary(grouping: entries.filter { parent($0.terminal) != nil }) { parent($0.terminal)! }
-    func build(_ e: Machine.Entry, _ seen: Set<Key>) -> Machine.Entry {
+    var placed = Set<TerminalRef>()
+    func build(_ e: Machine.Entry) -> Machine.Entry {
         var e = e
+        placed.insert(e.ref)
         guard let node = e.terminal.hubNode else { return e }
-        let key = Key(hub: node, id: e.terminal.id)
-        guard !seen.contains(key) else { return e } // a loop in bad data: stop there
-        e.children = (byParent[key] ?? []).sorted { newestFirst($0.terminal, $1.terminal) }.map { build($0, seen.union([key])) }
+        let kids = (byParent[Key(hub: node, id: e.terminal.id)] ?? []).filter { !placed.contains($0.ref) }
+        e.children = kids.sorted { newestFirst($0.terminal, $1.terminal) }.map(build)
         return e
     }
-    return entries.filter { parent($0.terminal) == nil }.sorted { newestFirst($0.terminal, $1.terminal) }.map { build($0, []) }
+    var top = entries.filter { parent($0.terminal) == nil }.sorted { newestFirst($0.terminal, $1.terminal) }.map(build)
+    // Bad data (a session that is its own ancestor) has no root: show those sessions at the top level, never hide them.
+    for e in entries.sorted(by: { newestFirst($0.terminal, $1.terminal) }) where !placed.contains(e.ref) { top.append(build(e)) }
+    return top.sorted { newestFirst($0.terminal, $1.terminal) }
 }

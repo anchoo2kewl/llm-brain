@@ -169,7 +169,9 @@ struct StateDot: View {
             still.disablesAnimations = true
             withTransaction(still) { dim = false }
             guard now[0] else { return }
-            withAnimation(.easeInOut(duration: now[1] ? 1 : 0.9).repeatForever(autoreverses: true)) { dim = true }
+            DispatchQueue.main.async { // a later turn: in the same one SwiftUI would see true -> true and not restart
+                withAnimation(.easeInOut(duration: now[1] ? 1 : 0.9).repeatForever(autoreverses: true)) { dim = true }
+            }
         }
     }
 

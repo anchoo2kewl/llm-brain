@@ -47,14 +47,16 @@
     rows.forEach(function (t) { if (t.hub && t.kind !== "session") have[key(t.hub, t.id)] = true; });
     function parentOf(t) { return t.parent_hub && t.parent_id > 0 && have[key(t.parent_hub, t.parent_id)] ? key(t.parent_hub, t.parent_id) : null; }
     rows.forEach(function (t) { var p = parentOf(t); if (p) (kids[p] = kids[p] || []).push(t); });
-    function walk(t, depth, parentHub, seen) {
-      var k = t.hub ? key(t.hub, t.id) : null, ks = k && !seen[k] ? kids[k] || [] : []; // seen: stop on a loop in bad data
-      out.push({ t: t, depth: depth, kids: ks.length, otherHub: depth > 0 && t.hub !== parentHub ? t.hub : "" });
-      if (!ks.length || !open[t.id]) return;
-      var next = Object.assign({}, seen); next[k] = true;
-      ks.forEach(function (c) { walk(c, depth + 1, t.hub, next); });
+    var placed = [];
+    function walk(t, depth, parentHub, show) {
+      placed.push(t);
+      var k = t.hub ? key(t.hub, t.id) : null, ks = (k && kids[k] || []).filter(function (c) { return placed.indexOf(c) < 0; });
+      if (show) out.push({ t: t, depth: depth, kids: ks.length, otherHub: depth > 0 && t.hub !== parentHub ? t.hub : "" });
+      ks.forEach(function (c) { walk(c, depth + 1, t.hub, show && !!open[t.id]); });
     }
-    rows.forEach(function (t) { if (!parentOf(t)) walk(t, 0, "", {}); });
+    rows.forEach(function (t) { if (!parentOf(t)) walk(t, 0, "", true); });
+    // Bad data (a session that is its own ancestor) has no root: show those sessions at the top level, never hide them.
+    rows.forEach(function (t) { if (placed.indexOf(t) < 0) walk(t, 0, "", true); });
     return out;
   }
   var api = { newestFirst: newestFirst, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity, pulses: pulses, treeRows: treeRows };

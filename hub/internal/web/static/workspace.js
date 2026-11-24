@@ -144,6 +144,7 @@
   function renderList() {
     var q = (document.getElementById("wsq").value || "").toLowerCase();
     var top = list.scrollTop; // emptying the list would scroll it to the top
+    var focused = list.contains(document.activeElement) ? document.activeElement : null; // and drop the focus
     list.textContent = "";
     var header = false;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
@@ -172,6 +173,7 @@
       li.kids = r.kids;
     });
     list.scrollTop = top;
+    if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   var treeOpen = {}; // parents whose child sessions show
   function setTree(id, open) { if (open) treeOpen[id] = true; else delete treeOpen[id]; renderList(); if (items[id]) items[id].focus(); }
@@ -235,7 +237,7 @@
     li.setAttribute("aria-selected", on ? "true" : "false");
     badgesFor(li.parts.badges, t);
     // Opened since its state last changed: it stops pulsing. A new question makes it pulse again.
-    var key = (t.state || "") + "/" + (t.ask_kind || "") + "/" + (t.blocked ? 1 : 0);
+    var key = [t.state || "", t.ask_kind || "", t.blocked ? 1 : 0, t.needs_owner ? 1 : 0, t.ask || ""].join("/");
     if (seenKey[id] !== key) { seenKey[id] = key; delete seenIds[id]; }
     if (on) seenIds[id] = true;
     var when = window.wsList.lastActive(t), pulse = window.wsList.pulses(t, on || seenIds[id]);

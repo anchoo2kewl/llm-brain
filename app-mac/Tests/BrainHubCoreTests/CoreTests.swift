@@ -281,6 +281,10 @@ import BrainHubCore
         #expect(top[1].children[1].children.map { $0.terminal.hubNode } == ["laptop"])
         #expect(top[1].all.count == 4)
         #expect(ids([term(1, started: nil), term(2, started: nil)]) == [2, 1], "an older hub: flat")
+        let loop = [node(5, "s", parent: ("s", 6), started: "2026-01-01T00:00:01Z"), node(6, "s", parent: ("s", 5), started: "2026-01-01T00:00:02Z"),
+                    node(7, "s", parent: ("s", 7), started: "2026-01-01T00:00:03Z")]
+        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        #expect(shown.flatMap(\.all).count == 3, "a loop in bad data never hides a session")
     }
 
     @Test func activityAndStateNeverReorder() {

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 pub const TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Reply {
     pub status: u16,
     pub body: String,
@@ -133,7 +133,11 @@ pub fn versions_from(health: Result<Reply, String>, status: Result<Reply, String
 
 /// Read the hub's versions. The status route runs the hub's updater, so call this only when Settings opens.
 pub fn versions(base: &str) -> Versions {
-    versions_from(get(base, "/api/hub-update/health"), get(base, "/api/hub-update"))
+    let health = get(base, "/api/hub-update/health");
+    if versions_from(health.clone(), Err(String::new())).running.is_none() {
+        return versions_from(health, Err(String::new())); // an older or unreachable hub: do not run its updater
+    }
+    versions_from(health, get(base, "/api/hub-update"))
 }
 
 #[cfg(test)]

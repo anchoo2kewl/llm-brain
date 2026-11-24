@@ -7,10 +7,10 @@ const ids = (xs) => xs.slice().sort(newestFirst).map((x) => x.id);
 
 test("hub terminals: newest opened first, ties by the higher id", () => {
   const ts = [
-    { id: 1, started: "2026-11-23 10:00:01", updated: "2026-11-23 12:00:00" },
-    { id: 2, started: "2026-11-23 10:00:03" },
-    { id: 3, started: "2026-11-23 10:00:02" },
-    { id: 4, started: "2026-11-23 10:00:02" },
+    { id: 1, started: "2026-11-23T10:00:01.000Z", updated: "2026-11-23T12:00:00.000Z" },
+    { id: 2, started: "2026-11-23T10:00:03.000Z" },
+    { id: 3, started: "2026-11-23T10:00:02.000Z" },
+    { id: 4, started: "2026-11-23T10:00:02.000Z" },
   ];
   assert.deepEqual(ids(ts), [2, 4, 3, 1]);
   assert.deepEqual(ids([{ id: 1 }, { id: 3 }, { id: 2 }]), [3, 2, 1], "an older hub without started: by id");
@@ -61,4 +61,7 @@ test("session tree: children under their parent, newest first, collapsed until o
   assert.deepEqual(view({}), ["studio#9/0/0", "studio#1/0/2"]);
   assert.deepEqual(view({ 1: true, 2: true }), ["studio#9/0/0", "studio#1/0/2", "studio#3/1/0", "studio#2/1/1", "laptop#1/2/0@laptop"]);
   assert.deepEqual(treeRows([{ id: 2 }, { id: 1 }], {}).map((r) => r.t.id), [2, 1], "an older hub: flat");
+  const loop = [{ id: 7, hub: "s", parent_hub: "s", parent_id: 7 }, { id: 6, hub: "s", parent_hub: "s", parent_id: 5 }, { id: 5, hub: "s", parent_hub: "s", parent_id: 6 }];
+  assert.deepEqual(treeRows(loop, {}).map((r) => r.t.id), [7, 6]);
+  assert.deepEqual(treeRows(loop, { 7: true, 6: true, 5: true }).map((r) => r.t.id).sort(), [5, 6, 7], "a loop in bad data never hides a session");
 });
