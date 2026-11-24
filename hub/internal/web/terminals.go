@@ -502,6 +502,7 @@ type termJSON struct {
 	Status   string `json:"status"`
 	Error    string `json:"error,omitempty"`
 	Updated  string `json:"updated"`
+	Started  string `json:"started,omitempty"`    // when it was opened: clients list terminals newest first by it
 	Session  int64  `json:"session_id,omitempty"` // the transcript it writes, for the Chat view
 	// Blocked: its CLI is frozen on a macOS prompt (stuck.go); Fix is what to do, in a sentence.
 	Blocked *store.TermBlock `json:"blocked,omitempty"`
@@ -524,7 +525,7 @@ func (s *Server) terminalsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		home, _, _ := s.Store.AgentPlaces(r.Context(), t.Host)
 		j := termJSON{ID: t.ID, Title: t.Title, Host: t.Host, CLI: agent.TermProviderName(t.Provider), Provider: t.Provider,
-			Cwd: tilde(home, t.Cwd), Status: t.Status, Error: t.Error, Updated: t.UpdatedAt, Session: sessOf[t.ID]}
+			Cwd: tilde(home, t.Cwd), Status: t.Status, Error: t.Error, Updated: t.UpdatedAt, Started: t.CreatedAt, Session: sessOf[t.ID]}
 		if b := t.Block(); b != nil {
 			j.Blocked, j.Fix = b, stuckDetail(t, b)
 		}

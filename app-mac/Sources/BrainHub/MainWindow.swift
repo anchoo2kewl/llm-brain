@@ -57,6 +57,7 @@ struct MainWindow: View {
             }
         }
         .background(WindowReader { w in panes.window = w })
+        .font(.appBody)
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar {
@@ -69,6 +70,13 @@ struct MainWindow: View {
                 .pickerStyle(.segmented)
                 .labelStyle(.iconOnly)
                 .disabled(model.hub == nil)
+            }
+            if let v = model.restartVersion {
+                ToolbarItem {
+                    Button { Updates.restart() } label: { Label("Restart to Update", systemImage: "arrow.clockwise.circle.fill") }
+                        .labelStyle(.titleAndIcon).buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
+                        .help("Version \(v) is installed. Restart Brain Hub to use it.")
+                }
             }
             ToolbarItemGroup {
                 if model.config.hubs.count > 1 {
@@ -192,11 +200,10 @@ struct Sidebar: View {
                             .onDrop(of: [.utf8PlainText, .plainText], isTargeted: nil) { dropped($0, on: m.name) }
                     }
                     ForEach(m.terminals) { e in
-                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded, end: { end(e.ref) })
+                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded, end: { end(e.ref) })
                             .tag(e.ref)
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
-                                Button("Move to Top") { model.moveToTop(e.ref, in: m) }
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
@@ -205,7 +212,6 @@ struct Sidebar: View {
                                     .disabled(model.closingTerminals.contains(e.ref))
                             }
                     }
-                    .onMove { from, to in model.move(in: m, from: from, to: to) }
                     // A row dragged here from another machine's section moves (⌥: clones) the terminal here.
                     .onInsert(of: [.utf8PlainText, .plainText]) { _, providers in _ = dropped(providers, on: m.name) }
                     if !m.elsewhere.isEmpty {

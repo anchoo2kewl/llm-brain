@@ -26,6 +26,9 @@ codesign --force --sign - "$app/Contents/MacOS/brain-attach"
 # Ghostty's terminfo and themes: libghostty finds them next to the executable, so a `theme =` line works.
 if [ -d Vendor/share ]; then cp -R Vendor/share/terminfo Vendor/share/ghostty "$app/Contents/Resources/"; fi
 cp ../app/src-tauri/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
+# JetBrainsMono Nerd Font (SIL OFL 1.1) for the app text and the terminal; ATSApplicationFontsPath loads it.
+mkdir -p "$app/Contents/Resources/Fonts"
+cp ../hub/internal/web/static/fonts/*.ttf ../hub/internal/web/static/fonts/OFL.txt "$app/Contents/Resources/Fonts/"
 # The MCP bridge any MCP client starts (Settings → MCP shows the config).
 install -m 755 ../bin/brain-mcp "$app/Contents/Resources/brain-mcp"
 cat > "$app/Contents/Info.plist" <<EOF
@@ -45,6 +48,7 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>ATSApplicationFontsPath</key><string>Fonts</string>
   <!-- Hubs on the tailnet can use http://. HubURL.swift refuses every other host. -->
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict>

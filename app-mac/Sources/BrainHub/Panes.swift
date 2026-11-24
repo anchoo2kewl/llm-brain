@@ -267,6 +267,9 @@ struct TerminalPane: View {
                     .padding(.top, 8)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if !session.pasted.isEmpty { PastedStrip(session: session).padding(8) }
+            }
             .overlay(alignment: .bottom) {
                 if let note = session.note {
                     Text(note).font(.callout).padding(.horizontal, 12).padding(.vertical, 6)
@@ -274,6 +277,34 @@ struct TerminalPane: View {
                 }
             }
             .background(SwiftUI.Color(nsColor: session.engine.background))
+    }
+}
+
+/// Small previews of the images pasted since the last Return. The path is already in the CLI's input: the red ×
+/// hides the preview only, and never edits what is in the terminal.
+struct PastedStrip: View {
+    let session: TerminalSession
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(session.pasted) { p in
+                Image(nsImage: p.image).resizable().scaledToFill().frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.4)))
+                    .overlay(alignment: .topTrailing) {
+                        Button { session.hidePreview(p.id) } label: {
+                            Image(systemName: "xmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .red)
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain).offset(x: 6, y: -6)
+                        .help("Hide this preview. The image stays in the message; delete its path in the terminal to leave it out.")
+                        .accessibilityLabel("Hide preview of \(p.name)")
+                    }
+                    .help(p.name)
+            }
+        }
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
     }
 }
 

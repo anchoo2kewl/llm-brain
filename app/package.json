@@ -1,8 +1,8 @@
 {
   "name": "brain-hub-app",
   "private": true,
-  "version": "0.1.11",
-  "description": "Desktop client (macOS, Linux) for the llm-brain hub. The npm package is a build tool only.",
+  "version": "0.1.12",
+  "description": "Desktop client (Linux, Windows) for the llm-brain hub. The npm package is a build tool only.",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

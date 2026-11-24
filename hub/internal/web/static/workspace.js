@@ -104,6 +104,7 @@
         if (infos[k].kind === "session" && st.slots.indexOf(k) >= 0 && !live.some(function (x) { return "s" + x.id === k; })) ts.push(infos[k]);
       });
       var seen = {};
+      ts.sort(window.wsList.newestFirst); // never by activity: rows stay where they are
       order = ts.map(function (t) { return t.id; });
       ts.forEach(function (t) {
         seen[t.id] = true;
@@ -142,6 +143,7 @@
   }
   function renderList() {
     var q = (document.getElementById("wsq").value || "").toLowerCase();
+    var top = list.scrollTop; // emptying the list would scroll it to the top
     list.textContent = "";
     var header = false;
     order.forEach(function (id) {
@@ -150,6 +152,7 @@
       if (t.kind === "session" && !header) {
         header = true;
         var h = el("li", "ws-sect", "Running elsewhere");
+        h.setAttribute("role", "presentation");
         h.title = "Claude/Codex sessions started outside the hub (your own terminal, an IDE). Read-only, updates live.";
         list.appendChild(h);
       }
@@ -157,12 +160,28 @@
       list.appendChild(li);
       paintItem(id);
     });
+    list.scrollTop = top;
   }
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Terminals");
+  // Up and Down move the selection through the list, like a native sidebar.
+  list.addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    var rows = Array.prototype.filter.call(list.children, function (li) { return li.classList.contains("ws-item"); });
+    var next = rows[rows.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    e.preventDefault();
+    var id = Object.keys(items).filter(function (k) { return items[k] === next; })[0];
+    if (id) show(id);
+    next.focus({ preventScroll: false });
+  });
   function makeItem(id) {
     var li = el("li", "ws-item");
     li.tabIndex = 0;
+    li.setAttribute("role", "option");
     var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
-    top.append(dot, title, num);
+    var age = el("span", "ws-it-age"); age.title = "Last activity or input";
+    top.append(dot, title, age, num);
     var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
     li.append(top, badges, meta, prev);
     li.addEventListener("click", function () { show(id); });
@@ -178,17 +197,27 @@
     var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; });
     top.insertBefore(x, num);
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x };
+    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x, age: age };
     return li;
   }
+  var seenIds = {}, seenKey = {};
   function paintItem(id) {
     var li = items[id], t = infos[id];
     if (!li || !t) return;
     var s = stateOf(id), p = panes[id];
-    li.className = "ws-item s-" + s + (t.kind === "session" ? " ext" : "") + (slotOf(id) === st.focus ? " on" : slotOf(id) >= 0 ? " shown" : "");
+    var on = slotOf(id) === st.focus;
+    li.className = "ws-item s-" + s + (t.kind === "session" ? " ext" : "") + (on ? " on" : slotOf(id) >= 0 ? " shown" : "");
+    li.setAttribute("aria-selected", on ? "true" : "false");
     badgesFor(li.parts.badges, t);
-    li.parts.dot.title = dotTitle[s] || s;
-    li.parts.dot.className = "dot-s " + s;
+    // Opened since its state last changed: it stops pulsing. A new question makes it pulse again.
+    var key = (t.state || "") + "/" + (t.ask_kind || "") + "/" + (t.blocked ? 1 : 0);
+    if (seenKey[id] !== key) { seenKey[id] = key; delete seenIds[id]; }
+    if (on) seenIds[id] = true;
+    var when = window.wsList.lastActive(t), pulse = window.wsList.pulses(t, on || seenIds[id]);
+    li.parts.dot.title = pulse ? "waiting for you" : dotTitle[s] || s;
+    li.parts.dot.className = "dot-s " + s + (pulse ? " needs" : "");
+    li.parts.dot.style.opacity = pulse || s === "working" ? "" : String(window.wsList.dotOpacity(when));
+    li.parts.age.textContent = window.wsList.shortAge(when);
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
     li.parts.meta.textContent = t.cli + " · " + t.cwd;
     li.parts.close.sync();
@@ -214,6 +243,7 @@
     document.title = (n ? "(" + n + ") " : "") + "Workspace · llm-brain hub";
   }
   setInterval(function () { order.forEach(function (id) { if (stateOf(id) === "working") paintItem(id); }); }, 2000);
+  setInterval(function () { order.forEach(paintItem); }, 30000); // the "2m" ages and the dot's fade
 
   function rename(id, span) {
     span.setAttribute("contenteditable", "true");

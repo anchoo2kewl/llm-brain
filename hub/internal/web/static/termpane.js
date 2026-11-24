@@ -10,6 +10,9 @@
 (function () {
   "use strict";
   var enc = new TextEncoder();
+  // The bundled JetBrainsMono Nerd Font (tokens.css). The platform monospace font if it does not load.
+  var MONO = '"JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  var fontReady = document.fonts && document.fonts.load ? document.fonts.load('13px "JetBrainsMono Nerd Font"').catch(function () {}) : null;
   var dark = window.hubDark ? window.hubDark() : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   window.TermPane = function (opts) {
@@ -19,13 +22,15 @@
     (opts.parent || document.body).appendChild(el);
     var term = new window.Terminal({
       cursorBlink: true, scrollback: 10000, allowProposedApi: true, macOptionIsMeta: true,
-      fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: opts.fontSize || (window.innerWidth < 640 ? 12 : 13),
+      fontFamily: MONO, fontSize: opts.fontSize || (window.innerWidth < 640 ? 12 : 13),
       theme: dark ? { background: "#0d1117", foreground: "#e6edf3" } : { background: "#ffffff", foreground: "#1f2328", cursor: "#1f2328", selectionBackground: "#b6d7ff" }
     });
     var fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
     if (window.WebLinksAddon) term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
     term.open(el);
+    // xterm measures the cell once: measure again when the web font arrives, so columns and line height match it.
+    if (fontReady) fontReady.then(function () { term.options.fontFamily = MONO; resize(); });
     var ws = null, wanted = true, tries = 0, timer = null, queued = [], visible = opts.visible !== false;
     var lastOut = 0, lastIn = 0, answered = false, state = "connecting", seen = true;
 
@@ -94,7 +99,26 @@
       }
     }, 500);
 
-    term.onData(function (d) { send(d); });
+    term.onData(function (d) { if (d === "\r") clearPreviews(); send(d); });
+
+    // Images pasted since the last Enter, as small previews over the pane (docs/design.md). The path is already in
+    // the CLI's input, so the red x only hides a preview: the page never edits text in the terminal.
+    var strip = null;
+    function preview(f) {
+      if (!strip) { strip = document.createElement("div"); strip.className = "pasted-strip"; el.appendChild(strip); }
+      var url = URL.createObjectURL(f), box = document.createElement("div"), img = document.createElement("img"), x = document.createElement("button");
+      box.className = "pasted"; img.src = url; img.alt = f.name || "pasted image"; box.title = f.name || "";
+      x.type = "button"; x.className = "pasted-x"; x.textContent = "×"; x.setAttribute("aria-label", "Hide preview of " + (f.name || "image"));
+      x.title = "Hide this preview. The image stays in the message; delete its path in the terminal to leave it out.";
+      x.addEventListener("click", function (e) { e.stopPropagation(); URL.revokeObjectURL(url); box.remove(); term.focus(); });
+      box.append(img, x);
+      strip.appendChild(box);
+    }
+    function clearPreviews() {
+      if (!strip || !strip.firstChild) return;
+      strip.querySelectorAll("img").forEach(function (i) { URL.revokeObjectURL(i.src); });
+      strip.textContent = "";
+    }
     term.onBinary(function (d) {
       var b = new Uint8Array(d.length);
       for (var i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 255;
@@ -103,7 +127,7 @@
     // Send the actual modified Enter; Claude's chat:sendNow handles draft and queue together.
     var provider = opts.provider || "";
     status(function (s) { provider = s.provider || provider; });
-    function sendNow() { send(provider === "claude" ? "\x1b[13;5u" : "\r"); }
+    function sendNow() { clearPreviews(); send(provider === "claude" ? "\x1b[13;5u" : "\r"); }
     term.attachCustomKeyEventHandler(function (e) {
       if (e.key === "Enter" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         if (e.type === "keydown") { e.preventDefault(); sendNow(); }
@@ -114,8 +138,9 @@
     var rt = null;
     if (window.ResizeObserver) new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(resize, 80); }).observe(el);
     if (window.hubDrop && opts.host) {
-      this.take = window.hubDrop(el, opts.host, "t" + id, function (paths) {
+      this.take = window.hubDrop(el, opts.host, "t" + id, function (paths, files) {
         self.paste(paths.map(function (p) { return /\s/.test(p) ? "'" + p + "'" : p; }).join(" ") + " ");
+        (files || []).forEach(function (f) { if (/^image\//.test(f.type)) preview(f); });
         term.focus();
       });
     }

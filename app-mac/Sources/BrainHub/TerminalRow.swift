@@ -6,6 +6,8 @@ struct TerminalRow: View {
     let ref: TerminalRef
     let terminal: Terminal
     let number: Int?
+    /// The one row the window shows. Only it gets the accent bar and the bold title.
+    var selected = false
     @Binding var expanded: Set<TerminalRef>
     /// One click on × ends the terminal (its CLI stops on its machine).
     var end: (() -> Void)?
@@ -18,18 +20,25 @@ struct TerminalRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Button { if open { expanded.remove(ref) } else { expanded.insert(ref) } } label: {
-                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2).frame(width: 10)
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.appCaption2).frame(width: 10)
                 }
                 .buttonStyle(.plain).foregroundStyle(.tertiary)
                 .accessibilityLabel(open ? "Hide detail" : "Show detail")
-                StateDot(state: state, wants: wants).help(Self.help(state, t))
-                Text(Self.name(t)).lineLimit(1).fontWeight(wants ? .semibold : .regular)
+                StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: t.lastActive).help(Self.help(state, t))
+                // Attention is the dot and the title colour, never a row background: only the selection looks selected.
+                Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
+                    .foregroundStyle(wants ? AnyShapeStyle(SessionStyle.attention) : AnyShapeStyle(.primary))
                 Spacer(minLength: 0)
                 if let n = t.subagents, n > 0 {
-                    Label("\(n)", systemImage: "arrow.triangle.branch").font(.caption2).foregroundStyle(.secondary)
+                    Label("\(n)", systemImage: "arrow.triangle.branch").font(.appCaption2).foregroundStyle(.secondary)
                         .help("\(n) subagent\(n == 1 ? "" : "s") running")
                 }
-                if let number, number < 9 { Text("⌘\(number + 1)").font(.caption2).foregroundStyle(.tertiary) }
+                // How long ago it ran or got input. It never moves the row.
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    Text(Recency.short(t.lastActive, now: ctx.date)).font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .help("Last activity or input")
+                if let number, number < 9 { Text("⌘\(number + 1)").font(.appCaption2).foregroundStyle(.tertiary) }
                 if let end {
                     SessionCloseButton(closing: model.closingTerminals.contains(ref), action: end)
                         .opacity(hovering || model.closingTerminals.contains(ref) ? 1 : 0)
@@ -40,36 +49,41 @@ struct TerminalRow: View {
             HStack(spacing: 6) {
                 Badge(provider: t.provider, text: t.badge)
                 if let p = t.profile, !p.isEmpty {
-                    Text(p).font(.caption2.weight(.medium)).padding(.horizontal, 5).padding(.vertical, 1)
+                    Text(p).font(.app(10, .medium)).padding(.horizontal, 5).padding(.vertical, 1)
                         .overlay(Capsule().stroke(.secondary.opacity(0.5))).foregroundStyle(.secondary)
                         .help("Account: \(p)\(t.account.map { " · \($0)" } ?? "")")
                 }
                 Text(t.branch.map { $0.isEmpty || $0 == "HEAD" ? t.cwd : "\(t.cwd) · \($0)" } ?? t.cwd)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .font(.appCaption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
                 if let f = t.contextFraction, f >= 0.7 {
-                    Text("\(Int(f * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(f >= 0.9 ? .red : .orange)
+                    Text("\(Int(f * 100))%").font(.appCaption2).foregroundStyle(f >= 0.9 ? .red : .orange)
                         .help("Context used")
                 }
             }
             .padding(.leading, 16)
-            if state == .waiting || state == .blocked, let ask = t.ask ?? t.fix, !ask.isEmpty {
-                Text("\(AppModel.headline(t)): \(ask)").font(.caption).lineLimit(open ? 6 : 2)
-                    .foregroundStyle(wants ? AnyShapeStyle(state == .blocked || t.askKind == "error" ? .red : .orange) : AnyShapeStyle(.secondary))
-                    .padding(.leading, 16)
-            }
+            // Always two lines, empty or not, so a row keeps its height when its agent starts or stops asking.
+            let ask = (state == .waiting || state == .blocked) ? (t.ask ?? t.fix).flatMap { $0.isEmpty ? nil : $0 } : nil
+            Text(ask.map { "\(AppModel.headline(t)): \($0)" } ?? " ").font(.appCaption)
+                .lineLimit(open ? 6 : 2, reservesSpace: true)
+                .foregroundStyle(wants ? AnyShapeStyle(state == .blocked || t.askKind == "error" ? .red : SessionStyle.attention) : AnyShapeStyle(.secondary))
+                .padding(.leading, 16)
             if let m = model.migrations[ref], let p = m.current {
                 Label(m.error.map { "\(m.isClone ? "Clone" : "Move") failed: \($0)" } ?? (m.done ? "\(m.isClone ? "Cloned" : "Moved") to \(model.machineLabel(m.to))" : "\(Migration.label(p.name, to: model.machineLabel(m.to)))…"),
                       systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
-                    .font(.caption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .font(.appCaption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .lineLimit(3).padding(.leading, 16).help(p.detail ?? "")
             }
             if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
+        .opacity(state == .ended ? SessionStyle.endedOpacity : 1)
+        .overlay(alignment: .leading) {
+            if selected { RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3).padding(.leading, -8) }
+        }
         .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAction(named: "End Terminal") { end?() }
-        .listRowBackground(wants ? RoundedRectangle(cornerRadius: 6).fill(.orange.opacity(0.13)).padding(.horizontal, 6) : nil)
     }
 
     static func name(_ t: Terminal) -> String { t.title.isEmpty ? t.badge : t.title }
@@ -95,7 +109,7 @@ struct SessionCloseButton: View {
             HStack(spacing: 4) {
                 if closing {
                     ProgressView().controlSize(.small)
-                    Text("Closing…").font(.caption)
+                    Text("Closing…").font(.appCaption)
                 } else {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 24, weight: .semibold))
                 }
@@ -110,23 +124,32 @@ struct SessionCloseButton: View {
     }
 }
 
-/// The state as a dot: it pulses while the agent works.
+/// The state as a dot. It fades with age, beats while the agent works, and pulses red, slowly, while the agent waits
+/// for you (docs/design.md). With Reduce Motion it stays still.
 struct StateDot: View {
     let state: AgentState
     let wants: Bool
+    var pulse = false
+    var age: Date?
     @ViewState private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Circle().fill(color).frame(width: 8, height: 8)
-            .opacity(state == .working && dim ? 0.3 : 1)
-            .animation(state == .working ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default, value: dim)
-            .onAppear { dim = true }
+        let moving = !reduceMotion && (pulse || state == .working)
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            Circle().fill(color).frame(width: 8, height: 8)
+                .opacity(pulse || state == .working ? 1 : Recency.dotOpacity(age, now: ctx.date))
+        }
+        .opacity(moving && dim ? (pulse ? 0.45 : 0.3) : 1)
+        .animation(moving ? .easeInOut(duration: pulse ? 1 : 0.9).repeatForever(autoreverses: true) : .default, value: dim)
+        .onAppear { dim = true }
     }
 
     private var color: SwiftUI.Color {
-        switch state {
+        if pulse { return SessionStyle.needsYou }
+        return switch state {
         case .working: .blue
-        case .waiting: wants ? .orange : .orange.opacity(0.5)
+        case .waiting: wants ? SessionStyle.attention : SessionStyle.attention.opacity(0.5)
         case .blocked: .red
         case .idle: .green.opacity(0.6)
         case .ended: .gray
@@ -140,7 +163,7 @@ struct Badge: View {
     let text: String
 
     var body: some View {
-        Text(text).font(.caption2.weight(.medium)).padding(.horizontal, 5).padding(.vertical, 1)
+        Text(text).font(.app(10, .medium)).padding(.horizontal, 5).padding(.vertical, 1)
             .foregroundStyle(color).background(color.opacity(0.16), in: Capsule())
     }
 
@@ -175,7 +198,7 @@ struct TerminalDetailView: View {
                 let live = agents.filter(\.live)
                 line("Subagents", live.isEmpty ? "\(agents.count), none running" : "\(live.count) running of \(agents.count)")
                 ForEach(live, id: \.self) { a in
-                    Text("• \(a.title)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text("• \(a.title)").font(.appCaption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             if let p = detail?.lastPrompt, !p.isEmpty { line("You", p) }
@@ -186,7 +209,7 @@ struct TerminalDetailView: View {
             }
             if let started = t.started.flatMap(Self.ago) { line("Started", started) }
         }
-        .font(.caption)
+        .font(.appCaption)
         .task(id: ref) {
             while !Task.isCancelled {
                 if let d = try? await HubClient(base: ref.hub).get(Paths.detail(ref.id), as: TerminalDetail.self) { detail = d }

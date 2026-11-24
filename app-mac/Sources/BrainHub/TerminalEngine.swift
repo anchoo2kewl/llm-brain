@@ -16,6 +16,8 @@ final class TerminalEngine {
     var onExit: (() -> Void)?
     /// Files to put on the terminal's machine: an image or files on the clipboard (⌘V, ⌃V), or dropped files.
     var onFiles: (([PastedFile]) -> Void)?
+    /// Return without modifiers was pressed: the message with any pasted image goes to the CLI. Only observed.
+    var onReturn: (() -> Void)?
 
     private var surface: SurfaceView?
     /// The last surface had the keyboard: the next one takes it, unless something else has it by then.
@@ -28,6 +30,7 @@ final class TerminalEngine {
         s.autoresizingMask = [.width, .height]
         s.onBell = { [weak self] in self?.onBell?() }
         s.onFiles = { [weak self] files in self?.onFiles?(files) }
+        s.onReturn = { [weak self] in self?.onReturn?() }
         s.onClose = { [weak self, weak s] in
             guard let self, let s, s === surface else { return }
             stop()
@@ -88,11 +91,14 @@ final class Ghostty {
         guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS,
               let config = ghostty_config_new() else { return }
         // The user's Ghostty config (~/.config/ghostty/config and the macOS app's file) sets font, theme and colors;
-        // then this app's own rules: its menus and tmux keys own the shortcuts, and Option is Meta.
+        // then this app's own rules: the font, its menus and tmux keys own the shortcuts, and Option is Meta.
         ghostty_config_load_default_files(config)
         ghostty_config_load_recursive_files(config)
         let own = FileManager.default.temporaryDirectory.appendingPathComponent("brainhub-ghostty.conf")
+        // The bundled JetBrainsMono Nerd Font (docs/design.md). Ghostty uses its own default font if it is missing.
         try? """
+            font-family = ""
+            font-family = JetBrainsMono Nerd Font
             keybind = clear
             macos-option-as-alt = true
             confirm-close-surface = false
@@ -207,6 +213,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     var onBell: (() -> Void)?
     var onClose: (() -> Void)?
     var onFiles: (([PastedFile]) -> Void)?
+    var onReturn: (() -> Void)?
     var cursorShape = GHOSTTY_MOUSE_SHAPE_TEXT {
         didSet { window?.invalidateCursorRects(for: self) }
     }
@@ -262,6 +269,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         onBell = nil
         onClose = nil
         onFiles = nil
+        onReturn = nil
         // A close can originate from a native callback. Keep userdata valid until the callback unwinds.
         DispatchQueue.main.async { [self] in
             ghostty_surface_free(s)
@@ -449,6 +457,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
            event.charactersIgnoringModifiers == "v", let onFiles, let files = PastedFile.read(.general) {
             onFiles(files)
             return
+        }
+        if event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.intersection([.option, .command, .shift]).isEmpty {
+            onReturn?() // Return, or ⌃Return (send now) // observed only: the key still goes to the terminal below
         }
         guard let surface else {
             interpretKeyEvents([event])

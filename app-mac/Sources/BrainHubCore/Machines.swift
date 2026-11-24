@@ -13,13 +13,28 @@ public struct Machine: Identifiable, Equatable, Sendable {
     public var id: String { name }
 }
 
+/// Newest first by when each terminal opened (`started`), ties and a hub without `started` by the higher id.
+/// Activity, state, attention and selection never change the order: only a new or a removed terminal does.
+public func newestFirst(_ a: Terminal, _ b: Terminal) -> Bool {
+    let x = a.started.flatMap(parseHubTime) ?? .distantPast, y = b.started.flatMap(parseHubTime) ?? .distantPast
+    return x != y ? x > y : a.id > b.id
+}
+
+/// A hub time: RFC 3339 with or without fractional seconds.
+func parseHubTime(_ s: String) -> Date? {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let d = f.date(from: s) { return d }
+    f.formatOptions = [.withInternetDateTime]
+    return f.date(from: s)
+}
+
 /// Group terminals by machine. `nodes` (the cluster's machines, this hub first) come first even with nothing open,
 /// so a new terminal can go there; other hosts follow by name. Ended terminals show only when `keep` holds them
-/// (they were opened in this app). Inside a machine, the terminals in `order` (the order you dragged them to) come
-/// first, then the others, newest first.
+/// (they were opened in this app). Inside a machine, terminals are newest first (`newestFirst`), and so are the
+/// conversations running elsewhere (higher id first).
 public func machines(terminals: [(hub: String, terminal: Terminal)], live: [LiveSession], nodes: [String],
-                     keep: Set<TerminalRef>, order: [TerminalRef] = []) -> [Machine] {
-    let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+                     keep: Set<TerminalRef>) -> [Machine] {
     var byHost: [String: [Machine.Entry]] = [:]
     for (hub, t) in terminals {
         let ref = TerminalRef(hub: hub, id: t.id)
@@ -31,14 +46,7 @@ public func machines(terminals: [(hub: String, terminal: Terminal)], live: [Live
     names += Set(byHost.keys).union(liveByHost.keys).subtracting(names).sorted()
     return names.map { name in
         Machine(name: name,
-                terminals: (byHost[name] ?? []).sorted { a, b in
-                    switch (rank[a.ref], rank[b.ref]) {
-                    case let (x?, y?): x < y
-                    case (.some, nil): true
-                    case (nil, .some): false
-                    case (nil, nil): a.terminal.updated > b.terminal.updated
-                    }
-                },
-                elsewhere: (liveByHost[name] ?? []).sorted { $0.updated > $1.updated })
+                terminals: (byHost[name] ?? []).sorted { newestFirst($0.terminal, $1.terminal) },
+                elsewhere: (liveByHost[name] ?? []).sorted { $0.id > $1.id })
     }
 }

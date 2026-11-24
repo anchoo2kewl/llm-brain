@@ -15,7 +15,8 @@
     note.textContent = t; note.hidden = !t;
     if (t) { clearTimeout(note.t); note.t = setTimeout(function () { note.hidden = true; }, 6000); }
   }
-  // wire(el, host, into, onPaths): drag-over highlight, drop, and paste of files on el.
+  // wire(el, host, into, onPaths): drag-over highlight, drop, and paste of files on el. onPaths(paths, files) gets
+// the uploaded files too, for previews.
   // host may be a function, for a form whose Mac can still change.
   window.hubDrop = function (el, hostArg, into, onPaths) {
     function take(files) {
@@ -27,8 +28,9 @@
       upload(host, into, files).then(function (rs) {
         var bad = rs.filter(function (j) { return j.error; });
         var paths = rs.filter(function (j) { return j.path; }).map(function (j) { return j.path; });
+        var done = files.filter(function (f, i) { return rs[i] && rs[i].path; });
         say(bad.length ? "Failed: " + bad[0].error : "Uploaded " + paths.length + " file(s); kept in Files.");
-        if (paths.length) onPaths(paths);
+        if (paths.length) onPaths(paths, done);
       }).catch(function (e) { say("Upload failed: " + e); });
       return true;
     }

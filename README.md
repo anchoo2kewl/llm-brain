@@ -46,7 +46,7 @@ every LLM call   -> account gateway (personal first, then work) -> usage and quo
 | [LLM roles and gateway](docs/llm-roles-and-gateway.md) | A different LLM reviews the implementer's work. One gateway shares your subscriptions, personal accounts first. |
 | [Terminals and Workspace](docs/hub-terminals.md) | Claude Code, Codex, Antigravity (`agy`) or a shell in tmux, live in the browser and the apps, many at once. In the Mac app, Ctrl+Enter sends now in every agent CLI. |
 | [Hub](docs/hub.md) | Inbox, Now, History, [search](docs/hub-search.md), [insights](docs/hub-insights.md), [tasks and chats](docs/hub-tasks-and-chats.md), [files and editor](docs/hub-files-and-editor.md). |
-| [Desktop app](docs/desktop-app.md) | macOS ([native](docs/mac-app.md)) and Linux clients: live terminals, hub switcher, quick search, notifications. |
+| [Desktop app](docs/desktop-app.md) | macOS ([native](docs/mac-app.md)), Linux and Windows clients: live terminals, hub switcher, quick search, notifications, restart to update. One look on every system: [design spec](docs/design.md). |
 | [MCP control](docs/mcp.md) | Manage hubs, sessions, moves, clones and memory from any MCP client. |
 | [Tool updates](docs/hub.md#tool-updates) | A daily job updates Homebrew, Claude Code, Codex, Antigravity, gh, open-code-review and Graphify on every machine. The Hub [updates itself](docs/hub-auto-updates.md) from `hub-v*` releases. |
 | [Team chat](docs/chat.md) | Reads Slack; a trusted teammate's note about an issue reaches its worker. |

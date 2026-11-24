@@ -6,21 +6,28 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-filter{padding:0 12px 8px}.ws-filter input{width:100%}
 .ws-list{list-style:none;margin:0;padding:0 6px;overflow:auto;flex:1}
 .ws-item{padding:8px 10px;border-radius:9px;cursor:pointer;margin:2px 0;border:1px solid transparent}
-.ws-item:hover{background:var(--bg)}.ws-item.shown{border-color:var(--line)}.ws-item.on{border-color:var(--acc);background:var(--bg)}
+/* One row looks selected (docs/design.md): accent background, accent bar and a bold title. Attention is only the dot and
+   the title colour. Ended rows fade. Every row has the same height. */
+.ws-item:hover{background:var(--sunk)}.ws-item.shown{border-color:var(--line)}
+.ws-item.on{background:var(--acc-soft);border-color:transparent;box-shadow:inset 3px 0 0 var(--acc)}.ws-item.on .ws-it-title{font-weight:700}
 .ws-item:focus-visible{outline:2px solid var(--acc)}
 .ws-it-top{display:flex;align-items:center;gap:7px}
-.ws-it-title{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;outline:none}
+.ws-it-title{font-weight:400;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;outline:none}
 .ws-it-title[contenteditable=true]{white-space:normal;background:var(--bg);border-radius:4px;padding:0 3px;outline:1px solid var(--acc)}
+.ws-it-age{font-size:11px;color:var(--mut);font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none}
+/* Needs you: a slow, low-contrast red pulse on the dot only; steady with reduced motion. */
+.dot-s.needs{background:var(--st-failed);box-shadow:none;animation:wsneeds 2s ease-in-out infinite}
+@keyframes wsneeds{0%,100%{opacity:1}50%{opacity:.45}}
 .ws-it-num{font-size:11px;color:var(--mut);font-family:ui-monospace,Menlo,monospace}
 .ws-it-meta{font-size:11.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 15px}
-.ws-it-prev{font-size:11.5px;font-family:ui-monospace,Menlo,monospace;color:var(--fg);opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:3px 0 0 15px}
-.ws-item.s-ended{opacity:.55}.ws-item.s-waiting .ws-it-title{color:var(--warn)}
+.ws-it-prev{font-size:11.5px;font-family:var(--mono);color:var(--fg);opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:3px 0 0 15px;min-height:1.4em}
+.ws-item.s-ended{opacity:.55}.ws-item.s-waiting .ws-it-title{color:var(--st-waiting)}
 .dot-s{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none;display:inline-block}
 .dot-s.working{background:var(--acc);animation:wspulse 1s ease-in-out infinite}
 .dot-s.waiting{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 30%,transparent)}
 .dot-s.idle{background:var(--ok)}.dot-s.ended{background:var(--bad)}.dot-s.connecting{background:var(--mut)}
 @keyframes wspulse{50%{opacity:.35}}
-@media (prefers-reduced-motion:reduce){.dot-s.working{animation:none}}
+@media (prefers-reduced-motion:reduce){.dot-s.working,.dot-s.needs{animation:none}}
 .ws-foot{border-top:1px solid var(--line);padding:8px 12px 10px}
 .ws-layouts{display:flex;gap:4px}
 .ws-layouts button{padding:5px 6px;line-height:0;color:var(--mut)}.ws-layouts button svg{opacity:.85}.ws-layouts button.on{border-color:var(--acc);background:var(--bg)}
@@ -62,14 +69,13 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .sesspane iframe{width:100%;height:100%;border:0;background:var(--bg)}
 /* where a terminal runs: hub terminals (blue) vs sessions started outside the hub (violet) */
 
-.ws-badges{display:flex;gap:4px;flex-wrap:wrap;margin:3px 0 0 15px}.ws-slot-head .ws-badges{margin:0;flex:none}
+.ws-badges{display:flex;gap:4px;flex-wrap:wrap;margin:3px 0 0 15px}.ws-item .ws-badges{flex-wrap:nowrap;overflow:hidden}.ws-slot-head .ws-badges{margin:0;flex:none}
 .bdg{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:4px;padding:1px 5px;line-height:1.5;border:1px solid transparent}
 .bdg.hub{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
 .bdg.ext{background:var(--ext);color:#fff}
 .bdg.host{color:var(--mut);border-color:var(--line)}
 .bdg.ro{color:var(--ext);border-color:color-mix(in srgb,var(--ext) 50%,transparent)}
-.ws-item.ext{border-left:3px solid var(--ext);background:color-mix(in srgb,var(--ext) 7%,transparent)}
-.ws-item.ext.on{border-color:var(--ext);background:color-mix(in srgb,var(--ext) 14%,transparent)}
+/* Sessions running elsewhere: the OUTSIDE HUB badge marks them, not a background or bar that looks like a selection. */
 .ws-item.ext .dot-s.working{background:var(--ext)}
 .ws-sect{color:var(--ext)!important;font-weight:700}
 .ws-slot.ext{border-color:color-mix(in srgb,var(--ext) 55%,var(--line))}

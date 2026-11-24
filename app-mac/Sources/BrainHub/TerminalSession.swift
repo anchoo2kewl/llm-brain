@@ -14,6 +14,9 @@ final class TerminalSession {
     private(set) var ended = false
     /// A short note at the bottom of the pane: a paste being copied to the machine, or why it failed.
     private(set) var note: String?
+    /// Images pasted since the last Return, as small previews over the pane. The path is already in the CLI's input,
+    /// so the red × only hides a preview; the app never edits text in the terminal.
+    private(set) var pasted: [PastedPreview] = []
 
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var retry: Task<Void, Never>?
@@ -27,6 +30,7 @@ final class TerminalSession {
         engine.onBell = { [weak self] in if let self { self.model?.bell(self.ref) } }
         engine.onExit = { [weak self] in Task { await self?.exited() } }
         engine.onFiles = { [weak self] files in self?.upload(files) }
+        engine.onReturn = { [weak self] in if self?.pasted.isEmpty == false { self?.pasted = [] } }
         connect()
     }
 
@@ -95,6 +99,7 @@ final class TerminalSession {
                 for f in files { paths.append(try await client.upload(Paths.upload(host: host, terminal: ref.id), name: f.name, data: f.data)) }
                 note = nil
                 engine.paste(pastedPaths(paths))
+                pasted += files.compactMap { f in NSImage(data: f.data).map { PastedPreview(name: f.name, image: $0) } }
             } catch {
                 show("Could not copy to \(host): \(error.localizedDescription)")
             }
@@ -109,6 +114,15 @@ final class TerminalSession {
         }
     }
 
+    func hidePreview(_ id: UUID) { pasted.removeAll { $0.id == id } }
+
     /// Bytes as if typed: send-prefix, copy-mode.
     func send(_ d: Data) { engine.send(d) }
+}
+
+/// A pasted image's preview.
+struct PastedPreview: Identifiable {
+    let id = UUID()
+    let name: String
+    let image: NSImage
 }

@@ -81,6 +81,61 @@ pub fn healthz(base: &str) -> Health {
     }
 }
 
+/// A hub's own version and its update state. Hub and app versions are separate and may differ.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct Versions {
+    /// The version the hub runs (`GET /api/hub-update/health`).
+    pub running: Option<String>,
+    /// The version installed on disk (`GET /api/hub-update`). Newer than `running`: the hub waits for a restart.
+    pub installed: Option<String>,
+    /// A newer release the hub's updater found.
+    pub available: Option<String>,
+    /// For Settings: "Hub 0.1.11", "Hub 0.1.11 · 0.1.12 installed, restart pending", or "Hub version unknown".
+    pub note: String,
+}
+
+fn number(v: &str) -> Option<[u64; 3]> {
+    let mut out = [0; 3];
+    let mut parts = v.trim().trim_start_matches('v').split('.');
+    for slot in &mut out {
+        *slot = parts.next()?.parse().ok()?;
+    }
+    parts.next().is_none().then_some(out)
+}
+
+/// True when `a` is a higher version than `b`. Unreadable versions are never newer.
+pub fn newer(a: &str, b: &str) -> bool {
+    matches!((number(a), number(b)), (Some(x), Some(y)) if x > y)
+}
+
+fn json_field(reply: Result<Reply, String>, key: &str) -> Option<serde_json::Value> {
+    let r = reply.ok().filter(|r| r.status == 200)?;
+    serde_json::from_str::<serde_json::Value>(&r.body).ok()?.get(key).cloned()
+}
+
+/// Build the versions from the two replies. Any missing field (an older hub, no updater) is simply left out.
+pub fn versions_from(health: Result<Reply, String>, status: Result<Reply, String>) -> Versions {
+    let text = |v: Option<serde_json::Value>| v.and_then(|v| v.as_str().map(str::to_owned)).filter(|s| number(s).is_some());
+    let running = text(json_field(health, "version"));
+    let status = status.ok().filter(|r| r.status == 200).and_then(|r| serde_json::from_str::<serde_json::Value>(&r.body).ok());
+    let field = |k: &str| text(status.as_ref().and_then(|s| s.get(k).cloned()));
+    let installed = field("version").filter(|v| running.as_deref().is_some_and(|r| newer(v, r)));
+    let base = installed.as_deref().or(running.as_deref()).unwrap_or("");
+    let available = field("latest").filter(|v| newer(v, base));
+    let note = match (&running, &installed, &available) {
+        (None, _, _) => "Hub version unknown".to_owned(),
+        (Some(r), Some(i), _) => format!("Hub {r} · {i} installed, restart pending"),
+        (Some(r), None, Some(a)) => format!("Hub {r} · {a} available"),
+        (Some(r), None, None) => format!("Hub {r}"),
+    };
+    Versions { running, installed, available, note }
+}
+
+/// Read the hub's versions. The status route runs the hub's updater, so call this only when Settings opens.
+pub fn versions(base: &str) -> Versions {
+    versions_from(get(base, "/api/hub-update/health"), get(base, "/api/hub-update"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,6 +156,30 @@ mod tests {
             }
         });
         format!("http://127.0.0.1:{port}")
+    }
+
+    fn ok(body: &str) -> Result<Reply, String> {
+        Ok(Reply { status: 200, body: body.into() })
+    }
+
+    #[test]
+    fn version_order() {
+        assert!(newer("0.1.12", "0.1.11") && newer("0.2.0", "0.1.99") && newer("1.0.0", "0.9.9"));
+        assert!(!newer("0.1.11", "0.1.11") && !newer("0.1.9", "0.1.10") && !newer("dev", "0.1.0") && !newer("0.1", "0.0.9"));
+    }
+
+    #[test]
+    fn hub_version_notes() {
+        let health = || ok(r#"{"version":"0.1.11","ready":true}"#);
+        assert_eq!(versions_from(health(), ok(r#"{"state":"up_to_date","version":"0.1.11"}"#)).note, "Hub 0.1.11");
+        let v = versions_from(health(), ok(r#"{"state":"up_to_date","version":"0.1.12","latest":"0.1.12"}"#));
+        assert_eq!((v.note.as_str(), v.installed.as_deref(), v.available), ("Hub 0.1.11 · 0.1.12 installed, restart pending", Some("0.1.12"), None));
+        let v = versions_from(health(), ok(r#"{"state":"available","version":"0.1.11","latest":"0.1.13"}"#));
+        assert_eq!(v.note, "Hub 0.1.11 · 0.1.13 available");
+        // An older hub: no update routes. A hub without the updater: 502.
+        assert_eq!(versions_from(Ok(Reply { status: 404, body: "".into() }), Err("x".into())).note, "Hub version unknown");
+        assert_eq!(versions_from(health(), Ok(Reply { status: 502, body: "{}".into() })).note, "Hub 0.1.11");
+        assert_eq!(versions_from(ok(r#"{"version":"dev"}"#), ok("{}")).note, "Hub version unknown");
     }
 
     #[test]

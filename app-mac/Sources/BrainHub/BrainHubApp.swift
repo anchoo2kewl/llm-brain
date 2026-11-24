@@ -30,6 +30,7 @@ struct BrainHubApp: App {
                 MCPSettings().tabItem { Label("MCP", systemImage: "point.3.connected.trianglepath.dotted") }
                 MemorySettings().tabItem { Label("Memory", systemImage: "brain") }
             }
+            .font(.appBody)
         }
 
         MenuBarExtra {
@@ -90,6 +91,7 @@ struct HubCommands: Commands {
         let _ = (AppModel.shared.openMain = { [openWindow] in openWindow(id: "main") })
         // Cmd+W: the focused pane, else whatever window is in front (sheet, Settings, Shortcuts). Never does nothing.
         CommandGroup(after: .appInfo) {
+            if let v = AppModel.shared.restartVersion { Button("Restart to Update (\(v))") { Updates.restart() } }
             Button("Check for Updates…") { Updates.check(manual: true) }
             Toggle("Automatically Install Updates", isOn: $automaticUpdates)
         }
@@ -160,6 +162,7 @@ struct MenuBarContent: View {
             }
         }
         if let err = model.hubError { Divider(); Text("Hub offline: \(err)") }
+        if let v = model.restartVersion { Divider(); Button("Restart to Update (\(v))") { Updates.restart() } }
         Divider()
         Button("Show Terminals") { AppModel.shared.showMain() }
         SettingsLink { Text("Settings…") }
@@ -173,6 +176,8 @@ struct SettingsView: View {
     @ViewState private var name = ""
     @ViewState private var url = ""
     @ViewState private var failure: String?
+    /// Each hub's version, asked once when Settings opens: the status route runs the hub's updater.
+    @ViewState private var versions: [String: HubVersions] = [:]
 
     var body: some View {
         Form {
@@ -186,6 +191,9 @@ struct SettingsView: View {
                         VStack(alignment: .leading) {
                             Text(h.name)
                             Text(h.url).font(.caption).foregroundStyle(.secondary)
+                            if let v = versions[h.url] {
+                                Text(v.note).font(.caption).foregroundStyle(v.needsAttention ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            }
                             HubAddressesField(hub: h) { failure = $0 }
                         }
                         Spacer()
@@ -208,8 +216,25 @@ struct SettingsView: View {
                 }
             }
             if let err = model.hubError { Section { Text("The selected hub does not answer: \(err)").foregroundStyle(.red) } }
+            Section {
+                Text("App \(Updates.running ?? "unknown")" + (model.hub.flatMap { versions[$0] }.map { " · " + $0.note } ?? ""))
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
         .formStyle(.grouped)
+        .task(id: model.config.hubs.map(\.url)) {
+            await withTaskGroup(of: (String, HubVersions).self) { group in
+                for url in model.config.hubs.map(\.url) where versions[url] == nil {
+                    group.addTask {
+                        guard let client = try? HubClient(base: url) else { return (url, HubVersions(health: nil, status: nil)) }
+                        let health = try? await client.get("/api/hub-update/health", as: HubVersions.Reply.self)
+                        let status = health == nil ? nil : try? await client.get("/api/hub-update", as: HubVersions.Reply.self, timeout: 45)
+                        return (url, HubVersions(health: health, status: status))
+                    }
+                }
+                for await (url, v) in group { versions[url] = v }
+            }
+        }
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
     }
