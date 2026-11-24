@@ -208,6 +208,17 @@ struct Sidebar: View {
         }
     }
 
+    /// The parents above a session in the tree, nearest last.
+    private func ancestors(of ref: TerminalRef) -> Set<TerminalRef> {
+        func walk(_ e: Machine.Entry, _ path: [TerminalRef]) -> [TerminalRef]? {
+            if e.ref == ref { return path }
+            for c in e.children { if let p = walk(c, path + [e.ref]) { return p } }
+            return nil
+        }
+        for e in model.machines.flatMap(\.terminals) { if let p = walk(e, []) { return Set(p) } }
+        return []
+    }
+
     private func toggleTree(_ ref: TerminalRef) {
         var open = treeOpen
         if open.contains(ref) { open.remove(ref) } else { open.insert(ref) }
@@ -224,7 +235,7 @@ struct Sidebar: View {
     var body: some View {
         let machines = model.machines
         let all = machines.flatMap { $0.terminals.flatMap(\.all) }
-        let showProvider = Set(all.map(\.terminal.provider)).count > 1
+        let showProvider = Set(all.map { ProviderMark.letter($0.terminal.provider) }).count > 1
         let ended = model.ended
         let treeOpen = self.treeOpen // decoded once per render
         ScrollViewReader { proxy in
@@ -319,6 +330,15 @@ struct Sidebar: View {
         }
         // The order follows activity at once; the selected row stays selected and in view.
         .onChange(of: model.allRefs) { if let s = selection { proxy.scrollTo(s) } }
+        // A row that moves glides to its new place (no motion with Reduce Motion).
+        .animation(SessionStyle.move, value: model.allRefs)
+        // A child picked elsewhere (⌘K, a notification): open its parents so its row shows, then show it.
+        .onChange(of: selection) {
+            guard let s = selection else { return }
+            let path = ancestors(of: s)
+            if !path.isSubset(of: self.treeOpen) { self.treeOpen = self.treeOpen.union(path) }
+            proxy.scrollTo(s)
+        }
         .overlay {
             if !model.loaded { ProgressView("Connecting to the hub…").font(.appCaption) }
         }

@@ -92,7 +92,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 /* touch (iPad, phones): no hover, so × is always shown, and every pane button is a 44 px target */
 @media (hover:none),(pointer:coarse),(max-width:1100px){
   .ws-item .ws-close{opacity:1}
-  .ws-acts{display:flex;gap:4px}.ws-btns{opacity:1}.ws-item:hover .ws-it-age{visibility:visible} /* no hover: × always shown */
+  .ws-acts{display:flex;gap:4px}.ws-btns{opacity:1}.ws-item:hover .ws-it-age,.ws-item:focus-within .ws-it-age{visibility:visible} /* no hover: × always shown */
   .ws-close,.ws-slot-head .ws-btn{min-width:var(--tap);min-height:var(--tap);font-size:17px;display:inline-flex;align-items:center;justify-content:center}
   .ws-slot-head{gap:2px;padding:0 4px}
   .ws-slot-head .ws-slot-meta{display:none}
@@ -131,5 +131,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-kids{border:0;background:none;color:var(--mut);font:600 11px/1 var(--mono);padding:2px 4px;border-radius:4px;cursor:pointer;flex:none}
 .ws-kids:hover{color:var(--acc)}.ws-kids:focus-visible{outline:2px solid var(--acc)}
 /* The rename and end buttons stay in the focus order but never change the row height. */
-.ws-it-top .ws-pen{opacity:1}.ws-it-top .ws-pen,.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;font-size:12px;padding:0 2px;flex:none} /* ui.css gives every button 38 px */
-@media (hover:none),(pointer:coarse){.ws-it-top .ws-pen{height:auto}}
+.ws-it-top .ws-pen{opacity:1}
+/* ui.css gives every button 38 px. Compact only for a precise pointer; touch keeps its 44 px targets. */
+@media (hover:hover) and (pointer:fine) and (min-width:1101px){.ws-it-top .ws-pen,.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;font-size:12px;padding:0 2px;flex:none}}
+.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;padding:0 2px;flex:none}

@@ -457,7 +457,6 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: keys
 
     override func keyDown(with event: NSEvent) {
-        onInput?()
         // ⌃V with an image or files on the clipboard: Claude Code's own ⌃V reads the clipboard of the machine it
         // runs on, not this Mac's.
         if event.modifierFlags.intersection([.control, .option, .command, .shift]) == .control,
@@ -465,6 +464,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             onFiles(files)
             return
         }
+        onInput?() // a key that goes to the terminal (a file paste counts once its upload worked)
         if event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.intersection([.option, .command, .shift]).isEmpty {
             onReturn?() // Return, or ⌃Return (send now) // observed only: the key still goes to the terminal below
         }
@@ -611,8 +611,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     @objc func copy(_ sender: Any?) { perform("copy_to_clipboard") }
     @objc func paste(_ sender: Any?) {
-        onInput?()
-        if let onFiles, let files = PastedFile.read(.general) { onFiles(files) } else { perform("paste_from_clipboard") }
+        if let onFiles, let files = PastedFile.read(.general) { onFiles(files) } else { onInput?(); perform("paste_from_clipboard") }
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

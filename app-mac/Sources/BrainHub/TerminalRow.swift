@@ -34,14 +34,15 @@ struct TerminalRow: View {
             HStack(alignment: .center, spacing: 8) {
                 StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
                 // Neutral text: colour is only for the selection, the dot ("needs you" pulses red) and errors.
-                Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular).layoutPriority(1)
-                Text(Self.folder(t)).font(.appCaption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail)
-                if let hub = tree.hub { Text(hub).font(.appCaption2).foregroundStyle(.secondary) }
+                Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
+                // The folder gives way first; the marks on the right keep their size.
+                Text(Self.folder(t)).font(.appCaption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                if let hub = tree.hub { Text(hub).font(.appCaption2).foregroundStyle(.secondary).fixedSize() }
                 Spacer(minLength: 0)
                 if showProvider { ProviderMark(provider: t.provider) }
                 if let f = t.contextFraction, f >= 0.8 {
                     Text("\(Int(f * 100))%").font(.appCaption2.monospacedDigit()).foregroundStyle(f >= 0.9 ? .red : .secondary)
-                        .help("Context used")
+                        .fixedSize().help("Context used")
                 }
                 if tree.children > 0 {
                     Button { tree.toggle?() } label: {
@@ -64,7 +65,7 @@ struct TerminalRow: View {
                             .help("End \(Self.name(t)): stops its CLI on \(t.host)")
                     }
                 }
-                .frame(minWidth: 26, alignment: .trailing)
+                .frame(minWidth: 26, alignment: .trailing).fixedSize()
             }
             .frame(minHeight: 22)
             if let m = model.migrations[ref], let p = m.current {
@@ -90,7 +91,8 @@ struct TerminalRow: View {
 
     /// The last folder of the working directory, and the branch when it is not the default.
     static func folder(_ t: Terminal) -> String {
-        let dir = t.cwd == "~" ? "~" : (t.cwd as NSString).lastPathComponent
+        let last = (t.cwd as NSString).lastPathComponent
+        let dir = t.cwd == "~" || last.isEmpty ? (t.cwd.hasPrefix("/") ? "/" : "~") : last
         guard let b = t.branch, !b.isEmpty, b != "HEAD", b != "main", b != "master" else { return dir }
         return "\(dir) · \(b)"
     }

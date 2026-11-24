@@ -160,6 +160,7 @@ struct SearchPalette: View {
         }
         .frame(width: 680, height: 460)
         .onAppear { fieldFocused = true }
+        .onChange(of: count) { highlighted = min(highlighted, max(count - 1, 0)) } // sessions closed meanwhile
         .task(id: query) { await search() }
     }
 

@@ -1,7 +1,6 @@
 import AppKit
 import BrainHubCore
 import Observation
-import SwiftUI
 import UserNotifications
 
 /// The app's shared state: the saved hubs, what the cluster runs, and the open terminal connections.
@@ -144,7 +143,7 @@ final class AppModel {
     func noteInput(_ ref: TerminalRef) {
         let now = Date()
         if let last = inputs[ref], now.timeIntervalSince(last) < 1 { return }
-        withAnimation(SessionStyle.move) { inputs[ref] = now }
+        inputs[ref] = now
     }
 
     /// The row's age and order time: the hub's activity and input, and this app's own input.
@@ -290,10 +289,7 @@ final class AppModel {
             guard client.base == hub else { return } // switched hubs meanwhile
             rememberNodes(nodes, base: client.base)
             let fresh = waiting.subtracting(inboxWaiting)
-            // A row that moves glides to its new place (no motion with Reduce Motion).
-            withAnimation(SessionStyle.move) {
-                (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
-            }
+            (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
             let inFront = NSApp.isActive ? focused : nil
             for (hub, t) in all {
                 let ref = TerminalRef(hub: hub, id: t.id)

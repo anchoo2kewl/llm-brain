@@ -114,6 +114,8 @@
         if (old && old.title !== t.title && slotOf(t.id) >= 0) paintSlot(slotOf(t.id));
         attach(t);
       });
+      Object.keys(treeOpen).forEach(function (id) { if (!seen[id]) delete treeOpen[id]; }); // ended parents
+      Object.keys(inputs).forEach(function (id) { if (!seen[id]) delete inputs[id]; });
       Object.keys(infos).forEach(function (id) {
         if (!seen[id]) { delete infos[id]; drop(id); }
         else if (infos[id].status === "ended" || infos[id].status === "failed") drop(id);
@@ -143,7 +145,8 @@
     return p ? p.state() : "idle";
   }
   // When the owner last typed or pasted into each terminal from this page (an older hub does not report input).
-  var inputs = pref("ws.inputs", {}), treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
+  // Input times live in memory, as in the Mac app: a reused id after a hub reset never inherits an old time.
+  var inputs = {}, treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
   function pref(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch (e) { return d; } }
   function setPref(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } }
   function keyOf(t) { return window.wsList.recentKey(t, inputs[t.id]); }
@@ -151,17 +154,18 @@
   function noteInput(id) { // at most once a second
     var now = Date.now();
     if (inputs[id] && now - inputs[id] < 1000) return;
-    inputs[id] = now; setPref("ws.inputs", inputs);
+    inputs[id] = now;
     if (inputTimer) return; // one update per second while the owner types
     inputTimer = setTimeout(function () {
       inputTimer = null;
+      order = order.filter(function (k) { return infos[k]; }); // a row closed meanwhile
       order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); });
       renderList();
     }, 1000);
   }
   var calm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   function renderList() {
-    var q = (document.getElementById("wsq").value || "").toLowerCase();
+    var q = (document.getElementById("wsq").value || "").trim().toLowerCase();
     var top = list.scrollTop; // emptying the list would scroll it to the top
     var focused = list.contains(document.activeElement) ? document.activeElement : null; // and drop the focus
     var before = {}; // where each row was: a moved row glides from there
@@ -235,6 +239,7 @@
       li.style.transition = "none"; li.style.transform = "translateY(" + dy + "px)";
       li.getBoundingClientRect(); // apply the start position before the transition
       li.style.transition = "transform 200ms ease"; li.style.transform = "";
+      setTimeout(function () { li.style.transition = ""; }, 250); // back to the CSS transition
     });
   }
   function setTree(id, open) {
@@ -832,7 +837,11 @@
   wsq.placeholder = "Go to a session…  (Ctrl+Shift+K)";
   wsq.addEventListener("keydown", function (e) {
     var first = list.querySelector(".ws-item");
-    if (e.key === "Enter" && first) { e.preventDefault(); show(order.filter(function (k) { return items[k] === first; })[0]); }
+    if (e.key === "Enter" && first) { // the shown row, ended ones too
+      e.preventDefault();
+      var id = Object.keys(infos).map(function (k) { return infos[k].id; }).filter(function (k) { return items[k] === first; })[0];
+      if (id !== undefined) show(id);
+    }
     else if (e.key === "ArrowDown" && first) { e.preventDefault(); first.focus(); }
     else if (e.key === "Escape") { wsq.value = ""; renderList(); }
   });
