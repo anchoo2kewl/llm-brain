@@ -12,6 +12,9 @@
 
   var state = { hubs: [], selected: null, hotkey: "", hotkey_error: null };
   var health = {}; // url -> {ok, ms, error}
+  var versions = {}; // url -> {running, installed, available, note}; asked once, because it runs the hub's updater
+  var restartEl = document.getElementById("restart");
+  var versionsEl = document.getElementById("versions");
   var editing = null; // url being renamed
 
   function el(tag, cls, text) {
@@ -36,6 +39,10 @@
   }
 
   function render() {
+    restartEl.hidden = !state.restart_version;
+    restartEl.textContent = "Restart to Update (" + (state.restart_version || "") + ")";
+    var sv = versions[state.selected];
+    versionsEl.textContent = "App " + state.app_version + (sv ? " · " + sv.note.replace(/^Hub version unknown$/, "Hub unknown") : "");
     hotkeyEl.value = state.hotkey;
     if (state.hotkey_error) {
       hkmsg.textContent = state.hotkey_error;
@@ -72,6 +79,8 @@
       info.appendChild(el("div", "hurl", h.url));
       var stat = hs ? (hs.ok ? "reachable, " + hs.ms + " ms" : (hs.error || "unreachable")) : "checking...";
       info.appendChild(el("div", "hstat " + (hs && !hs.ok ? "err" : "muted"), stat));
+      var hv = versions[h.url];
+      if (hv) info.appendChild(el("div", "hstat " + (hv.installed || hv.available ? "warn" : "muted"), hv.note));
       li.appendChild(info);
 
       var actions = el("div", "actions");
@@ -130,10 +139,22 @@
       .then(function (rows) {
         health = {};
         rows.forEach(function (r) { health[r.url] = r; });
-        render();
+        rows.forEach(function (r) { if (r.ok && !versions[r.url]) askVersions(r.url); });
+        return invoke("get_state").then(apply);
       })
       .catch(function () {});
   }
+
+  function askVersions(url) {
+    versions[url] = { note: "Hub version: checking..." };
+    invoke("hub_versions", { url: url }).then(function (v) { versions[url] = v; render(); })
+      .catch(function () { versions[url] = { note: "Hub version unknown" }; render(); });
+  }
+
+  restartEl.addEventListener("click", function () {
+    restartEl.disabled = true;
+    invoke("restart_app").catch(function (e) { restartEl.disabled = false; fail(e); });
+  });
 
   document.getElementById("add").addEventListener("submit", function (ev) {
     ev.preventDefault();

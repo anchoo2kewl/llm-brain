@@ -1,3 +1,6 @@
+/* JetBrainsMono Nerd Font (nerd-fonts v3.5.1, SIL OFL 1.1: fonts/OFL.txt), as in the hub pages (docs/design.md). */
+@font-face { font-family: "JetBrainsMono Nerd Font"; src: url(fonts/JetBrainsMonoNerdFont-Regular.ttf) format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "JetBrainsMono Nerd Font"; src: url(fonts/JetBrainsMonoNerdFont-Bold.ttf) format("truetype"); font-weight: 600 700; font-display: swap; }
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
@@ -32,7 +35,7 @@ html, body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font: 13px/1.4 "JetBrainsMono Nerd Font", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;

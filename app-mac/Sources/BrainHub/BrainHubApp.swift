@@ -30,6 +30,7 @@ struct BrainHubApp: App {
                 MCPSettings().tabItem { Label("MCP", systemImage: "point.3.connected.trianglepath.dotted") }
                 MemorySettings().tabItem { Label("Memory", systemImage: "brain") }
             }
+            .font(.appBody)
         }
 
         MenuBarExtra {
@@ -90,6 +91,7 @@ struct HubCommands: Commands {
         let _ = (AppModel.shared.openMain = { [openWindow] in openWindow(id: "main") })
         // Cmd+W: the focused pane, else whatever window is in front (sheet, Settings, Shortcuts). Never does nothing.
         CommandGroup(after: .appInfo) {
+            if let v = AppModel.shared.restartVersion { Button("Restart to Update (\(v))") { Updates.restart() } }
             Button("Check for Updates…") { Updates.check(manual: true) }
             Toggle("Automatically Install Updates", isOn: $automaticUpdates)
         }
@@ -147,7 +149,7 @@ struct MenuBarContent: View {
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
-        let waiting = model.orderedRefs.filter(model.wantsYou)
+        let waiting = model.allRefs.filter(model.wantsYou)
         if waiting.isEmpty { Text("No agent is waiting for you") }
         ForEach(waiting, id: \.self) { ref in
             Button {
@@ -160,6 +162,7 @@ struct MenuBarContent: View {
             }
         }
         if let err = model.hubError { Divider(); Text("Hub offline: \(err)") }
+        if let v = model.restartVersion { Divider(); Button("Restart to Update (\(v))") { Updates.restart() } }
         Divider()
         Button("Show Terminals") { AppModel.shared.showMain() }
         SettingsLink { Text("Settings…") }
@@ -173,6 +176,10 @@ struct SettingsView: View {
     @ViewState private var name = ""
     @ViewState private var url = ""
     @ViewState private var failure: String?
+    /// Each hub's version, asked once when Settings opens: the status route runs the hub's updater.
+    @ViewState private var versions: [String: HubVersions] = [:]
+    /// Hubs that answered the version question (a "dev" or an old hub too): not asked again.
+    @ViewState private var answered: Set<String> = []
 
     var body: some View {
         Form {
@@ -186,6 +193,9 @@ struct SettingsView: View {
                         VStack(alignment: .leading) {
                             Text(h.name)
                             Text(h.url).font(.caption).foregroundStyle(.secondary)
+                            if let v = versions[h.url] {
+                                Text(v.note).font(.caption).foregroundStyle(v.needsAttention ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            }
                             HubAddressesField(hub: h) { failure = $0 }
                         }
                         Spacer()
@@ -208,10 +218,47 @@ struct SettingsView: View {
                 }
             }
             if let err = model.hubError { Section { Text("The selected hub does not answer: \(err)").foregroundStyle(.red) } }
+            Section {
+                Text("App \(Updates.running ?? "unknown")" + (model.hub.flatMap { versions[$0] }.map { " · " + $0.note } ?? ""))
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
         .formStyle(.grouped)
+        .task(id: model.config.hubs.map(\.url)) {
+            // A hub that did not answer is asked again every minute while Settings is open.
+            while !Task.isCancelled {
+                await loadVersions()
+                if model.config.hubs.allSatisfy({ answered.contains($0.url) }) { return }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func loadVersions() async {
+        await withTaskGroup(of: (String, HubVersions, Bool).self) { group in
+            for url in model.config.hubs.map(\.url) where !answered.contains(url) {
+                group.addTask {
+                    guard let client = try? HubClient(base: url) else { return (url, HubVersions(health: nil, status: nil), true) }
+                    do {
+                        let health = try await client.get("/api/hub-update/health", as: HubVersions.Reply.self)
+                        // The status route runs the hub's updater: only for a hub with a real version.
+                        guard HubVersions(health: health, status: nil).running != nil else { return (url, HubVersions(health: health, status: nil), true) }
+                        let status = try? await client.get("/api/hub-update", as: HubVersions.Reply.self, timeout: 45)
+                        return (url, HubVersions(health: health, status: status), true)
+                    } catch let e as HubError where e.message.hasPrefix("The hub answered") || e.message.hasPrefix("Unexpected reply") {
+                        return (url, HubVersions(health: nil, status: nil), true) // it answered: an older hub (404)
+                    } catch {
+                        return (url, HubVersions(health: nil, status: nil), false) // no answer: ask again later
+                    }
+                }
+            }
+            for await (url, v, done) in group {
+                versions[url] = v
+                if done { answered.insert(url) }
+            }
+        }
     }
 
     private func add() {

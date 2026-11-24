@@ -26,13 +26,9 @@ final class AppModel {
     /// Why the selected hub cannot be reached, or nil.
     private(set) var hubError: String?
     private(set) var loaded = false
-
-    /// The sidebar order you dragged terminals to (and so ⌘1…9). Terminals not in it follow, newest first.
-    private(set) var order: [TerminalRef] = {
-        (try? JSONDecoder().decode([TerminalRef].self, from: UserDefaults.standard.data(forKey: "sidebarOrder") ?? Data())) ?? []
-    }() {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(order), forKey: "sidebarOrder") }
-    }
+    /// A newer version installed over this app (by its updater or the MCP desktop_update tool): the toolbar shows
+    /// "Restart to Update" until the app restarts.
+    var restartVersion: String?
 
     /// Terminals moving to another machine (or just moved), with the hub's phases.
     private(set) var migrations: [TerminalRef: Migration] = [:]
@@ -104,25 +100,9 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys), order: order)
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys))
     }
 
-    /// Drag in the sidebar: the machine's terminals take the new order, ahead of the terminals not yet ordered.
-    func move(in machine: Machine, from: IndexSet, to: Int) {
-        var refs = machine.terminals.map(\.ref)
-        refs.move(fromOffsets: from, toOffset: to)
-        setOrder(refs)
-    }
-
-    func moveToTop(_ ref: TerminalRef, in machine: Machine) {
-        setOrder([ref] + machine.terminals.map(\.ref).filter { $0 != ref })
-    }
-
-    private func setOrder(_ refs: [TerminalRef]) {
-        let open = Set(terminals.map { TerminalRef(hub: $0.hub, id: $0.terminal.id) })
-        // Ended terminals leave the list, so it stays small.
-        order = refs + order.filter { !refs.contains($0) && open.contains($0) }
-    }
     var machineNames: [String] { machines.map(\.name) }
 
     func terminal(_ ref: TerminalRef) -> Terminal? {
@@ -130,7 +110,10 @@ final class AppModel {
     }
 
     /// Order of the sidebar, for Cmd+1…9.
+    /// The top-level rows, in sidebar order: ⌘1…9 and next/previous. Child sessions open from their parent's row.
     var orderedRefs: [TerminalRef] { machines.flatMap { $0.terminals.map(\.ref) } }
+    /// Every row, child sessions too.
+    var allRefs: [TerminalRef] { machines.flatMap { $0.terminals.flatMap(\.all).map(\.ref) } }
 
     /// The agent's state: the hub's answer. A hub that sends none (an older one) is read from its inbox and the bell.
     func state(_ ref: TerminalRef) -> AgentState {
@@ -148,7 +131,11 @@ final class AppModel {
         guard let t = terminal(ref), t.state != nil else { return true }
         return t.needsAnswer || !seen.contains(ref)
     }
-    var waitingCount: Int { orderedRefs.filter(wantsYou).count }
+    var waitingCount: Int { allRefs.filter(wantsYou).count }
+    /// The dot pulses red: the agent waits for you and you have not opened it since.
+    func pulses(_ ref: TerminalRef) -> Bool {
+        terminal(ref).map { Recency.pulses($0, opened: seen.contains(ref) || focused == ref) } ?? false
+    }
 
     static let prefixOverrideKey = "tmux.prefixOverride"
 
@@ -252,6 +239,7 @@ final class AppModel {
             while !Task.isCancelled {
                 if Date().timeIntervalSince(probed) >= 30 { // which address of each hub is fastest now
                     probed = Date()
+                    Updates.refreshRestart()
                     await HubRoutes.shared.probeAll()
                 }
                 await self?.refresh()
@@ -290,7 +278,7 @@ final class AppModel {
                     if primed, fresh.contains(ref), sessions[ref] == nil { notify(ref) }
                     continue
                 }
-                let key = "\(s.rawValue)/\(t.askKind ?? "")"
+                let key = "\(s.rawValue)/\(t.askKind ?? "")/\(t.ask ?? "")" // a new question marks it again
                 guard lastState.updateValue(key, forKey: ref) != key else { continue }
                 if ref == inFront { seen.insert(ref) } else { seen.remove(ref) }
                 if primed, ref != inFront, s == .waiting || s == .blocked { notify(ref) }

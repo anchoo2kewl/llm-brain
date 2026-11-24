@@ -1,6 +1,6 @@
 # Desktop app
 
-Brain Hub is a small native app for the hub. On macOS, use the native Mac app: see [mac-app.md](mac-app.md). This page is about the Tauri app for Linux, which also still builds on macOS.
+Brain Hub is a small native app for the hub. On macOS, use the native Mac app: see [mac-app.md](mac-app.md). This page is about the Tauri app for Linux and Windows, which also still builds on macOS. The look of both apps is in [design.md](design.md).
 
 The app source is in `app/`. It uses Tauri v2: a Rust core and the system web view (WebKit). It has no web framework and no runtime npm packages.
 
@@ -21,17 +21,25 @@ Get the build for your system from the GitHub release page (tags `client-v<versi
 | --- | --- |
 | macOS (native app, universal) | `BrainHub-mac-<version>.zip`, see [mac-app.md](mac-app.md) |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
+| Windows | `Brain Hub_<version>_x64_en-US.msi` or `Brain Hub_<version>_x64-setup.exe` |
 
 The builds are not signed:
 
 - macOS: the first start can be blocked. Open System Settings, Privacy and Security, and press Open Anyway. Or run `xattr -dr com.apple.quarantine "/Applications/Brain Hub.app"`.
 - Linux: make the AppImage executable (`chmod +x`), or install the `.deb`/`.rpm`. The app needs WebKitGTK 4.1 and an AppIndicator library for the tray icon.
+- Windows: SmartScreen can block the first start. Choose **More info**, then **Run anyway**. The app needs the WebView2 runtime, which Windows 10 and 11 include; the installers add it when it is missing.
 
 ## Publish a release
 
 1. Set the new version in `app/src-tauri/tauri.conf.json` and `app/package.json`.
 2. Push a tag `client-v<version>` for that commit.
-3. The `client-release` workflow runs the tests, builds the native Mac app and the Linux app, and attaches the files to a draft release. It publishes the release only when every build succeeded.
+3. The `client-release` workflow runs the tests, builds the native Mac app, the Linux app and the Windows app (on GitHub's `windows-latest` runner), and attaches the files to a draft release. It publishes the release only when every build succeeded.
+
+On each pull request that changes `app/`, the `client-build` workflow runs the Linux tests and lint, and builds the Windows installers as run artifacts. It makes no release.
+
+### Versions
+
+The desktop clients and the hub have separate versions and separate releases: `client-v<version>` tags for the apps, `hub-v<version>` tags for the hub. They can differ. Change one only when that part changes. The Mac app and the Tauri app share the client version (`app/src-tauri/tauri.conf.json`). Settings (Mac) and the Hubs page (Tauri) show both, for example "App 0.1.12 · Hub 0.1.11".
 
 ## Build
 
@@ -183,10 +191,12 @@ On macOS, click the Dock icon to show the window again. On Linux, use the tray i
 ## Limits
 
 - The builds are not signed or notarised. See Download.
-- Only the macOS build was run by hand. The Linux build comes from CI and was not run by hand yet.
+- Only the macOS build was run by hand. The Linux and Windows builds come from CI and were not run by hand yet.
+- Windows: the app does not update itself (no updater for Windows yet). Install the new `.msi` or `.exe` over the old one. A second start of the app on Windows opens a second copy (no single-instance lock there yet).
+- Windows: the app has no tmux-only features of its own. Terminals run on the hub's machines, so they work the same.
 - The quick-search window is a normal always-on-top window, not a system panel. When it opens, macOS can bring the main window forward too.
 - The app cannot cancel an HTTP request that is already running. It starts no request for an old keystroke, and it drops the reply of an old request. A request ends after 5 seconds at most.
 
 ### Desktop updates
 
-Beginning with 0.1.4, Brain Hub checks for a newer stable desktop release at startup. In the application menu, use **Check for Updates…** to check immediately or turn off **Automatically Install Updates**. On macOS, move Brain Hub into a writable Applications folder before updating. On Linux, keep the AppImage in a writable folder. Both install the matching release for the next launch and leave active terminals running. Linux deb and rpm installations announce new versions and use the system package installer. Release downloads are checked against the SHA-256 digest supplied by GitHub. Users on 0.1.3 or earlier install this release once to get the updater.
+Beginning with 0.1.4, Brain Hub checks for a newer stable desktop release at startup. In the application menu, use **Check for Updates…** to check immediately or turn off **Automatically Install Updates**. On macOS, move Brain Hub into a writable Applications folder before updating. On Linux, keep the AppImage in a writable folder. Both install the matching release for the next launch and leave active terminals running. Then a green **Restart to Update** sign shows until you restart (see [design.md](design.md#restart-to-update)): in the Tauri app, a menu-bar item, the first tray item and a button on the Hubs page. Linux deb and rpm installations announce new versions and use the system package installer. Release downloads are checked against the SHA-256 digest supplied by GitHub. Users on 0.1.3 or earlier install this release once to get the updater.

@@ -47,8 +47,11 @@ their first lines).
 
 ## The window
 
-- **Sidebar**: each machine of the cluster and its open terminals. The dot says what the agent does: green working,
-  orange waiting for you (it rang the bell, or the hub's inbox says so), grey ended. "Running elsewhere" lists Claude
+- **Sidebar**: each machine of the cluster and its open terminals, newest first. The order never changes when an
+  agent works or waits; only a new terminal (on top) or an ended one changes it. One row is selected: the accent bar
+  and the bold title. The dot says what the agent does: blue working, orange waiting for you, a slow red pulse when
+  it needs an answer, grey ended. The time (`now`, `2m`, `1h`) is the last activity or input. Child sessions show under their parent: click the
+  count, or press → and ←. See [design.md](design.md). "Running elsewhere" lists Claude
   Code and Codex conversations that run outside the hub; double-click one to continue it in a hub terminal.
 - **Panes**: a window starts with one pane. Split it up to 9 panes. Click a terminal in the sidebar to show it in the
   focused pane. Closing a pane only removes the view: the terminal keeps running on its machine. **End Terminal**
@@ -59,9 +62,15 @@ their first lines).
 - The terminal reconnects by itself after a network drop or sleep, and says why when the hub or the machine is offline.
 - Copy and paste: the hub's tmux has the mouse on, so a drag selects in tmux and copies to the Mac clipboard, and the
   wheel scrolls tmux's history. Shift-drag selects locally; then ⌘C. ⌘V pastes. Option is Meta.
-- Font, theme and colors come from your Ghostty config (`~/.config/ghostty/config`), if you have one. The app's own
-  rules win over it: its menus and tmux keys own the shortcuts (Ghostty key bindings are off), Option is Meta, and
+- Theme and colors come from your Ghostty config (`~/.config/ghostty/config`), if you have one. The app's own
+  rules win over it: the bundled JetBrainsMono Nerd Font, its menus and tmux keys own the shortcuts (Ghostty key bindings are off), Option is Meta, and
   a remote program cannot read the clipboard.
+
+- **Restart to Update**: after the app installed a newer version of itself (by its own check or the MCP
+  `desktop_update` tool), a green button shows in the toolbar until you restart. One click restarts into it.
+- **Pasted images**: a preview shows at the top right of the pane until you press Return. Its red × hides the preview
+  only; the path stays in the CLI's input.
+- **Settings → Hubs** shows each hub's version and its update state, and "App 0.1.x · Hub 0.1.y" at the bottom.
 
 ## From any terminal
 

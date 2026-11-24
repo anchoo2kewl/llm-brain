@@ -30,6 +30,17 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// Subagents that run now.
     public var subagents: Int?
     public var started: String?
+    /// The agent's last output and the owner's last input (hub 0.1.12); an older hub sends only `updated`.
+    public var lastActivity: String?
+    public var lastInput: String?
+    /// The session tree (hub 0.1.12): the node of the hub that owns this row, and its parent session's hub node and
+    /// terminal id there. An id alone is not unique across hubs. `childCount` is the parent's live children.
+    public var hubNode: String?
+    public var parentHub: String?
+    public var parentId: Int64?
+    public var childCount: Int?
+    /// Set by the hub only when the session waits on you: a question or a permission prompt.
+    public var needsOwner: Bool?
     /// The login profile it runs with (nil = the machine's default login), and who that login is.
     public var profile: String?
     public var account: String?
@@ -37,6 +48,8 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
         case contextUsed = "context_used", contextWindow = "context_window", subagents, started, profile, account
+        case lastActivity = "last_activity_at", lastInput = "last_input_at"
+        case hubNode = "hub", parentHub = "parent_hub", parentId = "parent_id", childCount = "children", needsOwner = "needs_owner"
     }
 
     public init(id: Int64, title: String, host: String, cli: String, provider: String, cwd: String,
@@ -61,6 +74,45 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// The agent needs an answer or hit an error: it stays marked until that changes. A finished turn is marked
     /// only until you look at it.
     public var needsAnswer: Bool { state == .blocked || (state == .waiting && askKind != "done") }
+
+    /// When it last ran or got input: the later of the two, else `updated`.
+    public var lastActive: Date? {
+        [lastActivity, lastInput].compactMap { $0.flatMap(parseHubTime) }.max() ?? parseHubTime(updated)
+    }
+}
+
+/// The session list's recency and "needs you" signals (docs/design.md). They never change the order.
+public enum Recency {
+    /// "now", "2m", "1h", "3d".
+    public static func short(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "" }
+        let s = max(0, Int(now.timeIntervalSince(date)))
+        switch s {
+        case ..<60: return "now"
+        case ..<3600: return "\(s / 60)m"
+        case ..<86400: return "\(s / 3600)h"
+        default: return "\(s / 86400)d"
+        }
+    }
+
+    /// The status dot fades with age: bright when active now, dimmer as it gets older.
+    public static func dotOpacity(_ date: Date?, now: Date = Date()) -> Double {
+        guard let date else { return 0.4 }
+        switch now.timeIntervalSince(date) {
+        case ..<60: return 1
+        case ..<600: return 0.85
+        case ..<3600: return 0.7
+        case ..<86400: return 0.55
+        default: return 0.4
+        }
+    }
+
+    /// The dot pulses red only while the agent waits for the owner (a question or a permission prompt) and the owner
+    /// has not opened it yet. The hub's `needs_owner` decides; an older hub: blocked, or waiting on a question.
+    /// A finished turn or an error is a report: it never pulses.
+    public static func pulses(_ t: Terminal, opened: Bool) -> Bool {
+        !opened && (t.needsOwner ?? (t.state == .blocked || (t.state == .waiting && t.askKind == "question")))
+    }
 }
 
 /// `GET /api/terminals/{id}/detail`: what an expanded row shows.

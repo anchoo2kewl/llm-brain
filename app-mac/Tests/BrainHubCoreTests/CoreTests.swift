@@ -248,20 +248,51 @@ import BrainHubCore
 }
 
 @Suite struct SidebarOrder {
-    func term(_ id: Int64, _ updated: String) -> Terminal {
-        Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated)
+    func term(_ id: Int64, started: String?, updated: String = "1", state: AgentState? = nil) -> Terminal {
+        var t = Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated, state: state)
+        t.started = started
+        return t
+    }
+    func ids(_ ts: [Terminal]) -> [Int64] {
+        machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals.map(\.ref.id)
     }
 
-    @Test func draggedOrderFirstThenNewest() {
-        let ts = [("h", term(1, "2026-01-01T00:00:01Z")), ("h", term(2, "2026-01-01T00:00:02Z")),
-                  ("h", term(3, "2026-01-01T00:00:03Z")), ("h", term(4, "2026-01-01T00:00:04Z"))]
-        let ids = { (o: [Int64]) in
-            machines(terminals: ts, live: [], nodes: ["m"], keep: [], order: o.map { TerminalRef(hub: "h", id: $0) })[0]
-                .terminals.map(\.ref.id)
+    @Test func newestStartedFirst() {
+        let ts = [term(1, started: "2026-01-01T00:00:01Z"), term(2, started: "2026-01-01T00:00:03.5Z"),
+                  term(3, started: "2026-01-01T00:00:02Z"), term(4, started: "2026-01-01T00:00:02Z")]
+        #expect(ids(ts) == [2, 4, 3, 1], "ties: the higher id first")
+        #expect(ids([term(1, started: nil), term(3, started: nil), term(2, started: nil)]) == [3, 2, 1], "an older hub: by id")
+    }
+
+    @Test func childrenNestUnderTheirParentNewestFirst() {
+        func node(_ id: Int64, _ hub: String, parent: (String, Int64)? = nil, started: String) -> Terminal {
+            var t = term(id, started: started)
+            (t.hubNode, t.parentHub, t.parentId) = (hub, parent?.0, parent?.1)
+            return t
         }
-        #expect(ids([]) == [4, 3, 2, 1])
-        #expect(ids([1, 3]) == [1, 3, 4, 2])
-        #expect(ids([9, 2]) == [2, 4, 3, 1]) // a ref no longer open is ignored
+        let ts = [node(1, "studio", started: "2026-01-01T00:00:01Z"),
+                  node(2, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:02Z"),
+                  node(3, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:03Z"),
+                  node(1, "laptop", parent: ("studio", 2), started: "2026-01-01T00:00:04Z"), // same id, another hub
+                  node(9, "studio", parent: ("studio", 77), started: "2026-01-01T00:00:05Z")] // parent not listed
+        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        #expect(top.map(\.terminal.id) == [9, 1])
+        #expect(top[1].children.map(\.terminal.id) == [3, 2])
+        #expect(top[1].children[1].children.map { $0.terminal.hubNode } == ["laptop"])
+        #expect(top[1].all.count == 4)
+        #expect(ids([term(1, started: nil), term(2, started: nil)]) == [2, 1], "an older hub: flat")
+        let loop = [node(5, "s", parent: ("s", 6), started: "2026-01-01T00:00:01Z"), node(6, "s", parent: ("s", 5), started: "2026-01-01T00:00:02Z"),
+                    node(7, "s", parent: ("s", 7), started: "2026-01-01T00:00:03Z")]
+        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        #expect(shown.flatMap(\.all).count == 3, "a loop in bad data never hides a session")
+    }
+
+    @Test func activityAndStateNeverReorder() {
+        let before = [term(1, started: "2026-01-01T00:00:01Z"), term(2, started: "2026-01-01T00:00:02Z")]
+        let after = [term(1, started: "2026-01-01T00:00:01Z", updated: "2026-01-02T00:00:00Z", state: .waiting),
+                     term(2, started: "2026-01-01T00:00:02Z", state: .ended)]
+        #expect(ids(before) == [2, 1] && ids(after) == [2, 1])
+        #expect(ids(after + [term(3, started: "2026-01-01T00:00:03Z")]) == [3, 2, 1], "a new terminal goes on top")
     }
 }
 

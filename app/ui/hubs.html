@@ -9,7 +9,10 @@
 </head>
 <body>
 <main>
-  <h1>Hubs</h1>
+  <div class="titlebar">
+    <h1>Hubs</h1>
+    <button id="restart" class="restart" type="button" hidden>Restart to Update</button>
+  </div>
   <p class="muted" id="intro">Pick the hub to show. The hub must be on this computer (127.0.0.1) or on your tailnet (100.64.0.0/10 or a *.ts.net name).</p>
   <div id="status" role="status"></div>
   <ul id="hubs"></ul>
@@ -28,6 +31,8 @@
     <button id="reset" type="button">Reset</button>
   </div>
   <div id="hkmsg" class="muted"></div>
+
+  <p id="versions" class="muted versions"></p>
 </main>
 <script src="hubs.js"></script>
 </body>

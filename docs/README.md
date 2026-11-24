@@ -37,8 +37,9 @@ Every feature of llm-brain, one page per area. Start with [Getting started](gett
 | [Search](hub-search.md) | The full-text index and the query syntax |
 | [Insights](hub-insights.md) | Fleet overview, `/insights` charts and findings, the JSON API, cost estimates |
 | [API](hub-api.md) | Every HTTP endpoint the hub serves |
-| [Desktop app](desktop-app.md) | macOS and Linux clients |
+| [Desktop app](desktop-app.md) | macOS, Linux and Windows clients |
 | [Mac app](mac-app.md) | The native macOS client |
+| [Design spec](design.md) | The shared look: font, session list, restart sign, pasted images |
 | [Move folders](move-folders.md) | Pick the destination folder when you move or clone a session |
 | [Hub automatic updates](hub-auto-updates.md) | How the hub updates itself from `hub-v*` releases |
 

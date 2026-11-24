@@ -57,6 +57,7 @@ struct MainWindow: View {
             }
         }
         .background(WindowReader { w in panes.window = w })
+        .font(.appBody)
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar {
@@ -69,6 +70,13 @@ struct MainWindow: View {
                 .pickerStyle(.segmented)
                 .labelStyle(.iconOnly)
                 .disabled(model.hub == nil)
+            }
+            if let v = model.restartVersion {
+                ToolbarItem {
+                    Button { Updates.restart() } label: { Label("Restart to Update", systemImage: "arrow.clockwise.circle.fill") }
+                        .labelStyle(.titleAndIcon).buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
+                        .help("Version \(v) is installed. Restart Brain Hub to use it.")
+                }
             }
             ToolbarItemGroup {
                 if model.config.hubs.count > 1 {
@@ -176,8 +184,30 @@ struct Sidebar: View {
     var openInWindow: (TerminalRef) -> Void
     @Binding var failure: String?
     @ViewState private var expanded: Set<TerminalRef> = []
+    /// Parents whose child sessions show. Collapsed by default.
+    @ViewState private var treeOpen: Set<TerminalRef> = []
     @ViewState private var draggingOverSidebar = false
     private var model: AppModel { AppModel.shared }
+
+    /// The rows to show: each top-level session, then its open children (and theirs), one level deeper each.
+    private func visible(_ entries: [Machine.Entry], depth: Int = 0, parentHub: String? = nil) -> [TreeRow] {
+        entries.flatMap { e -> [TreeRow] in
+            let other = depth > 0 && e.terminal.hubNode != parentHub ? e.terminal.hubNode : nil
+            let row = TreeRow(entry: e, depth: depth, otherHub: other)
+            return [row] + (treeOpen.contains(e.ref) ? visible(e.children, depth: depth + 1, parentHub: e.terminal.hubNode) : [])
+        }
+    }
+
+    private func toggleTree(_ ref: TerminalRef) {
+        if treeOpen.contains(ref) { treeOpen.remove(ref) } else { treeOpen.insert(ref) }
+    }
+
+    private func setTree(_ ref: TerminalRef?, open: Bool) -> KeyPress.Result {
+        guard let ref, let e = model.machines.flatMap({ $0.terminals.flatMap(\.all) }).first(where: { $0.ref == ref }),
+              !e.children.isEmpty, treeOpen.contains(ref) != open else { return .ignored }
+        toggleTree(ref)
+        return .handled
+    }
 
     var body: some View {
         List(selection: $selection) {
@@ -191,12 +221,15 @@ struct Sidebar: View {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
                             .onDrop(of: [.utf8PlainText, .plainText], isTargeted: nil) { dropped($0, on: m.name) }
                     }
-                    ForEach(m.terminals) { e in
-                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], expanded: $expanded, end: { end(e.ref) })
+                    ForEach(visible(m.terminals), id: \.entry.ref) { row in
+                        let e = row.entry
+                        TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded,
+                                    tree: .init(depth: row.depth, children: e.children.count, open: treeOpen.contains(e.ref),
+                                                hub: row.otherHub, toggle: { toggleTree(e.ref) }),
+                                    end: { end(e.ref) })
                             .tag(e.ref)
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
-                                Button("Move to Top") { model.moveToTop(e.ref, in: m) }
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
@@ -205,7 +238,6 @@ struct Sidebar: View {
                                     .disabled(model.closingTerminals.contains(e.ref))
                             }
                     }
-                    .onMove { from, to in model.move(in: m, from: from, to: to) }
                     // A row dragged here from another machine's section moves (⌥: clones) the terminal here.
                     .onInsert(of: [.utf8PlainText, .plainText]) { _, providers in _ = dropped(providers, on: m.name) }
                     if !m.elsewhere.isEmpty {
@@ -245,6 +277,9 @@ struct Sidebar: View {
         .overlay {
             if !model.loaded { ProgressView() }
         }
+        // Right opens a parent's child sessions, Left closes them.
+        .onKeyPress(.rightArrow) { setTree(selection, open: true) }
+        .onKeyPress(.leftArrow) { setTree(selection, open: false) }
         .onDrop(of: [.utf8PlainText, .plainText], isTargeted: $draggingOverSidebar) { _ in false }
         .safeAreaInset(edge: .bottom) {
             if draggingOverSidebar {
@@ -280,4 +315,12 @@ struct Sidebar: View {
             do { selection = try await model.continueLive(s) } catch { failure = error.localizedDescription }
         }
     }
+}
+
+/// One visible sidebar row of the session tree.
+struct TreeRow {
+    var entry: Machine.Entry
+    var depth: Int
+    /// The child's hub, when it is not its parent's.
+    var otherHub: String?
 }
