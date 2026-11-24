@@ -5,23 +5,25 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-head{display:flex;align-items:center;gap:8px;padding:12px 12px 6px}.ws-head .grow{flex:1}
 .ws-filter{padding:0 12px 8px}.ws-filter input{width:100%}
 .ws-list{list-style:none;margin:0;padding:0 6px;overflow:auto;flex:1}
-.ws-item{padding:8px 10px;border-radius:9px;cursor:pointer;margin:2px 0;border:1px solid transparent}
-/* One row looks selected (docs/design.md): accent background, accent bar and a bold title. Attention is only the dot and
-   the title colour. Ended rows fade. Every row has the same height. */
-.ws-item:hover{background:var(--sunk)}.ws-item.shown{border-color:var(--line)}
+/* One line per row (docs/design.md, 8 px grid): dot, name, muted folder, age. One row looks selected: accent background,
+   accent bar and a bold name. Neutral text: colour only for the selection, the dot and errors. Ended rows fade. */
+.ws-item{padding:6px 8px;border-radius:6px;cursor:pointer;margin:0;transition:background var(--dur-1)}
+.ws-item:hover{background:var(--sunk)}
 .ws-item.on{background:var(--acc-soft);border-color:transparent;box-shadow:inset 3px 0 0 var(--acc)}.ws-item.on .ws-it-title{font-weight:700}
 .ws-item:focus-visible{outline:2px solid var(--acc)}
-.ws-it-top{display:flex;align-items:center;gap:7px}
-.ws-it-title{font-weight:400;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;outline:none}
+.ws-it-top{display:flex;align-items:center;gap:8px;min-height:20px}
+.ws-it-title{font-weight:400;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;outline:none}
+.ws-it-dir{font-size:11.5px;color:var(--mut);opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 0;min-width:0}
+.ws-it-hub{font-size:11px;color:var(--mut);flex:none}
+.ws-prov{font:500 9px/12px var(--mono);color:var(--mut);border:1px solid var(--line);border-radius:3px;padding:0 3px;flex:none}
 .ws-it-title[contenteditable=true]{white-space:normal;background:var(--bg);border-radius:4px;padding:0 3px;outline:1px solid var(--acc)}
 .ws-it-age{font-size:11px;color:var(--mut);font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none}
 .ws-it-num{font-size:11px;color:var(--mut);font-family:ui-monospace,Menlo,monospace}
-.ws-it-meta{font-size:11.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 15px}
-.ws-it-prev{font-size:11.5px;font-family:var(--mono);color:var(--fg);opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:3px 0 0 15px;min-height:1.4em}
-.ws-item.s-ended{opacity:.55}.ws-item.s-waiting .ws-it-title{color:var(--st-waiting)}
+.ws-it-prev{font-size:11.5px;color:var(--bad);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 16px}.ws-it-prev:empty{display:none}
+.ws-item.s-ended{opacity:.55}
 .dot-s{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none;display:inline-block}
 .dot-s.working{background:var(--acc);animation:wspulse 1s ease-in-out infinite}
-.dot-s.waiting{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 30%,transparent)}
+.dot-s.waiting{background:var(--warn)}
 .dot-s.idle{background:var(--ok)}.dot-s.ended{background:var(--bad)}.dot-s.connecting{background:var(--mut)}
 @keyframes wspulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.dot-s.working{animation:none}}
@@ -74,11 +76,12 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .bdg.ro{color:var(--ext);border-color:color-mix(in srgb,var(--ext) 50%,transparent)}
 /* Sessions running elsewhere: the OUTSIDE HUB badge marks them, not a background or bar that looks like a selection. */
 .ws-item.ext .dot-s.working{background:var(--ext)}
-.ws-sect{color:var(--ext)!important;font-weight:700}
+.ws-ended{cursor:pointer}.ws-ended:hover{color:var(--fg)}.ws-ended:focus-visible{outline:2px solid var(--acc)}
 .ws-slot.ext{border-color:color-mix(in srgb,var(--ext) 55%,var(--line))}
 .ws-slot.ext.focus{border-color:var(--ext);box-shadow:0 0 0 1px var(--ext)}
 .ws-slot.ext .ws-slot-head{background:color-mix(in srgb,var(--ext) 12%,transparent)}
-.ws-pen{border:0;background:none;color:var(--mut);padding:0 3px;font-size:12px;cursor:pointer;opacity:0}.ws-item:hover .ws-pen,.ws-item.on .ws-pen,.ws-item:focus-within .ws-pen,.ws-pen:focus-visible{opacity:1}.ws-pen:hover{color:var(--acc)}
+.ws-pen{border:0;background:none;color:var(--mut);padding:0 3px;font-size:12px;cursor:pointer;opacity:0}.ws-item:hover .ws-pen,.ws-item:focus-within .ws-pen,.ws-pen:focus-visible{opacity:1}
+.ws-pen{display:none}.ws-item:hover .ws-pen,.ws-item:focus-within .ws-pen{display:inline}.ws-item:hover .ws-it-age{display:none}.ws-pen:hover{color:var(--acc)}
 .ws-slot-title{cursor:text;border-radius:4px}.ws-slot-title:hover{background:color-mix(in srgb,var(--acc) 10%,transparent)}
 .ws-slot-title[contenteditable=true]{outline:1px solid var(--acc);background:var(--bg);padding:0 4px;max-width:60%}
 .ws-editor{position:absolute;left:0;right:0;top:29px;bottom:0;width:100%;height:calc(100% - 29px);border:0;background:var(--bg);z-index:3}
@@ -86,7 +89,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-close{font-size:15px;line-height:1}.ws-close:hover,.ws-close:focus-visible{color:var(--bad)}.ws-close:disabled{opacity:.4;cursor:progress}
 /* touch (iPad, phones): no hover, so × is always shown, and every pane button is a 44 px target */
 @media (hover:none),(pointer:coarse),(max-width:1100px){
-  .ws-item .ws-close{opacity:1}
+  .ws-item .ws-close{opacity:1;display:inline-flex}
   .ws-close,.ws-slot-head .ws-btn{min-width:var(--tap);min-height:var(--tap);font-size:17px;display:inline-flex;align-items:center;justify-content:center}
   .ws-slot-head{gap:2px;padding:0 4px}
   .ws-slot-head .ws-slot-meta{display:none}

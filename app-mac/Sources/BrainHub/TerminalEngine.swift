@@ -18,6 +18,8 @@ final class TerminalEngine {
     var onFiles: (([PastedFile]) -> Void)?
     /// Return without modifiers was pressed: the message with any pasted image goes to the CLI. Only observed.
     var onReturn: (() -> Void)?
+    /// The owner typed or pasted into this terminal: it orders the sidebar. Only observed.
+    var onInput: (() -> Void)?
 
     private var surface: SurfaceView?
     /// The last surface had the keyboard: the next one takes it, unless something else has it by then.
@@ -31,6 +33,7 @@ final class TerminalEngine {
         s.onBell = { [weak self] in self?.onBell?() }
         s.onFiles = { [weak self] files in self?.onFiles?(files) }
         s.onReturn = { [weak self] in self?.onReturn?() }
+        s.onInput = { [weak self] in self?.onInput?() }
         s.onClose = { [weak self, weak s] in
             guard let self, let s, s === surface else { return }
             stop()
@@ -214,6 +217,8 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     var onClose: (() -> Void)?
     var onFiles: (([PastedFile]) -> Void)?
     var onReturn: (() -> Void)?
+    /// The owner typed or pasted into this terminal: it orders the sidebar. Only observed.
+    var onInput: (() -> Void)?
     var cursorShape = GHOSTTY_MOUSE_SHAPE_TEXT {
         didSet { window?.invalidateCursorRects(for: self) }
     }
@@ -270,6 +275,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         onClose = nil
         onFiles = nil
         onReturn = nil
+        onInput = nil
         // A close can originate from a native callback. Keep userdata valid until the callback unwinds.
         DispatchQueue.main.async { [self] in
             ghostty_surface_free(s)
@@ -451,6 +457,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: keys
 
     override func keyDown(with event: NSEvent) {
+        onInput?()
         // ⌃V with an image or files on the clipboard: Claude Code's own ⌃V reads the clipboard of the machine it
         // runs on, not this Mac's.
         if event.modifierFlags.intersection([.control, .option, .command, .shift]) == .control,

@@ -103,30 +103,45 @@ struct SearchPalette: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search conversations on every machine", text: $query)
+                TextField("Go to a session, or search conversations on every machine", text: $query)
                     .textFieldStyle(.plain).font(.title3)
                     .focused($fieldFocused)
-                    .onKeyPress(.downArrow) { highlighted = min(highlighted + 1, max(hits.count - 1, 0)); return .handled }
+                    .onKeyPress(.downArrow) { highlighted = min(highlighted + 1, max(count - 1, 0)); return .handled }
                     .onKeyPress(.upArrow) { highlighted = max(highlighted - 1, 0); return .handled }
-                    .onSubmit { if hits.indices.contains(highlighted) { continueHit(hits[highlighted]) } }
+                    .onSubmit { submit() }
                 if searching { ProgressView().controlSize(.small) }
             }
             .padding(12)
             Divider()
             ScrollViewReader { proxy in
-                List(Array(hits.enumerated()), id: \.element.id) { i, hit in
-                    row(hit, selected: i == highlighted)
-                        .id(i)
-                        .contentShape(Rectangle())
-                        .onTapGesture { highlighted = i }
-                        .onTapGesture(count: 2) { continueHit(hit) }
+                List {
+                    if !open.isEmpty {
+                        Section("Open sessions") {
+                            ForEach(Array(open.enumerated()), id: \.element) { i, ref in
+                                sessionRow(ref, selected: i == highlighted)
+                                    .id(i)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { highlighted = i }
+                                    .onTapGesture(count: 2) { show(ref) }
+                            }
+                        }
+                    }
+                    Section(hits.isEmpty ? "" : "Conversations") {
+                        ForEach(Array(hits.enumerated()), id: \.element.id) { i, hit in
+                            row(hit, selected: open.count + i == highlighted)
+                                .id(open.count + i)
+                                .contentShape(Rectangle())
+                                .onTapGesture { highlighted = open.count + i }
+                                .onTapGesture(count: 2) { continueHit(hit) }
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .onChange(of: highlighted) { proxy.scrollTo(highlighted) }
             }
             .overlay {
-                if hits.isEmpty && !query.isEmpty && !searching && failure == nil {
-                    Text("No conversations match.").foregroundStyle(.secondary)
+                if count == 0 && !query.isEmpty && !searching && failure == nil {
+                    Text("No session or conversation matches.").foregroundStyle(.secondary)
                 }
             }
             Divider()
@@ -134,7 +149,7 @@ struct SearchPalette: View {
                 if let busy { ProgressView().controlSize(.small); Text(busy) }
                 else if let failure { Text(failure).foregroundStyle(.red).lineLimit(2) }
                 else if !partial.isEmpty { Text("Not answering: \(partial.joined(separator: ", "))").foregroundStyle(.secondary) }
-                else { Text("↩ Continue · double-click a result").foregroundStyle(.secondary) }
+                else { Text("↩ Open the session or continue the conversation").foregroundStyle(.secondary) }
                 Spacer()
                 Toggle("End the old terminal on a move", isOn: $closeSource).toggleStyle(.checkbox)
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -145,6 +160,39 @@ struct SearchPalette: View {
         .frame(width: 680, height: 460)
         .onAppear { fieldFocused = true }
         .task(id: query) { await search() }
+    }
+
+    /// Open sessions whose name or folder matches, in sidebar order (most recent first).
+    private var open: [TerminalRef] {
+        let refs = model.allRefs
+        let names = refs.map { r in model.terminal(r).map { TerminalRow.name($0) + " " + TerminalRow.folder($0) } ?? "" }
+        return switcherMatches(names, query: query).map { refs[$0] }
+    }
+
+    private var count: Int { open.count + hits.count }
+
+    private func submit() {
+        let o = open
+        if o.indices.contains(highlighted) { show(o[highlighted]) }
+        else if hits.indices.contains(highlighted - o.count) { continueHit(hits[highlighted - o.count]) }
+    }
+
+    private func show(_ ref: TerminalRef) {
+        opened(ref)
+        dismiss()
+    }
+
+    private func sessionRow(_ ref: TerminalRef, selected: Bool) -> some View {
+        let t = model.terminal(ref)
+        return HStack(spacing: 8) {
+            StateDot(state: model.state(ref), wants: model.wantsYou(ref), pulse: model.pulses(ref), age: model.recent(ref))
+            Text(t.map(TerminalRow.name) ?? "Terminal \(ref.id)").lineLimit(1)
+            Text(t.map(TerminalRow.folder) ?? "").font(.appCaption).foregroundStyle(.tertiary).lineLimit(1)
+            Spacer()
+            Text(Recency.short(model.recent(ref))).font(.appCaption2).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .listRowBackground(selected ? Color.accentColor.opacity(0.15) : Color.clear)
     }
 
     private func row(_ hit: SessionHit, selected: Bool) -> some View {
@@ -174,6 +222,7 @@ struct SearchPalette: View {
 
     private func search() async {
         let q = query.trimmingCharacters(in: .whitespaces)
+        highlighted = 0
         guard !q.isEmpty, let client = model.client else { hits = []; partial = []; return }
         try? await Task.sleep(for: .milliseconds(150))
         if Task.isCancelled { return }
@@ -182,7 +231,7 @@ struct SearchPalette: View {
         do {
             let r = try await client.get(Paths.search(q), as: SearchReply.self)
             if Task.isCancelled { return }
-            (hits, partial, highlighted, failure) = (r.sessions, r.partial, 0, nil)
+            (hits, partial, failure) = (r.sessions, r.partial, nil)
         } catch {
             if !Task.isCancelled { failure = error.localizedDescription }
         }

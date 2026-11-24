@@ -52,6 +52,7 @@
       isFocused: function () { return document.hasFocus() && st.slots[st.focus] === info.id; },
       onSay: function (t) { var s = shownAt(info.id); if (s >= 0 && slotEls[s]) slotEls[s].msg.textContent = t; },
       onState: function () { paintItem(info.id); paintSlot(shownAt(info.id)); badge(); },
+      onInput: function () { noteInput(info.id); },
       onStatus: function (s) {
         if (!s.status) return;
         info.status = s.status; info.error = s.error; paintItem(info.id);
@@ -104,7 +105,7 @@
         if (infos[k].kind === "session" && st.slots.indexOf(k) >= 0 && !live.some(function (x) { return "s" + x.id === k; })) ts.push(infos[k]);
       });
       var seen = {};
-      ts.sort(window.wsList.newestFirst); // never by activity: rows stay where they are
+      ts.sort(window.wsList.byRecent(keyOf)); // strictly the latest activity or interaction
       order = ts.map(function (t) { return t.id; });
       ts.forEach(function (t) {
         seen[t.id] = true;
@@ -141,16 +142,41 @@
     if (i.blocked) return "blocked";
     return p ? p.state() : "idle";
   }
+  // When the owner last typed or pasted into each terminal from this page (an older hub does not report input).
+  var inputs = pref("ws.inputs", {}), treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
+  function pref(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch (e) { return d; } }
+  function setPref(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } }
+  function keyOf(t) { return window.wsList.recentKey(t, inputs[t.id]); }
+  var inputTimer = null;
+  function noteInput(id) { // at most once a second
+    var now = Date.now();
+    if (inputs[id] && now - inputs[id] < 1000) return;
+    inputs[id] = now; setPref("ws.inputs", inputs);
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(function () {
+      order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); });
+      renderList();
+    }, 1000);
+  }
+  var calm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   function renderList() {
     var q = (document.getElementById("wsq").value || "").toLowerCase();
     var top = list.scrollTop; // emptying the list would scroll it to the top
     var focused = list.contains(document.activeElement) ? document.activeElement : null; // and drop the focus
+    var before = {}; // where each row was: a moved row glides from there
+    Object.keys(items).forEach(function (k) { if (items[k].isConnected) before[k] = items[k].getBoundingClientRect().top; });
+    var was = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
     list.textContent = "";
     var header = false;
+    var all = order.map(function (id) { return infos[id]; });
+    var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
+    var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
+    var mixed = live.reduce(function (m, t) { m[t.provider || t.cli] = 1; return m; }, {});
+    mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
-    var rows = q ? order.map(function (id) { return { t: infos[id], depth: 0, kids: 0, otherHub: "" }; })
-      : window.wsList.treeRows(order.map(function (id) { return infos[id]; }), treeOpen);
-    rows.forEach(function (r) {
+    var rows = q ? live.map(function (t) { return { t: t, depth: 0, kids: 0, otherHub: "" }; })
+      : window.wsList.treeRows(live, treeOpen, keyOf);
+    function put(r) {
       var t = r.t, id = t.id;
       if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
       if (t.kind === "session" && !header) {
@@ -161,9 +187,11 @@
         list.appendChild(h);
       }
       var li = items[id] || makeItem(id);
+      li.dataset.id = id;
       list.appendChild(li);
+      li.mixed = mixed;
       paintItem(id);
-      li.style.marginLeft = r.depth ? r.depth * 14 + "px" : "";
+      li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
       li.parts.kids.hidden = !r.kids;
       li.parts.kids.textContent = (treeOpen[id] ? "▾ " : "▸ ") + r.kids;
       li.parts.kids.title = treeOpen[id] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
@@ -171,12 +199,41 @@
       li.parts.hub.textContent = r.otherHub;
       li.parts.hub.hidden = !r.otherHub;
       li.kids = r.kids;
-    });
+    }
+    rows.forEach(put);
+    // Ended and failed sessions leave the live list: one collapsed group at the bottom.
+    if (ended.length && !q) {
+      var eh = el("li", "ws-sect ws-ended", (endedOpen ? "▾ " : "▸ ") + "Ended (" + ended.length + ")");
+      eh.setAttribute("role", "button"); eh.tabIndex = 0; eh.setAttribute("aria-expanded", endedOpen ? "true" : "false");
+      eh.onclick = eh.onkeydown = function (e) {
+        if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault(); endedOpen = !endedOpen; setPref("ws.endedOpen", endedOpen); renderList();
+      };
+      list.appendChild(eh);
+      if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }); });
+    }
     list.scrollTop = top;
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+    var now = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
+    if (now === was) return;
+    // The order changed: each moved row glides to its new place (none with reduced motion), and the selected row
+    // stays in view.
+    if (!calm.matches) Object.keys(before).forEach(function (k) {
+      var li = items[k];
+      if (!li || !li.isConnected) return;
+      var dy = before[k] - li.getBoundingClientRect().top;
+      if (!dy) return;
+      li.style.transition = "none"; li.style.transform = "translateY(" + dy + "px)";
+      li.getBoundingClientRect(); // apply the start position before the transition
+      li.style.transition = "transform 200ms ease"; li.style.transform = "";
+    });
+    var on = list.querySelector(".ws-item.on");
+    if (on) on.scrollIntoView({ block: "nearest" });
   }
-  var treeOpen = {}; // parents whose child sessions show
-  function setTree(id, open) { if (open) treeOpen[id] = true; else delete treeOpen[id]; renderList(); if (items[id]) items[id].focus(); }
+  function setTree(id, open) {
+    if (open) treeOpen[id] = true; else delete treeOpen[id];
+    setPref("ws.treeOpen", treeOpen); renderList(); if (items[id]) items[id].focus();
+  }
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Terminals");
   // Up and Down move the selection through the list, like a native sidebar.
@@ -199,18 +256,22 @@
     if (id !== undefined) show(id);
     next.focus({ preventScroll: false });
   });
+  // One line per row (docs/design.md): dot, name, muted folder, then the age. The summary is in the tooltip.
   function makeItem(id) {
     var li = el("li", "ws-item");
     li.tabIndex = 0;
     li.setAttribute("role", "option");
-    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
-    var age = el("span", "ws-it-age"); age.title = "Last activity or input";
-    var hub = el("span", "bdg host"); hub.hidden = true; hub.title = "This child session runs on this hub";
+    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), dir = el("span", "ws-it-dir");
+    var num = el("span", "ws-it-num"), age = el("span", "ws-it-age"), prov = el("span", "ws-prov");
+    var hub = el("span", "ws-it-hub"); hub.hidden = true; hub.title = "This child session runs on this hub";
     var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
     kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[id]); });
-    top.append(dot, title, hub, kids, age, num);
-    var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
-    li.append(top, badges, meta, prev);
+    var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
+    pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
+    var prev = el("div", "ws-it-prev"); // only a close error, for a moment
+    var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; setTimeout(function () { prev.textContent = ""; }, 6000); });
+    top.append(dot, title, dir, hub, prov, kids, num, age, pen, x);
+    li.append(top, prev);
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
       li.draggable = true;
@@ -218,15 +279,12 @@
     }
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
-    var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
-    pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
-    top.insertBefore(pen, num);
-    var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; });
-    top.insertBefore(x, num);
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x, age: age, kids: kids, hub: hub };
+    li.parts = { dot: dot, title: title, dir: dir, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
+  function folder(t) { var c = (t.cwd || "").replace(/\/+$/, ""); return c === "~" || !c ? "~" : c.split("/").pop(); }
+  var PROV = { claude: "CC", codex: "CX", antigravity: "AG" };
   var seenIds = {}, seenKey = {};
   function paintItem(id) {
     var li = items[id], t = infos[id];
@@ -235,22 +293,28 @@
     var on = slotOf(id) === st.focus;
     li.className = "ws-item s-" + s + (t.kind === "session" ? " ext" : "") + (on ? " on" : slotOf(id) >= 0 ? " shown" : "");
     li.setAttribute("aria-selected", on ? "true" : "false");
-    badgesFor(li.parts.badges, t);
     // Opened since its state last changed: it stops pulsing. A new question makes it pulse again.
     var key = [t.state || "", t.ask_kind || "", t.blocked ? 1 : 0, t.needs_owner ? 1 : 0, t.ask || ""].join("/");
     if (seenKey[id] !== key) { seenKey[id] = key; delete seenIds[id]; }
     if (on) seenIds[id] = true;
-    var when = window.wsList.lastActive(t), pulse = window.wsList.pulses(t, on || seenIds[id]);
+    var when = window.wsList.lastActive(t, inputs[id]), pulse = window.wsList.pulses(t, on || seenIds[id]);
     li.parts.dot.title = pulse ? "waiting for you" : dotTitle[s] || s;
     li.parts.dot.className = "dot-s " + s + (pulse ? " needs" : "");
     li.parts.dot.style.opacity = pulse || s === "working" ? "" : String(window.wsList.dotOpacity(when));
     li.parts.age.textContent = window.wsList.shortAge(when);
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
-    li.parts.meta.textContent = t.cli + " · " + t.cwd;
+    li.parts.dir.textContent = folder(t);
+    li.parts.prov.hidden = !li.mixed;
+    li.parts.prov.textContent = PROV[t.provider] || ">_";
     li.parts.close.sync();
     var slot = slotOf(id);
-    li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
-    li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host) : p ? p.lastLine() : "";
+    li.parts.num.hidden = true; // the pane header shows its number; the tooltip says it here
+    // Everything the one line leaves out.
+    var ask = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host)
+      : t.ask ? t.ask : p ? p.lastLine() : "";
+    li.title = [(t.title || "terminal " + id) + " · " + (pulse ? "waiting for you" : dotTitle[s] || s), ask,
+      (t.kind === "session" ? "Outside the hub, read-only · " : "") + t.cli + " on " + shortHost(t.host) + " · " + t.cwd,
+      slot >= 0 ? "In pane " + (slot + 1) : ""].filter(Boolean).join("\n");
   }
   // badgesFor: where it runs. Hub terminals: the Mac. Sessions started elsewhere: OUTSIDE HUB, the Mac, read-only.
   function shortHost(h) { return /macbook/i.test(h) ? "MacBook" : /studio/i.test(h) ? "Studio" : h; }
@@ -261,8 +325,7 @@
       box.appendChild(el("span", "bdg host", shortHost(t.host)));
       box.appendChild(el("span", "bdg ro", "read-only"));
     } else {
-      box.appendChild(el("span", "bdg hub", "HUB"));
-      box.appendChild(el("span", "bdg host", shortHost(t.host)));
+      box.appendChild(el("span", "bdg host", shortHost(t.host))); // a hub terminal is the normal case: no "HUB" chip
     }
   }
   function badge() {
@@ -739,6 +802,7 @@
     else if (k === "Enter") toggleZoom();
     else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
     else if (k === "N" || k === "n") openNew();
+    else if (k === "K" || k === "k") { wsq.focus(); wsq.select(); }
     else if (k === "J" || k === "j") { var w = order.filter(function (id) { return stateOf(id) === "waiting"; }); if (w.length) show(w[0]); }
     else return true;
     e.preventDefault();
@@ -747,7 +811,19 @@
   // Capture phase on the document: runs before xterm sees the key, so a shortcut never reaches the shell.
   document.addEventListener("keydown", function (e) { if (!shortcut(e)) e.stopPropagation(); }, true);
   document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.onclick = function () { setLayout(b.getAttribute("data-layout")); }; });
-  document.getElementById("wsq").addEventListener("input", renderList);
+  var wsq = document.getElementById("wsq");
+  wsq.addEventListener("input", renderList);
+  // The quick switcher: Ctrl+Shift+K (Cmd+K on a Mac) goes to the filter; Enter opens the first match, Down the list.
+  wsq.placeholder = "Go to a session…  (Ctrl+Shift+K)";
+  wsq.addEventListener("keydown", function (e) {
+    var first = list.querySelector(".ws-item");
+    if (e.key === "Enter" && first) { e.preventDefault(); show(order.filter(function (k) { return items[k] === first; })[0]); }
+    else if (e.key === "ArrowDown" && first) { e.preventDefault(); first.focus(); }
+    else if (e.key === "Escape") { wsq.value = ""; renderList(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key.toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); wsq.focus(); wsq.select(); }
+  }, true);
   narrow.addEventListener && narrow.addEventListener("change", layout);
 
   // ------------------------------------------------------------ new terminal

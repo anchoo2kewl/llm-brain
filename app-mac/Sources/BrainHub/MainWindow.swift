@@ -172,6 +172,9 @@ struct MainWindow: View {
 
     private var subtitle: String {
         guard let ref = panes.tree.focusedTerminal, let t = model.terminal(ref) else { return "" }
+        // The session's summary lives here, not in its sidebar row.
+        let state = model.state(ref)
+        if state == .waiting || state == .blocked, let ask = t.ask ?? t.fix, !ask.isEmpty { return "\(AppModel.headline(t)): \(ask)" }
         return "\(t.host) · \(t.cwd)"
     }
 }
@@ -184,8 +187,13 @@ struct Sidebar: View {
     var openInWindow: (TerminalRef) -> Void
     @Binding var failure: String?
     @ViewState private var expanded: Set<TerminalRef> = []
-    /// Parents whose child sessions show. Collapsed by default.
-    @ViewState private var treeOpen: Set<TerminalRef> = []
+    /// Parents whose child sessions show. Collapsed by default; kept across restarts.
+    @AppStorage("sidebar.treeOpen") private var treeOpenStore = ""
+    @AppStorage("sidebar.endedOpen") private var endedOpen = false
+    private var treeOpen: Set<TerminalRef> {
+        get { Set((try? JSONDecoder().decode([TerminalRef].self, from: Data(treeOpenStore.utf8))) ?? []) }
+        nonmutating set { treeOpenStore = String(decoding: (try? JSONEncoder().encode(Array(newValue))) ?? Data(), as: UTF8.self) }
+    }
     @ViewState private var draggingOverSidebar = false
     private var model: AppModel { AppModel.shared }
 
@@ -199,7 +207,9 @@ struct Sidebar: View {
     }
 
     private func toggleTree(_ ref: TerminalRef) {
-        if treeOpen.contains(ref) { treeOpen.remove(ref) } else { treeOpen.insert(ref) }
+        var open = treeOpen
+        if open.contains(ref) { open.remove(ref) } else { open.insert(ref) }
+        treeOpen = open
     }
 
     private func setTree(_ ref: TerminalRef?, open: Bool) -> KeyPress.Result {
@@ -210,12 +220,17 @@ struct Sidebar: View {
     }
 
     var body: some View {
+        let machines = model.machines
+        let all = machines.flatMap { $0.terminals.flatMap(\.all) }
+        let showProvider = Set(all.map(\.terminal.provider)).count > 1
+        let ended = machines.flatMap(\.ended)
+        ScrollViewReader { proxy in
         List(selection: $selection) {
             if let err = model.hubError {
                 Label { Text("Hub offline: \(err)").font(.callout) } icon: { Image(systemName: "wifi.exclamationmark").foregroundStyle(.red) }
             }
             let index = Dictionary(uniqueKeysWithValues: model.orderedRefs.enumerated().map { ($1, $0) })
-            ForEach(model.machines) { m in
+            ForEach(machines) { m in
                 Section {
                     if m.terminals.isEmpty && m.elsewhere.isEmpty {
                         Text("No open terminals").foregroundStyle(.secondary).font(.callout)
@@ -226,10 +241,14 @@ struct Sidebar: View {
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded,
                                     tree: .init(depth: row.depth, children: e.children.count, open: treeOpen.contains(e.ref),
                                                 hub: row.otherHub, toggle: { toggleTree(e.ref) }),
-                                    end: { end(e.ref) })
+                                    showProvider: showProvider, end: { end(e.ref) })
                             .tag(e.ref)
+                            .id(e.ref)
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
+                                Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
+                                    if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                }
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
@@ -268,14 +287,34 @@ struct Sidebar: View {
                         }
                     }
                 } header: {
-                    Text(model.machineLabel(m.name)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    Text(model.machineLabel(m.name).uppercased()).font(.appCaption2).tracking(0.5).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         .help("Drop a terminal here to move its conversation to \(model.machineLabel(m.name))")
                         .onDrop(of: [.utf8PlainText, .plainText], isTargeted: nil) { dropped($0, on: m.name) }
                 }
             }
+            // Ended and failed sessions leave the live list: one collapsed section at the bottom.
+            if !ended.isEmpty {
+                Section {
+                    DisclosureGroup(isExpanded: $endedOpen) {
+                        ForEach(ended) { e in
+                            TerminalRow(ref: e.ref, terminal: e.terminal, number: nil, selected: selection == e.ref, expanded: $expanded,
+                                        showProvider: showProvider, end: { end(e.ref) })
+                                .tag(e.ref)
+                                .id(e.ref)
+                                .contextMenu { Button("Close") { close(e.ref) } }
+                        }
+                    } label: {
+                        Text("Ended (\(ended.count))").font(.appCaption).foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
+        // The order follows activity at once; the selected row stays selected and in view.
+        .onChange(of: model.orderedRefs) { if let s = selection { proxy.scrollTo(s) } }
         .overlay {
-            if !model.loaded { ProgressView() }
+            if !model.loaded { ProgressView("Connecting to the hub…").font(.appCaption) }
+        }
         }
         // Right opens a parent's child sessions, Left closes them.
         .onKeyPress(.rightArrow) { setTree(selection, open: true) }

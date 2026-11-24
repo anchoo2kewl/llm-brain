@@ -1,6 +1,7 @@
 import AppKit
 import BrainHubCore
 import Observation
+import SwiftUI
 import UserNotifications
 
 /// The app's shared state: the saved hubs, what the cluster runs, and the open terminal connections.
@@ -100,7 +101,7 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys))
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys), inputs: inputs)
     }
 
     var machineNames: [String] { machines.map(\.name) }
@@ -132,6 +133,22 @@ final class AppModel {
         return t.needsAnswer || !seen.contains(ref)
     }
     var waitingCount: Int { allRefs.filter(wantsYou).count }
+    /// When the owner last typed, pasted or sent to each terminal from this app. An older hub does not report input,
+    /// so the sidebar order uses this too.
+    private(set) var inputs: [TerminalRef: Date] = [:]
+
+    /// At most once a second per terminal: every key would redraw the sidebar.
+    func noteInput(_ ref: TerminalRef) {
+        let now = Date()
+        if let last = inputs[ref], now.timeIntervalSince(last) < 1 { return }
+        withAnimation(SessionStyle.move) { inputs[ref] = now }
+    }
+
+    /// The row's age and order time: the hub's activity and input, and this app's own input.
+    func recent(_ ref: TerminalRef) -> Date? {
+        terminal(ref).map { recentKey($0, input: inputs[ref]) }
+    }
+
     /// The dot pulses red: the agent waits for you and you have not opened it since.
     func pulses(_ ref: TerminalRef) -> Bool {
         terminal(ref).map { Recency.pulses($0, opened: seen.contains(ref) || focused == ref) } ?? false
@@ -270,7 +287,10 @@ final class AppModel {
             guard client.base == hub else { return } // switched hubs meanwhile
             rememberNodes(nodes, base: client.base)
             let fresh = waiting.subtracting(inboxWaiting)
-            (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
+            // A row that moves glides to its new place (no motion with Reduce Motion).
+            withAnimation(SessionStyle.move) {
+                (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
+            }
             let inFront = NSApp.isActive ? focused : nil
             for (hub, t) in all {
                 let ref = TerminalRef(hub: hub, id: t.id)
@@ -521,6 +541,7 @@ extension AppModel {
     /// Type text into a terminal and press Enter (the reply to a notification).
     func send(_ text: String, to ref: TerminalRef) async {
         struct OK: Decodable {}
+        noteInput(ref)
         do {
             _ = try await HubClient(base: ref.hub).post(Paths.send(ref.id), json: ["text": text, "keys": ["Enter"]], as: OK.self)
             await refresh()
