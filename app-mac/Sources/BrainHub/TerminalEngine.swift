@@ -611,6 +611,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     @objc func copy(_ sender: Any?) { perform("copy_to_clipboard") }
     @objc func paste(_ sender: Any?) {
+        onInput?()
         if let onFiles, let files = PastedFile.read(.general) { onFiles(files) } else { perform("paste_from_clipboard") }
     }
 

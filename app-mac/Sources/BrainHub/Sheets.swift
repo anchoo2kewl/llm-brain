@@ -114,6 +114,7 @@ struct SearchPalette: View {
             .padding(12)
             Divider()
             ScrollViewReader { proxy in
+                let open = self.open
                 List {
                     if !open.isEmpty {
                         Section("Open sessions") {
@@ -126,7 +127,7 @@ struct SearchPalette: View {
                             }
                         }
                     }
-                    Section(hits.isEmpty ? "" : "Conversations") {
+                    if !hits.isEmpty { Section("Conversations") {
                         ForEach(Array(hits.enumerated()), id: \.element.id) { i, hit in
                             row(hit, selected: open.count + i == highlighted)
                                 .id(open.count + i)
@@ -134,7 +135,7 @@ struct SearchPalette: View {
                                 .onTapGesture { highlighted = open.count + i }
                                 .onTapGesture(count: 2) { continueHit(hit) }
                         }
-                    }
+                    } }
                 }
                 .listStyle(.plain)
                 .onChange(of: highlighted) { proxy.scrollTo(highlighted) }
@@ -232,6 +233,7 @@ struct SearchPalette: View {
             let r = try await client.get(Paths.search(q), as: SearchReply.self)
             if Task.isCancelled { return }
             (hits, partial, failure) = (r.sessions, r.partial, nil)
+            highlighted = min(highlighted, max(count - 1, 0)) // fewer results than before: keep a row highlighted
         } catch {
             if !Task.isCancelled { failure = error.localizedDescription }
         }

@@ -17,8 +17,6 @@ public struct Machine: Identifiable, Equatable, Sendable {
     }
     public var name: String
     public var terminals: [Entry]
-    /// Ended and failed terminals that this app still holds, most recent first.
-    public var ended: [Entry] = []
     public var elsewhere: [LiveSession]
     public var id: String { name }
 }
@@ -54,28 +52,40 @@ private enum HubTime {
 
 /// Group terminals by machine. `nodes` (the cluster's machines, this hub first) come first even with nothing open,
 /// so a new terminal can go there; other hosts follow by name. Ended terminals show only when `keep` holds them
-/// (they were opened in this app), in `ended`. Rows are most recent first (`recentKey`, with `inputs`: when this app
+/// (they were opened in this app), in `endedSessions`. Rows are most recent first (`recentKey`, with `inputs`: when this app
 /// last sent input to each terminal); the conversations running elsewhere: higher id first.
 public func machines(terminals: [(hub: String, terminal: Terminal)], live: [LiveSession], nodes: [String],
                      keep: Set<TerminalRef>, inputs: [TerminalRef: Date] = [:]) -> [Machine] {
-    var open: [Machine.Entry] = [], ended: [Machine.Entry] = []
-    for (hub, t) in terminals {
-        let ref = TerminalRef(hub: hub, id: t.id)
-        guard t.isOpen || keep.contains(ref) else { continue }
-        let key = recentKey(t, input: inputs[ref])
-        let e = Machine.Entry(ref: ref, terminal: t, recent: key, rank: key)
-        if t.isOpen { open.append(e) } else { ended.append(e) }
-    }
-    var byHost: [String: [Machine.Entry]] = [:], endedByHost: [String: [Machine.Entry]] = [:]
-    for e in sessionTree(open) { byHost[e.terminal.host, default: []].append(e) }
-    for e in ended.sorted(by: mostRecentFirst) { endedByHost[e.terminal.host, default: []].append(e) }
+    var byHost: [String: [Machine.Entry]] = [:]
+    for e in sessionTree(entries(terminals, open: true, keep: keep, inputs: inputs)) { byHost[e.terminal.host, default: []].append(e) }
     let liveByHost = Dictionary(grouping: live, by: \.host)
     var names: [String] = []
     for n in nodes where !names.contains(n) { names.append(n) }
-    names += Set(byHost.keys).union(liveByHost.keys).union(endedByHost.keys).subtracting(names).sorted()
+    names += Set(byHost.keys).union(liveByHost.keys).subtracting(names).sorted()
     return names.map { name in
-        Machine(name: name, terminals: byHost[name] ?? [], ended: endedByHost[name] ?? [],
-                elsewhere: (liveByHost[name] ?? []).sorted { $0.id > $1.id })
+        Machine(name: name, terminals: byHost[name] ?? [],
+                // Conversations outside the hub: their file time is their activity. Ties: the higher id.
+                elsewhere: (liveByHost[name] ?? []).sorted { a, b in
+                    let x = parseHubTime(a.updated) ?? .distantPast, y = parseHubTime(b.updated) ?? .distantPast
+                    return x != y ? x > y : a.id > b.id
+                })
+    }
+}
+
+/// Ended and failed terminals that this app still holds (`keep`), for the one "Ended" group: most recent first.
+public func endedSessions(terminals: [(hub: String, terminal: Terminal)], keep: Set<TerminalRef>,
+                          inputs: [TerminalRef: Date] = [:]) -> [Machine.Entry] {
+    entries(terminals, open: false, keep: keep, inputs: inputs).sorted(by: mostRecentFirst)
+}
+
+/// The open (or the kept ended) terminals as rows with their order key.
+func entries(_ terminals: [(hub: String, terminal: Terminal)], open: Bool, keep: Set<TerminalRef>,
+             inputs: [TerminalRef: Date]) -> [Machine.Entry] {
+    terminals.compactMap { hub, t in
+        let ref = TerminalRef(hub: hub, id: t.id)
+        guard t.isOpen == open, open || keep.contains(ref) else { return nil }
+        let key = recentKey(t, input: inputs[ref])
+        return Machine.Entry(ref: ref, terminal: t, recent: key, rank: key)
     }
 }
 

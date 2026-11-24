@@ -66,10 +66,9 @@
     var top = rows.filter(function (t) { return !parentOf(t); }).map(build);
     // Bad data (a session that is its own ancestor) has no root: show those sessions at the top level, never hide them.
     rows.forEach(function (t) { if (placed.indexOf(t) < 0) top.push(build(t)); });
-    var rank = byRecent(function (t) { return t.__rank; });
-    top.forEach(function (n) { n.t.__rank = n.rank; });
-    top.sort(function (a, b) { return rank(a.t, b.t); });
-    top.forEach(function (n) { delete n.t.__rank; });
+    var rankOf = new Map(top.map(function (n) { return [n.t, n.rank]; }));
+    var byRank = byRecent(function (t) { return rankOf.get(t); });
+    top.sort(function (a, b) { return byRank(a.t, b.t); });
     function walk(n, depth, parentHub, show) {
       if (show) out.push({ t: n.t, depth: depth, kids: n.kids.length, otherHub: depth > 0 && n.t.hub !== parentHub ? n.t.hub : "" });
       n.kids.forEach(function (c) { walk(c, depth + 1, n.t.hub, show && !!open[n.t.id]); });

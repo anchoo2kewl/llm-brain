@@ -58,7 +58,7 @@ struct TerminalRow: View {
                     TimelineView(.periodic(from: .now, by: 30)) { ctx in
                         Text(Recency.short(recent, now: ctx.date)).font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary)
                     }
-                    .opacity(hovering && end != nil ? 0 : 1)
+                    .opacity(end != nil && (hovering || model.closingTerminals.contains(ref)) ? 0 : 1)
                     if let end, hovering || model.closingTerminals.contains(ref) {
                         SessionCloseButton(closing: model.closingTerminals.contains(ref), action: end)
                             .help("End \(Self.name(t)): stops its CLI on \(t.host)")

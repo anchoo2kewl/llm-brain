@@ -243,16 +243,18 @@ import BrainHubCore
                           nodes: ["studio", "laptop"], keep: [TerminalRef(hub: hub, id: 5)])
         #expect(ms.map(\.name) == ["studio", "laptop", "other"])
         #expect(ms[0].terminals.map(\.terminal.id) == [3], "open ones in the list")
-        #expect(ms[0].ended.map(\.terminal.id) == [5], "ended ones only when kept, in their own section")
+        let ended = endedSessions(terminals: [(hub, t(2, "studio", "ended", "2")), (hub, t(5, "studio", "ended", "5")), (hub, t(6, "laptop", "failed", "6"))],
+                                  keep: [TerminalRef(hub: hub, id: 5), TerminalRef(hub: hub, id: 6)])
+        #expect(ended.map(\.terminal.id) == [6, 5], "ended ones only when kept, one group for every machine")
         #expect(ms[1].elsewhere.map(\.id) == [9])
     }
 }
 
 @Suite struct SidebarOrder {
     /// A row from hub 0.1.12: `act` = last_activity_at, `input` = last_input_at (seconds after a fixed start).
-    func term(_ id: Int64, act: Int? = nil, input: Int? = nil, started: Int = 0, updated: Int = 0, state: AgentState? = nil) -> Terminal {
+    func term(_ id: Int64, act: Int? = nil, input: Int? = nil, started: Int = 0, updated: Int? = 0, state: AgentState? = nil) -> Terminal {
         func at(_ s: Int) -> String { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_800_000_000 + Double(s))) }
-        var t = Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: at(updated), state: state)
+        var t = Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated.map(at) ?? "", state: state)
         (t.started, t.lastActivity, t.lastInput) = (at(started), act.map(at), input.map(at))
         return t
     }
@@ -282,7 +284,7 @@ import BrainHubCore
 
     @Test func olderHubUsesUpdatedThenStart() {
         #expect(ids([term(1, updated: 50), term(2, updated: 40)]) == [1, 2])
-        #expect(ids([term(1, started: 5), term(2, started: 6)]) == [2, 1])
+        #expect(ids([term(1, started: 6, updated: nil), term(2, started: 5, updated: nil)]) == [1, 2], "start time only when there is nothing else")
     }
 
     @Test func aParentRisesWithItsChildrenAndChildrenFollowTheirOwnActivity() {

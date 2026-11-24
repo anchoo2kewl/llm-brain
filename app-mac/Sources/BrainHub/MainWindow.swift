@@ -223,7 +223,8 @@ struct Sidebar: View {
         let machines = model.machines
         let all = machines.flatMap { $0.terminals.flatMap(\.all) }
         let showProvider = Set(all.map(\.terminal.provider)).count > 1
-        let ended = machines.flatMap(\.ended)
+        let ended = model.ended
+        let treeOpen = self.treeOpen // decoded once per render
         ScrollViewReader { proxy in
         List(selection: $selection) {
             if let err = model.hubError {

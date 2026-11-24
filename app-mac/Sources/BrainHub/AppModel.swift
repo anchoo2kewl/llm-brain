@@ -133,6 +133,9 @@ final class AppModel {
         return t.needsAnswer || !seen.contains(ref)
     }
     var waitingCount: Int { allRefs.filter(wantsYou).count }
+    /// Ended terminals this app still holds: one "Ended" group, most recent first.
+    var ended: [Machine.Entry] { endedSessions(terminals: terminals, keep: Set(sessions.keys), inputs: inputs) }
+
     /// When the owner last typed, pasted or sent to each terminal from this app. An older hub does not report input,
     /// so the sidebar order uses this too.
     private(set) var inputs: [TerminalRef: Date] = [:]
@@ -146,7 +149,7 @@ final class AppModel {
 
     /// The row's age and order time: the hub's activity and input, and this app's own input.
     func recent(_ ref: TerminalRef) -> Date? {
-        terminal(ref).map { recentKey($0, input: inputs[ref]) }
+        terminal(ref).map { recentKey($0, input: inputs[ref]) }.flatMap { $0 == .distantPast ? nil : $0 }
     }
 
     /// The dot pulses red: the agent waits for you and you have not opened it since.

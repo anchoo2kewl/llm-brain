@@ -81,7 +81,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-slot.ext.focus{border-color:var(--ext);box-shadow:0 0 0 1px var(--ext)}
 .ws-slot.ext .ws-slot-head{background:color-mix(in srgb,var(--ext) 12%,transparent)}
 .ws-pen{border:0;background:none;color:var(--mut);padding:0 3px;font-size:12px;cursor:pointer;opacity:0}.ws-item:hover .ws-pen,.ws-item:focus-within .ws-pen,.ws-pen:focus-visible{opacity:1}
-.ws-pen{display:none}.ws-item:hover .ws-pen,.ws-item:focus-within .ws-pen{display:inline}.ws-item:hover .ws-it-age{display:none}.ws-pen:hover{color:var(--acc)}
+.ws-item:hover .ws-it-age,.ws-item:focus-within .ws-it-age{display:none}.ws-pen:hover{color:var(--acc)}
 .ws-slot-title{cursor:text;border-radius:4px}.ws-slot-title:hover{background:color-mix(in srgb,var(--acc) 10%,transparent)}
 .ws-slot-title[contenteditable=true]{outline:1px solid var(--acc);background:var(--bg);padding:0 4px;max-width:60%}
 .ws-editor{position:absolute;left:0;right:0;top:29px;bottom:0;width:100%;height:calc(100% - 29px);border:0;background:var(--bg);z-index:3}
@@ -89,7 +89,7 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-close{font-size:15px;line-height:1}.ws-close:hover,.ws-close:focus-visible{color:var(--bad)}.ws-close:disabled{opacity:.4;cursor:progress}
 /* touch (iPad, phones): no hover, so × is always shown, and every pane button is a 44 px target */
 @media (hover:none),(pointer:coarse),(max-width:1100px){
-  .ws-item .ws-close{opacity:1;display:inline-flex}
+  .ws-item .ws-close{opacity:1}
   .ws-close,.ws-slot-head .ws-btn{min-width:var(--tap);min-height:var(--tap);font-size:17px;display:inline-flex;align-items:center;justify-content:center}
   .ws-slot-head{gap:2px;padding:0 4px}
   .ws-slot-head .ws-slot-meta{display:none}
@@ -127,3 +127,6 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 @media (prefers-reduced-motion:reduce){.ws-item .dot-s.needs{animation:none}}
 .ws-kids{border:0;background:none;color:var(--mut);font:600 11px/1 var(--mono);padding:2px 4px;border-radius:4px;cursor:pointer;flex:none}
 .ws-kids:hover{color:var(--acc)}.ws-kids:focus-visible{outline:2px solid var(--acc)}
+/* The rename and end buttons stay in the focus order but never change the row height. */
+.ws-it-top .ws-pen,.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;font-size:12px;padding:0 2px;flex:none} /* ui.css gives every button 38 px */
+@media (hover:none),(pointer:coarse){.ws-it-top .ws-pen{height:auto}}

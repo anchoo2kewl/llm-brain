@@ -25,8 +25,8 @@ test("order: a spinner, a state flip or jitter under a second never moves a row;
   a.last_activity_at = "2027-01-15T08:00:20.900Z"; b.last_activity_at = "2027-01-15T08:00:20.100Z";
   assert.deepEqual(ids([a, b]), [2, 1]);
   assert.deepEqual(ids([term(1, { updated: 50 }), term(2, { updated: 40 })]), [1, 2], "an older hub: updated");
-  const s9 = { id: "s9", sid: 9, kind: "session", updated: at(999) };
-  assert.deepEqual(ids([s9, term(1, { act: 1 })]), [1, "s9"], "sessions running elsewhere follow");
+  const s9 = { id: "s9", sid: 9, kind: "session", updated: at(999) }, s5 = { id: "s5", sid: 5, kind: "session", updated: at(1000) };
+  assert.deepEqual(ids([s9, term(1, { act: 1 }), s5]), [1, "s5", "s9"], "sessions running elsewhere follow, by their own activity");
 });
 
 test("recency: short times, the later of activity and input, the dot fades", () => {

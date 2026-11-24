@@ -171,15 +171,16 @@
     var all = order.map(function (id) { return infos[id]; });
     var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
     var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
-    var mixed = live.reduce(function (m, t) { m[t.provider || t.cli] = 1; return m; }, {});
+    var mixed = live.reduce(function (m, t) { m[provOf(t)] = 1; return m; }, {});
     mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
-    var rows = q ? live.map(function (t) { return { t: t, depth: 0, kids: 0, otherHub: "" }; })
+    // The filter is the quick switcher: names that start with the text first, then the rest that match.
+    var rows = q ? window.wsList.switcher(live.map(function (t) { return (t.title || "") + " " + folder(t) + " " + t.cli + " " + t.host; }), q, live.length)
+        .map(function (i) { return { t: live[i], depth: 0, kids: 0, otherHub: "" }; })
       : window.wsList.treeRows(live, treeOpen, keyOf);
-    function put(r) {
+    function put(r, inEnded) {
       var t = r.t, id = t.id;
-      if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
-      if (t.kind === "session" && !header) {
+      if (t.kind === "session" && !header && !inEnded) {
         header = true;
         var h = el("li", "ws-sect", "Running elsewhere");
         h.setAttribute("role", "presentation");
@@ -200,20 +201,22 @@
       li.parts.hub.hidden = !r.otherHub;
       li.kids = r.kids;
     }
-    rows.forEach(put);
+    rows.forEach(function (r) { put(r, false); });
     // Ended and failed sessions leave the live list: one collapsed group at the bottom.
+    var eh = null;
     if (ended.length && !q) {
-      var eh = el("li", "ws-sect ws-ended", (endedOpen ? "▾ " : "▸ ") + "Ended (" + ended.length + ")");
+      eh = el("li", "ws-sect ws-ended", (endedOpen ? "▾ " : "▸ ") + "Ended (" + ended.length + ")");
       eh.setAttribute("role", "button"); eh.tabIndex = 0; eh.setAttribute("aria-expanded", endedOpen ? "true" : "false");
       eh.onclick = eh.onkeydown = function (e) {
         if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault(); endedOpen = !endedOpen; setPref("ws.endedOpen", endedOpen); renderList();
       };
       list.appendChild(eh);
-      if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }); });
+      if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }, true); });
     }
     list.scrollTop = top;
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+    else if (focused && focused.classList.contains("ws-ended") && eh) eh.focus({ preventScroll: true }); // a new header element
     var now = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
     if (now === was) return;
     // The order changed: each moved row glides to its new place (none with reduced motion), and the selected row
@@ -283,8 +286,13 @@
     li.parts = { dot: dot, title: title, dir: dir, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
-  function folder(t) { var c = (t.cwd || "").replace(/\/+$/, ""); return c === "~" || !c ? "~" : c.split("/").pop(); }
-  var PROV = { claude: "CC", codex: "CX", antigravity: "AG" };
+  function folder(t) {
+    var raw = t.cwd || "", c = raw.replace(/\/+$/, "");
+    if (!c) return /^\/+$/.test(raw) ? "/" : "~";
+    return c === "~" ? "~" : c.split("/").pop();
+  }
+  var PROV = { claude: "CC", codex: "CX", antigravity: "AG", "claude code": "CC" };
+  function provOf(t) { return (t.provider || t.cli || "").toLowerCase(); }
   var seenIds = {}, seenKey = {};
   function paintItem(id) {
     var li = items[id], t = infos[id];
@@ -305,7 +313,7 @@
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
     li.parts.dir.textContent = folder(t);
     li.parts.prov.hidden = !li.mixed;
-    li.parts.prov.textContent = PROV[t.provider] || ">_";
+    li.parts.prov.textContent = PROV[provOf(t)] || ">_";
     li.parts.close.sync();
     var slot = slotOf(id);
     li.parts.num.hidden = true; // the pane header shows its number; the tooltip says it here
