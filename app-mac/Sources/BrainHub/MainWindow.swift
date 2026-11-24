@@ -174,7 +174,9 @@ struct MainWindow: View {
         guard let ref = panes.tree.focusedTerminal, let t = model.terminal(ref) else { return "" }
         // The session's summary lives here, not in its sidebar row.
         let state = model.state(ref)
-        if state == .waiting || state == .blocked, let ask = t.ask ?? t.fix, !ask.isEmpty { return "\(AppModel.headline(t)): \(ask)" }
+        if state == .waiting || state == .blocked, let ask = [t.ask, t.fix].compactMap({ $0 }).first(where: { !$0.isEmpty }) {
+            return "\(AppModel.headline(t)): \(ask)"
+        }
         return "\(t.host) · \(t.cwd)"
     }
 }
@@ -300,10 +302,14 @@ struct Sidebar: View {
                     DisclosureGroup(isExpanded: $endedOpen) {
                         ForEach(ended) { e in
                             TerminalRow(ref: e.ref, terminal: e.terminal, number: nil, selected: selection == e.ref, expanded: $expanded,
-                                        showProvider: showProvider, end: { end(e.ref) })
+                                        showProvider: showProvider, end: nil)
                                 .tag(e.ref)
                                 .id(e.ref)
-                                .contextMenu { Button("Close") { close(e.ref) } }
+                                .contextMenu {
+                                    Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
+                                        if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                    }
+                                }
                         }
                     } label: {
                         Text("Ended (\(ended.count))").font(.appCaption).foregroundStyle(.secondary)
@@ -312,7 +318,7 @@ struct Sidebar: View {
             }
         }
         // The order follows activity at once; the selected row stays selected and in view.
-        .onChange(of: model.orderedRefs) { if let s = selection { proxy.scrollTo(s) } }
+        .onChange(of: model.allRefs) { if let s = selection { proxy.scrollTo(s) } }
         .overlay {
             if !model.loaded { ProgressView("Connecting to the hub…").font(.appCaption) }
         }

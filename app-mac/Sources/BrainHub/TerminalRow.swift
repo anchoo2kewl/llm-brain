@@ -84,7 +84,6 @@ struct TerminalRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .help(Self.tooltip(t, state: state, number: number))
-        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAction(named: "End Terminal") { end?() }
     }
@@ -99,7 +98,7 @@ struct TerminalRow: View {
     /// Everything the one line leaves out.
     static func tooltip(_ t: Terminal, state: AgentState, number: Int?) -> String {
         var lines = [name(t) + " · " + help(state, t)]
-        if (state == .waiting || state == .blocked), let ask = t.ask ?? t.fix, !ask.isEmpty { lines.append(ask) }
+        if state == .waiting || state == .blocked, let ask = [t.ask, t.fix].compactMap({ $0 }).first(where: { !$0.isEmpty }) { lines.append(ask) }
         lines.append("\(t.badge) on \(t.host) · \(t.cwd)" + (t.branch.map { $0.isEmpty ? "" : " · \($0)" } ?? ""))
         if let p = t.profile, !p.isEmpty { lines.append("Account: \(p)" + (t.account.map { " · \($0)" } ?? "")) }
         if let n = t.subagents, n > 0 { lines.append("\(n) subagent\(n == 1 ? "" : "s") running") }

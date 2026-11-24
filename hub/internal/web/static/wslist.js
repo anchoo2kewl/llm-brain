@@ -86,7 +86,13 @@
     var inside = idx.filter(function (i) { return low[i].indexOf(q) > 0; });
     return starts.concat(inside).slice(0, limit);
   }
-  var api = { recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
+  // A reply the terminal sends by itself, not the owner's input: device status and cursor position reports
+  // (ESC[0n, ESC[12;5R, ESC[?1;1R), device attributes (ESC[?62c, ESC[>0;10;1c), focus in and out (ESC[I, ESC[O)
+  // and OSC answers (ESC]…BEL or ESC]…ESC\).
+  function isReply(data) {
+    return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\))+$/.test(data);
+  }
+  var api = { isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
     pulses: pulses, treeRows: treeRows, switcher: switcher };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;

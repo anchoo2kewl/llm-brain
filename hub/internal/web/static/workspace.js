@@ -152,8 +152,9 @@
     var now = Date.now();
     if (inputs[id] && now - inputs[id] < 1000) return;
     inputs[id] = now; setPref("ws.inputs", inputs);
-    clearTimeout(inputTimer);
+    if (inputTimer) return; // one update per second while the owner types
     inputTimer = setTimeout(function () {
+      inputTimer = null;
       order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); });
       renderList();
     }, 1000);
@@ -165,22 +166,25 @@
     var focused = list.contains(document.activeElement) ? document.activeElement : null; // and drop the focus
     var before = {}; // where each row was: a moved row glides from there
     Object.keys(items).forEach(function (k) { if (items[k].isConnected) before[k] = items[k].getBoundingClientRect().top; });
-    var was = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
+    function liveOrder() { // the live rows in list order: only a change here moves the view to the selection
+      return Array.prototype.filter.call(list.children, function (li) { return li.dataset.id && !li.ended; }).map(function (li) { return li.dataset.id; }).join(",");
+    }
+    var was = liveOrder(), hadRows = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
     list.textContent = "";
     var header = false;
     var all = order.map(function (id) { return infos[id]; });
     var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
     var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
-    var mixed = live.reduce(function (m, t) { m[provOf(t)] = 1; return m; }, {});
+    var mixed = live.reduce(function (m, t) { m[PROV[provOf(t)] || ">_"] = 1; return m; }, {});
     mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
     // The filter is the quick switcher: names that start with the text first, then the rest that match.
-    var rows = q ? window.wsList.switcher(live.map(function (t) { return (t.title || "") + " " + folder(t) + " " + t.cli + " " + t.host; }), q, live.length)
-        .map(function (i) { return { t: live[i], depth: 0, kids: 0, otherHub: "" }; })
+    var rows = q ? window.wsList.switcher(all.map(function (t) { return (t.title || "terminal " + t.id) + " " + folder(t) + " " + t.cli + " " + t.host; }), q, all.length)
+        .map(function (i) { return { t: all[i], depth: 0, kids: 0, otherHub: "" }; })
       : window.wsList.treeRows(live, treeOpen, keyOf);
     function put(r, inEnded) {
       var t = r.t, id = t.id;
-      if (t.kind === "session" && !header && !inEnded) {
+      if (t.kind === "session" && !header && !inEnded && !q) { // a search is one flat list
         header = true;
         var h = el("li", "ws-sect", "Running elsewhere");
         h.setAttribute("role", "presentation");
@@ -200,6 +204,7 @@
       li.parts.hub.textContent = r.otherHub;
       li.parts.hub.hidden = !r.otherHub;
       li.kids = r.kids;
+      li.ended = !!inEnded;
     }
     rows.forEach(function (r) { put(r, false); });
     // Ended and failed sessions leave the live list: one collapsed group at the bottom.
@@ -217,10 +222,11 @@
     list.scrollTop = top;
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
     else if (focused && focused.classList.contains("ws-ended") && eh) eh.focus({ preventScroll: true }); // a new header element
-    var now = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
-    if (now === was) return;
-    // The order changed: each moved row glides to its new place (none with reduced motion), and the selected row
-    // stays in view.
+    if (Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",") === hadRows) return;
+    // The live order changed: the selected row stays in view (before the glide is measured). Then each moved row
+    // glides to its new place (none with reduced motion).
+    var on = list.querySelector(".ws-item.on");
+    if (on && !q && liveOrder() !== was) on.scrollIntoView({ block: "nearest" });
     if (!calm.matches) Object.keys(before).forEach(function (k) {
       var li = items[k];
       if (!li || !li.isConnected) return;
@@ -230,8 +236,6 @@
       li.getBoundingClientRect(); // apply the start position before the transition
       li.style.transition = "transform 200ms ease"; li.style.transform = "";
     });
-    var on = list.querySelector(".ws-item.on");
-    if (on) on.scrollIntoView({ block: "nearest" });
   }
   function setTree(id, open) {
     if (open) treeOpen[id] = true; else delete treeOpen[id];
@@ -273,7 +277,10 @@
     pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
     var prev = el("div", "ws-it-prev"); // only a close error, for a moment
     var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; setTimeout(function () { prev.textContent = ""; }, 6000); });
-    top.append(dot, title, dir, hub, prov, kids, num, age, pen, x);
+    // The age and the buttons share one place: the buttons show over the age on hover or focus (no dead space).
+    var acts = el("span", "ws-acts"), btns = el("span", "ws-btns");
+    btns.append(pen, x); acts.append(age, btns);
+    top.append(dot, title, dir, hub, prov, kids, num, acts);
     li.append(top, prev);
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {

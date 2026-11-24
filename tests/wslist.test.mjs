@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher } =
+const { isReply, recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher } =
   createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
 const at = (s) => new Date(Date.parse("2027-01-15T08:00:00Z") + s * 1000).toISOString();
 const term = (id, f = {}) => ({ id, updated: at(f.updated ?? 0), started: at(f.started ?? 0),
@@ -70,4 +70,10 @@ test("quick switcher: names that start with the query first, in list order", () 
   assert.deepEqual(switcher(names, "db"), [1, 4]);
   assert.deepEqual(switcher(names, "s"), [3, 0, 2]);
   assert.deepEqual(switcher(names, "", 2), [0, 1]);
+});
+
+test("terminal replies are not owner input", () => {
+  for (const r of ["\x1b[0n", "\x1b[12;5R", "\x1b[?1;1R", "\x1b[?62;22c", "\x1b[>0;10;1c", "\x1b[I", "\x1b[O",
+    "\x1b]11;rgb:0d0d/1111/1717\x07", "\x1b]10;rgb:e6e6/eded/f3f3\x1b\\", "\x1b[I\x1b[12;5R"]) assert.ok(isReply(r), JSON.stringify(r));
+  for (const k of ["a", "\r", "\x1b[A", "\x1b[1;5D", "\x1b", "\x03", "hello\x1b[0n", "\x1b[200~text\x1b[201~"]) assert.ok(!isReply(k), JSON.stringify(k));
 });

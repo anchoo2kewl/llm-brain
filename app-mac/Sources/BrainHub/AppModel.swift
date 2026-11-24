@@ -101,7 +101,7 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys), inputs: inputs)
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs)
     }
 
     var machineNames: [String] { machines.map(\.name) }
@@ -544,9 +544,9 @@ extension AppModel {
     /// Type text into a terminal and press Enter (the reply to a notification).
     func send(_ text: String, to ref: TerminalRef) async {
         struct OK: Decodable {}
-        noteInput(ref)
         do {
             _ = try await HubClient(base: ref.hub).post(Paths.send(ref.id), json: ["text": text, "keys": ["Enter"]], as: OK.self)
+            noteInput(ref) // only input the hub took moves the row
             await refresh()
         } catch { NSLog("Brain Hub: reply failed: %@", error.localizedDescription) }
     }

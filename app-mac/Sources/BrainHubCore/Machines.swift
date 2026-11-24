@@ -28,9 +28,11 @@ public struct Machine: Identifiable, Equatable, Sendable {
 public func recentKey(_ t: Terminal, input: Date? = nil) -> Date {
     let hub = [t.lastActivity, t.lastInput].compactMap { $0.flatMap(parseHubTime) }
     let base = hub.max() ?? parseHubTime(t.updated)
-    let d = [base, input].compactMap { $0 }.max() ?? t.started.flatMap(parseHubTime) ?? .distantPast
-    return Date(timeIntervalSince1970: d.timeIntervalSince1970.rounded(.down))
+    return wholeSeconds([base, input].compactMap { $0 }.max() ?? t.started.flatMap(parseHubTime) ?? .distantPast)
 }
+
+/// Whole seconds: a change smaller than one second never reorders the list.
+func wholeSeconds(_ d: Date) -> Date { Date(timeIntervalSince1970: d.timeIntervalSince1970.rounded(.down)) }
 
 /// Most recent first; ties: the higher id.
 public func mostRecentFirst(_ a: Machine.Entry, _ b: Machine.Entry) -> Bool {
@@ -51,13 +53,12 @@ private enum HubTime {
 }
 
 /// Group terminals by machine. `nodes` (the cluster's machines, this hub first) come first even with nothing open,
-/// so a new terminal can go there; other hosts follow by name. Ended terminals show only when `keep` holds them
-/// (they were opened in this app), in `endedSessions`. Rows are most recent first (`recentKey`, with `inputs`: when this app
+/// so a new terminal can go there; other hosts follow by name. Ended terminals are in `endedSessions`. Rows are most recent first (`recentKey`, with `inputs`: when this app
 /// last sent input to each terminal); the conversations running elsewhere: higher id first.
 public func machines(terminals: [(hub: String, terminal: Terminal)], live: [LiveSession], nodes: [String],
-                     keep: Set<TerminalRef>, inputs: [TerminalRef: Date] = [:]) -> [Machine] {
+                     inputs: [TerminalRef: Date] = [:]) -> [Machine] {
     var byHost: [String: [Machine.Entry]] = [:]
-    for e in sessionTree(entries(terminals, open: true, keep: keep, inputs: inputs)) { byHost[e.terminal.host, default: []].append(e) }
+    for e in sessionTree(entries(terminals, open: true, keep: [], inputs: inputs)) { byHost[e.terminal.host, default: []].append(e) }
     let liveByHost = Dictionary(grouping: live, by: \.host)
     var names: [String] = []
     for n in nodes where !names.contains(n) { names.append(n) }
@@ -66,7 +67,7 @@ public func machines(terminals: [(hub: String, terminal: Terminal)], live: [Live
         Machine(name: name, terminals: byHost[name] ?? [],
                 // Conversations outside the hub: their file time is their activity. Ties: the higher id.
                 elsewhere: (liveByHost[name] ?? []).sorted { a, b in
-                    let x = parseHubTime(a.updated) ?? .distantPast, y = parseHubTime(b.updated) ?? .distantPast
+                    let x = wholeSeconds(parseHubTime(a.updated) ?? .distantPast), y = wholeSeconds(parseHubTime(b.updated) ?? .distantPast)
                     return x != y ? x > y : a.id > b.id
                 })
     }

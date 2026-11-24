@@ -240,13 +240,19 @@ import BrainHubCore
                                       (hub, t(3, "studio", "live", "3")), (hub, t(4, "other", "starting", "4")),
                                       (hub, t(5, "studio", "ended", "5"))],
                           live: live,
-                          nodes: ["studio", "laptop"], keep: [TerminalRef(hub: hub, id: 5)])
+                          nodes: ["studio", "laptop"])
         #expect(ms.map(\.name) == ["studio", "laptop", "other"])
         #expect(ms[0].terminals.map(\.terminal.id) == [3], "open ones in the list")
         let ended = endedSessions(terminals: [(hub, t(2, "studio", "ended", "2")), (hub, t(5, "studio", "ended", "5")), (hub, t(6, "laptop", "failed", "6"))],
                                   keep: [TerminalRef(hub: hub, id: 5), TerminalRef(hub: hub, id: 6)])
         #expect(ended.map(\.terminal.id) == [6, 5], "ended ones only when kept, one group for every machine")
         #expect(ms[1].elsewhere.map(\.id) == [9])
+        let more = try JSONDecoder().decode([LiveSession].self, from: Data(#"""
+            [{"id":3,"title":"a","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:20.900Z","messages":1},
+             {"id":4,"title":"b","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:20.100Z","messages":1},
+             {"id":2,"title":"c","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:30Z","messages":1}]
+            """#.utf8))
+        #expect(machines(terminals: [], live: more, nodes: ["m"])[0].elsewhere.map(\.id) == [2, 4, 3], "by activity, whole seconds, ties by id")
     }
 }
 
@@ -260,7 +266,7 @@ import BrainHubCore
     }
     func ids(_ ts: [Terminal], inputs: [Int64: Int] = [:]) -> [Int64] {
         let local = Dictionary(uniqueKeysWithValues: inputs.map { (TerminalRef(hub: "h", id: $0.key), Date(timeIntervalSince1970: 1_800_000_000 + Double($0.value))) })
-        return machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [], inputs: local)[0].terminals.map(\.ref.id)
+        return machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], inputs: local)[0].terminals.map(\.ref.id)
     }
 
     @Test func outputAndInputMoveARowUp() {
@@ -299,13 +305,13 @@ import BrainHubCore
                   node(1, "laptop", parent: ("studio", 2), act: 2), // same id, another hub
                   node(8, "studio", act: 30),
                   node(9, "studio", parent: ("studio", 77), act: 5)] // parent not listed: top level
-        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals
         #expect(top.map(\.terminal.id) == [1, 8, 9], "the conductor rises: its child worked at 50")
         #expect(top[0].children.map(\.terminal.id) == [2, 3], "children by their own activity")
         #expect(top[0].children[0].children.map { $0.terminal.hubNode } == ["laptop"])
         #expect(top[0].all.count == 4)
         let loop = [node(5, "s", parent: ("s", 6), act: 1), node(6, "s", parent: ("s", 5), act: 2), node(7, "s", parent: ("s", 7), act: 3)]
-        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals
         #expect(shown.flatMap(\.all).count == 3, "a loop in bad data never hides a session")
     }
 }
