@@ -223,20 +223,29 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .task(id: model.config.hubs.map(\.url)) {
-            await withTaskGroup(of: (String, HubVersions).self) { group in
-                for url in model.config.hubs.map(\.url) where versions[url] == nil {
-                    group.addTask {
-                        guard let client = try? HubClient(base: url) else { return (url, HubVersions(health: nil, status: nil)) }
-                        let health = try? await client.get("/api/hub-update/health", as: HubVersions.Reply.self)
-                        let status = health == nil ? nil : try? await client.get("/api/hub-update", as: HubVersions.Reply.self, timeout: 45)
-                        return (url, HubVersions(health: health, status: status))
-                    }
-                }
-                for await (url, v) in group { versions[url] = v }
+            // A hub that did not answer is asked again every minute while Settings is open.
+            while !Task.isCancelled {
+                await loadVersions()
+                if model.config.hubs.allSatisfy({ versions[$0.url]?.running != nil }) { return }
+                try? await Task.sleep(for: .seconds(60))
             }
         }
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func loadVersions() async {
+        await withTaskGroup(of: (String, HubVersions).self) { group in
+            for url in model.config.hubs.map(\.url) where versions[url]?.running == nil {
+                group.addTask {
+                    guard let client = try? HubClient(base: url) else { return (url, HubVersions(health: nil, status: nil)) }
+                    let health = try? await client.get("/api/hub-update/health", as: HubVersions.Reply.self)
+                    let status = health == nil ? nil : try? await client.get("/api/hub-update", as: HubVersions.Reply.self, timeout: 45)
+                    return (url, HubVersions(health: health, status: status))
+                }
+            }
+            for await (url, v) in group { versions[url] = v }
+        }
     }
 
     private func add() {
