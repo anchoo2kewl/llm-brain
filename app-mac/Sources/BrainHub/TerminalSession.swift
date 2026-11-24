@@ -30,7 +30,7 @@ final class TerminalSession {
         engine.onBell = { [weak self] in if let self { self.model?.bell(self.ref) } }
         engine.onExit = { [weak self] in Task { await self?.exited() } }
         engine.onFiles = { [weak self] files in self?.upload(files) }
-        engine.onReturn = { [weak self] in if self?.pasted.isEmpty == false { self?.pasted = [] } }
+        engine.onReturn = { [weak self] in self?.clearPreviews() }
         connect()
     }
 
@@ -115,6 +115,8 @@ final class TerminalSession {
     }
 
     func hidePreview(_ id: UUID) { pasted.removeAll { $0.id == id } }
+    /// The message went to the CLI (Return, or ⌃Return through the key router).
+    func clearPreviews() { if !pasted.isEmpty { pasted = [] } }
 
     /// Bytes as if typed: send-prefix, copy-mode.
     func send(_ d: Data) { engine.send(d) }

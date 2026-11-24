@@ -278,7 +278,7 @@ final class AppModel {
                     if primed, fresh.contains(ref), sessions[ref] == nil { notify(ref) }
                     continue
                 }
-                let key = "\(s.rawValue)/\(t.askKind ?? "")/\(t.needsOwner == true)/\(t.ask ?? "")"
+                let key = "\(s.rawValue)/\(t.askKind ?? "")/\(t.ask ?? "")" // a new question marks it again
                 guard lastState.updateValue(key, forKey: ref) != key else { continue }
                 if ref == inFront { seen.insert(ref) } else { seen.remove(ref) }
                 if primed, ref != inFront, s == .waiting || s == .blocked { notify(ref) }

@@ -71,17 +71,19 @@ public func sessionTree(_ entries: [Machine.Entry]) -> [Machine.Entry] {
         return Key(hub: h, id: p)
     }
     let byParent = Dictionary(grouping: entries.filter { parent($0.terminal) != nil }) { parent($0.terminal)! }
-    var placed = Set<TerminalRef>()
+    // One row: the hub address it came from, the hub node it names and its id.
+    func row(_ e: Machine.Entry) -> String { "\(e.ref.hub)|\(e.terminal.hubNode ?? "")|\(e.terminal.id)" }
+    var placed = Set<String>()
     func build(_ e: Machine.Entry) -> Machine.Entry {
         var e = e
-        placed.insert(e.ref)
+        placed.insert(row(e))
         guard let node = e.terminal.hubNode else { return e }
-        let kids = (byParent[Key(hub: node, id: e.terminal.id)] ?? []).filter { !placed.contains($0.ref) }
+        let kids = (byParent[Key(hub: node, id: e.terminal.id)] ?? []).filter { !placed.contains(row($0)) }
         e.children = kids.sorted { newestFirst($0.terminal, $1.terminal) }.map(build)
         return e
     }
     var top = entries.filter { parent($0.terminal) == nil }.sorted { newestFirst($0.terminal, $1.terminal) }.map(build)
     // Bad data (a session that is its own ancestor) has no root: show those sessions at the top level, never hide them.
-    for e in entries.sorted(by: { newestFirst($0.terminal, $1.terminal) }) where !placed.contains(e.ref) { top.append(build(e)) }
+    for e in entries.sorted(by: { newestFirst($0.terminal, $1.terminal) }) where !placed.contains(row(e)) { top.append(build(e)) }
     return top.sorted { newestFirst($0.terminal, $1.terminal) }
 }

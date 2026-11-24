@@ -129,6 +129,7 @@ enum KeyRouter {
 
     /// One key at a time, a moment apart: sent together, a CLI reads them as pasted text, not as keys.
     private static func sendNow(_ seq: [Data], _ session: TerminalSession) {
+        session.clearPreviews()
         Task { @MainActor in
             for (i, k) in seq.enumerated() {
                 if i > 0 { try? await Task.sleep(for: .milliseconds(i == 1 ? 80 : 60)) }

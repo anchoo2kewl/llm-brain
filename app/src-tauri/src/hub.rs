@@ -43,8 +43,14 @@ fn describe(e: &ureq::Error, what: &str) -> String {
 
 /// GET `path` on the hub at `base`.
 pub fn get(base: &str, path: &str) -> Result<Reply, String> {
+    get_within(base, path, TIMEOUT)
+}
+
+/// GET with its own time limit, for a route that does slow work (the hub's updater).
+pub fn get_within(base: &str, path: &str, limit: Duration) -> Result<Reply, String> {
     let url = allow::join_path(base, path)?;
-    finish(agent().get(url.as_str()).header("Accept", "application/json").call(), "Hub unreachable")
+    let req = agent().get(url.as_str()).header("Accept", "application/json").config().timeout_global(Some(limit)).build();
+    finish(req.call(), "Hub unreachable")
 }
 
 /// POST a JSON body to `path` on the hub at `base`. No Origin header is sent, which the hub accepts.
@@ -137,7 +143,7 @@ pub fn versions(base: &str) -> Versions {
     if versions_from(health.clone(), Err(String::new())).running.is_none() {
         return versions_from(health, Err(String::new())); // an older or unreachable hub: do not run its updater
     }
-    versions_from(health, get(base, "/api/hub-update"))
+    versions_from(health, get_within(base, "/api/hub-update", Duration::from_secs(45)))
 }
 
 #[cfg(test)]
