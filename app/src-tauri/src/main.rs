@@ -34,6 +34,10 @@ use url::Url;
 
 const POLL_EVERY: Duration = Duration::from_secs(30);
 const APP_TITLE: &str = "Brain Hub";
+// WebView2 (Windows) serves the app's own pages from http://tauri.localhost, the other systems from tauri://.
+#[cfg(windows)]
+const LOCAL_HUBS_PAGE: &str = "http://tauri.localhost/hubs.html";
+#[cfg(not(windows))]
 const LOCAL_HUBS_PAGE: &str = "tauri://localhost/hubs.html";
 
 struct AppState {
@@ -56,12 +60,16 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Commands change settings and talk to hubs. Only the app's own pages may call them, never a hub page
 /// in the main window. (The capability file already gives hub pages no IPC; this is a second lock.)
 fn require_local(w: &WebviewWindow) -> Result<(), String> {
-    let url = w.url().map_err(|e| e.to_string())?;
-    if url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost") {
+    if app_page(&w.url().map_err(|e| e.to_string())?) {
         Ok(())
     } else {
         Err("Not allowed from this page.".into())
     }
+}
+
+/// One of the app's own pages: `tauri://localhost/…`, or `http://tauri.localhost/…` on Windows.
+fn app_page(url: &Url) -> bool {
+    url.scheme() == "tauri" || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
 }
 
 fn selected_url(state: &AppState) -> Option<String> {
@@ -75,16 +83,31 @@ fn persist(state: &AppState, cfg: &Config) -> Result<(), String> {
 // ---------------------------------------------------------------- windows
 
 fn open_external(url: &Url) {
-    if matches!(url.scheme(), "http" | "https") {
-        let _ = std::process::Command::new("open").arg(url.as_str()).spawn();
+    if !matches!(url.scheme(), "http" | "https") {
+        return;
     }
+    // One argument each, never through a shell, so the URL cannot become a command.
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    let _ = cmd.arg(url.as_str()).spawn();
 }
 
 /// Main window navigation rule: hub hosts and the app's own pages stay in the window. Other web links
 /// (GitHub, Slack) open in the default browser. Everything else is refused.
 fn navigation_allowed(url: &Url) -> bool {
+    if app_page(url) {
+        return true;
+    }
     match url.scheme() {
-        "tauri" | "about" => true,
+        "about" => true,
         "http" | "https" => {
             if allow::url_allowed(url) {
                 true
@@ -785,6 +808,11 @@ mod tests {
         assert!(navigation_allowed(&u("http://127.0.0.1:8787/inbox")));
         assert!(navigation_allowed(&u("https://studio.tail1.ts.net/sessions/1")));
         assert!(navigation_allowed(&u("tauri://localhost/hubs.html")));
+        assert!(navigation_allowed(&u("http://tauri.localhost/hubs.html")));
+        assert!(navigation_allowed(&u(LOCAL_HUBS_PAGE)));
+        assert!(app_page(&u(LOCAL_HUBS_PAGE)));
+        assert!(!app_page(&u("http://127.0.0.1:8787/")));
+        assert!(!app_page(&u("http://tauri.localhost.example.com/")));
         assert!(navigation_allowed(&u("about:blank")));
         assert!(!navigation_allowed(&u("file:///etc/passwd")));
         assert!(!navigation_allowed(&u("javascript:alert(1)")));

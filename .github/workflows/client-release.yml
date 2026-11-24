@@ -1,5 +1,5 @@
 # Build the desktop clients and publish the files on a GitHub release: the native Mac app (app-mac/) and the Tauri app
-# (app/) for Linux.
+# (app/) for Linux (deb, rpm, AppImage) and Windows (MSI, NSIS setup .exe).
 # Push a tag `client-v<version>` (the version in app/src-tauri/tauri.conf.json) to start it.
 name: client-release
 
@@ -78,6 +78,9 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+          - platform: windows-latest
             args: ""
             rust_targets: ""
     runs-on: ${{ matrix.platform }}
