@@ -47,12 +47,14 @@ their first lines).
 
 ## The window
 
-- **Sidebar**: each machine of the cluster and its open terminals, one line each: the state dot, the name, the
-  folder and the age. The session with the latest activity or input is at the top; status and selection never move
+- **Sidebar**: each machine of the cluster and its open terminals, two short lines each: the state dot, the name and
+  the age; then the tool mark, the model and the context used. The selected row also shows the blue context bar and
+  a grid: state and for how long, where it runs, the account, totals, your last input, the agent's last output and
+  when it started. The session with the latest activity or input is at the top; status and selection never move
   a row. One row is selected: the accent bar and the bold name. The dot pulses red, slowly, when a session needs an
   answer. Child sessions show under their parent: click the count, or press → and ←. Ended sessions go to the
   collapsed "Ended" group at the bottom. The summary is in the row's tooltip and in the window subtitle; **Show
-  Details** in the context menu opens the rest. See [design.md](design.md).
+  Details** in the context menu opens the grid on another row too. See [design.md](design.md).
 - **Panes**: a window starts with one pane. Split it up to 9 panes. Click a terminal in the sidebar to show it in the
   focused pane. Closing a pane only removes the view: the terminal keeps running on its machine. **End Terminal**
   stops it.

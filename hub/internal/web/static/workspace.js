@@ -181,8 +181,6 @@
     var all = order.map(function (id) { return infos[id]; });
     var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
     var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
-    var mixed = all.reduce(function (m, t) { m[PROV[provOf(t)] || ">_"] = 1; return m; }, {});
-    mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
     // The filter is the quick switcher: names that start with the text first, then the rest that match.
     var rows = q ? window.wsList.switcher(all.map(function (t) { return window.wsList.searchText(t); }), q, all.length)
@@ -200,7 +198,6 @@
       var li = items[id] || makeItem(id);
       li.dataset.id = id;
       list.appendChild(li);
-      li.mixed = mixed;
       paintItem(id);
       li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
       li.parts.kids.hidden = !r.kids;
@@ -270,12 +267,13 @@
     if (id !== undefined) show(id);
     next.focus({ preventScroll: false });
   });
-  // One line per row (docs/design.md): dot, name, muted folder, then the age. The summary is in the tooltip.
+  // Two short lines per row (docs/design.md): dot, name and age; then the tool, the model and the context used.
+  // The selected row adds the context bar and the details grid. The rest is in the tooltip.
   function makeItem(id) {
     var li = el("li", "ws-item");
     li.tabIndex = 0;
     li.setAttribute("role", "option");
-    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), dir = el("span", "ws-it-dir");
+    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title");
     var num = el("span", "ws-it-num"), age = el("span", "ws-it-age"), prov = el("span", "ws-prov");
     var hub = el("span", "ws-it-hub"); hub.hidden = true; hub.title = "This child session runs on this hub";
     var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
@@ -287,8 +285,13 @@
     // The age and the buttons share one place: the buttons show over the age on hover or focus (no dead space).
     var acts = el("span", "ws-acts"), btns = el("span", "ws-btns");
     btns.append(pen, x); acts.append(age, btns);
-    top.append(dot, title, dir, hub, prov, kids, num, acts);
-    li.append(top, prev);
+    top.append(dot, title, hub, el("span", "grow"), kids, num, acts);
+    var meta = el("div", "ws-it-meta"), model = el("span", "ws-it-model"), pct = el("span", "ws-it-pct");
+    meta.append(prov, model, pct);
+    var det = el("div", "ws-det"), bar = el("div", "ws-bar"), fill = el("i"), grid = el("dl"), cells = []; // cells update in place: a tooltip stays open
+    bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Context used"); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+    bar.append(fill); det.append(bar, grid); det.hidden = true;
+    li.append(top, meta, det, prev);
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
       li.draggable = true;
@@ -297,12 +300,18 @@
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     items[id] = li;
-    li.parts = { dot: dot, title: title, dir: dir, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
+    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
-  function folder(t) { return window.wsList.folder(t); }
-  var PROV = { claude: "CC", codex: "CX", antigravity: "AG", "claude code": "CC" };
-  function provOf(t) { return (t.provider || t.cli || "").toLowerCase(); }
+  // The selected row's /detail from the hub, asked again every 5 seconds while it shows.
+  var details = {};
+  function loadDetail(id) {
+    if (!infos[id] || infos[id].kind === "session") return;
+    function got(d) { if (infos[id] && (d || !details[id])) { details[id] = d || {}; paintItem(id); } } // a failure keeps the last answer, else shows "–"
+    fetch("/api/terminals/" + encodeURIComponent(id) + "/detail", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(got).catch(function () { got(null); });
+  }
+  setInterval(function () { order.forEach(function (id) { if (slotOf(id) === st.focus) { paintItem(id); loadDetail(id); } }); }, 5000);
   var seenIds = {}, seenKey = {};
   function paintItem(id) {
     var li = items[id], t = infos[id];
@@ -321,9 +330,28 @@
     li.parts.dot.style.opacity = pulse || s === "working" ? "" : String(window.wsList.dotOpacity(when));
     li.parts.age.textContent = window.wsList.shortAge(when);
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
-    li.parts.dir.textContent = folder(t);
-    li.parts.prov.hidden = !li.mixed;
-    li.parts.prov.textContent = PROV[provOf(t)] || ">_";
+    var m = window.wsList.rowMeta(t);
+    li.parts.prov.textContent = m.mark; li.parts.prov.title = m.tool;
+    li.parts.model.textContent = m.model;
+    li.parts.pct.textContent = m.pct === null ? "" : m.pct + "%";
+    li.parts.pct.title = "Context used";
+    li.parts.pct.className = "ws-it-pct" + (m.pct >= 90 ? " hi" : "");
+    if (on && li.parts.det.hidden) loadDetail(id); // just selected: fresh numbers now
+    li.parts.det.hidden = !on;
+    if (on) {
+      li.parts.fill.style.width = (m.pct || 0) + "%";
+      li.parts.fill.className = m.pct >= 90 ? "hi" : m.pct >= 70 ? "mid" : "";
+      li.parts.bar.setAttribute("aria-valuenow", String(m.pct || 0));
+      li.parts.bar.setAttribute("aria-valuetext", m.pct === null ? "not reported" : m.pct + "%");
+      var known = t.state ? t : Object.assign({}, t, { state: s }); // an older hub sends no state: the pane's
+      window.wsList.detailRows(known, t.kind === "session" ? {} : details[id] || null).forEach(function (r, i) { // no /detail outside the hub
+        if (!li.parts.cells[i]) { li.parts.cells[i] = [el("dt"), el("dd")]; li.parts.grid.append(li.parts.cells[i][0], li.parts.cells[i][1]); }
+        var dt = li.parts.cells[i][0], dd = li.parts.cells[i][1];
+        if (dt.textContent !== r.label) dt.textContent = r.label;
+        if (dd.textContent !== r.value) dd.textContent = r.value;
+        if (dd.title !== r.title) dd.title = r.title;
+      });
+    }
     li.parts.close.sync();
     var slot = slotOf(id);
     li.parts.num.hidden = true; // the pane header shows its number; the tooltip says it here

@@ -1,8 +1,9 @@
 import BrainHubCore
 import SwiftUI
 
-/// One terminal in the sidebar, on one line (docs/design.md): the state dot, the name, the folder in a muted colour,
-/// then the age. The summary, the account and the shortcut are in the tooltip; the detail opens from the context menu.
+/// One terminal in the sidebar, on two short lines (docs/design.md): the state dot, the name and the age; then the
+/// tool, the model and the context used. The selected row adds the context bar and the details grid. The rest is in
+/// the tooltip.
 struct TerminalRow: View {
     let ref: TerminalRef
     let terminal: Terminal
@@ -19,8 +20,6 @@ struct TerminalRow: View {
         var toggle: (() -> Void)?
     }
     var tree = Tree()
-    /// The list has more than one provider: show a small provider mark.
-    var showProvider = false
     /// One click on × ends the terminal (its CLI stops on its machine).
     var end: (() -> Void)?
     @ViewState private var hovering = false
@@ -35,15 +34,8 @@ struct TerminalRow: View {
                 StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
                 // Neutral text: colour is only for the selection, the dot ("needs you" pulses red) and errors.
                 Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
-                // The folder gives way first; the marks on the right keep their size.
-                Text(Self.folder(t)).font(.appCaption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
                 if let hub = tree.hub { Text(hub).font(.appCaption2).foregroundStyle(.secondary).fixedSize() }
                 Spacer(minLength: 0)
-                if showProvider { ProviderMark(provider: t.provider) }
-                if let f = t.contextFraction, f >= 0.8 {
-                    Text("\(Int(f * 100))%").font(.appCaption2.monospacedDigit()).foregroundStyle(f >= 0.9 ? .red : .secondary)
-                        .fixedSize().help("Context used")
-                }
                 if tree.children > 0 {
                     Button { tree.toggle?() } label: {
                         HStack(spacing: 2) {
@@ -68,13 +60,24 @@ struct TerminalRow: View {
                 .frame(minWidth: 26, alignment: .trailing).fixedSize()
             }
             .frame(minHeight: 22)
+            let meta = RowMeta(t)
+            HStack(spacing: 6) {
+                ProviderMark(mark: meta.mark, tool: meta.tool)
+                Text(meta.model).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                if let p = meta.percent {
+                    Text("\(p)%").monospacedDigit().foregroundStyle(p >= 90 ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        .fixedSize().help("Context used")
+                }
+            }
+            .font(.appCaption2).foregroundStyle(.secondary).padding(.leading, 16).frame(minHeight: 14)
             if let m = model.migrations[ref], let p = m.current {
                 Label(m.error.map { "\(m.isClone ? "Clone" : "Move") failed: \($0)" } ?? (m.done ? "\(m.isClone ? "Cloned" : "Moved") to \(model.machineLabel(m.to))" : "\(Migration.label(p.name, to: model.machineLabel(m.to)))…"),
                       systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
                     .font(.appCaption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .lineLimit(3).padding(.leading, 16).help(p.detail ?? "")
             }
-            if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
+            if selected || open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
         .padding(.leading, CGFloat(tree.depth) * 16)
@@ -187,76 +190,56 @@ struct StateDot: View {
     }
 }
 
-/// Which CLI a terminal runs, as a small muted mark. Shown only when the list has more than one CLI.
+/// Which CLI a terminal runs, as a small muted mark.
 struct ProviderMark: View {
-    let provider: String
+    let mark: String
+    let tool: String
 
     var body: some View {
-        Text(Self.letter(provider)).font(.app(9, .medium)).foregroundStyle(.secondary)
+        Text(mark).font(.app(9, .medium)).foregroundStyle(.secondary)
             .frame(width: 16, height: 14).overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.quaternary))
-            .help(provider).accessibilityLabel(provider)
-    }
-
-    static func letter(_ p: String) -> String {
-        switch p {
-        case "claude": "CC"
-        case "codex": "CX"
-        case "antigravity": "AG"
-        default: ">_"
-        }
+            .help(tool).accessibilityLabel(tool)
     }
 }
 
-/// The opened row: context, model, subagents, the running tool, the last prompt and reply, and totals. It asks the
-/// hub again every 5 seconds while it shows.
+/// The selected (or opened) row: the context bar, then always the same rows (`Terminal.detailRows`), one line each, so
+/// the row's height never changes when data arrives. It asks the hub again every 5 seconds while it shows.
 struct TerminalDetailView: View {
     let ref: TerminalRef
     let terminal: Terminal
     @ViewState private var detail: TerminalDetail?
 
     var body: some View {
-        let t = terminal
+        let f = terminal.contextFraction ?? 0, known = RowMeta(terminal).percent, p = known ?? 0 // colours follow the % the row shows
         VStack(alignment: .leading, spacing: 4) {
-            if let f = t.contextFraction, let used = t.contextUsed, let window = t.contextWindow {
-                ProgressView(value: f).tint(f >= 0.9 ? .red : f >= 0.7 ? .orange : .accentColor)
-                line("Context", "\(shortCount(used)) of \(shortCount(window)) (\(Int(f * 100))%)")
-            }
-            if let m = t.model, !m.isEmpty { line("Model", m) }
-            if let a = t.account, !a.isEmpty { line("Account", (t.profile.map { $0.isEmpty ? "" : "\($0) · " } ?? "") + a) }
-            if let tool = detail?.tool { line("Now", tool) }
-            if let agents = detail?.agents, !agents.isEmpty {
-                let live = agents.filter(\.live)
-                line("Subagents", live.isEmpty ? "\(agents.count), none running" : "\(live.count) running of \(agents.count)")
-                ForEach(live, id: \.self) { a in
-                    Text("• \(a.title)").font(.appCaption2).foregroundStyle(.secondary).lineLimit(1)
+            // Drawn, not a ProgressView: a selected list row turns a ProgressView's tint grey.
+            Capsule().fill(.quaternary).frame(height: 4)
+                .overlay(alignment: .leading) {
+                    GeometryReader { g in Capsule().fill(p >= 90 ? Color.red : p >= 70 ? .orange : .blue).frame(width: g.size.width * f) }
+                }
+                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue(known.map { "\($0) percent" } ?? "not reported")
+            TimelineView(.periodic(from: .now, by: 5)) { ctx in
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
+                    ForEach(terminal.detailRows(detail, now: ctx.date), id: \.label) { r in
+                        GridRow {
+                            Text(r.label).foregroundStyle(.tertiary)
+                            Text(r.value).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(r.help)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
             }
-            if let p = detail?.lastPrompt, !p.isEmpty { line("You", p) }
-            if let r = detail?.lastReply, !r.isEmpty { line("Agent", r) }
-            if let s = detail?.stats {
-                line("Totals", "\(s.prompts) prompts · \(s.toolCalls) tool calls" + (s.toolErrors > 0 ? " (\(s.toolErrors) failed)" : "")
-                    + (s.dollars > 0 ? String(format: " · about $%.2f", s.dollars) : ""))
-            }
-            if let started = t.started.flatMap(Self.ago) { line("Started", started) }
         }
         .font(.appCaption)
         .task(id: ref) {
+            detail = nil // never show another session's numbers
             while !Task.isCancelled {
-                if let d = try? await HubClient(base: ref.hub).get(Paths.detail(ref.id), as: TerminalDetail.self) { detail = d }
+                do {
+                    let d = try await HubClient(base: ref.hub).get(Paths.detail(ref.id), as: TerminalDetail.self)
+                    if !Task.isCancelled { detail = d }
+                } catch { if !Task.isCancelled, detail == nil { detail = TerminalDetail() } } // keep the last answer, else show "–"
                 try? await Task.sleep(for: .seconds(5))
             }
         }
-    }
-
-    private func line(_ name: String, _ value: String) -> some View {
-        (Text(name + "  ").foregroundStyle(.tertiary) + Text(value).foregroundStyle(.secondary)).lineLimit(3)
-    }
-
-    /// "3 hours ago" from the hub's UTC time.
-    static func ago(_ s: String) -> String? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let d = f.date(from: s) else { return nil }
-        return RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date())
     }
 }

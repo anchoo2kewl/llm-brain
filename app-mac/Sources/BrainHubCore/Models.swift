@@ -30,6 +30,8 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// Subagents that run now.
     public var subagents: Int?
     public var started: String?
+    /// Since when the agent is in its current state.
+    public var stateSince: String?
     /// The agent's last output and the owner's last input (hub 0.1.12); an older hub sends only `updated`.
     public var lastActivity: String?
     public var lastInput: String?
@@ -48,6 +50,7 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
         case contextUsed = "context_used", contextWindow = "context_window", subagents, started, profile, account
+        case stateSince = "state_since"
         case lastActivity = "last_activity_at", lastInput = "last_input_at"
         case hubNode = "hub", parentHub = "parent_hub", parentId = "parent_id", childCount = "children", needsOwner = "needs_owner"
     }
@@ -128,7 +131,9 @@ public struct TerminalDetail: Decodable, Sendable {
         public var toolCalls: Int
         public var toolErrors: Int
         public var prompts: Int
-        enum CodingKeys: String, CodingKey { case dollars, toolCalls = "tool_calls", toolErrors = "tool_errors", prompts }
+        /// input, output, cache_read and cache_write.
+        public var tokens: [String: Int]?
+        enum CodingKeys: String, CodingKey { case dollars, toolCalls = "tool_calls", toolErrors = "tool_errors", prompts, tokens }
     }
     public var lastPrompt: String?
     public var lastReply: String?
@@ -136,6 +141,8 @@ public struct TerminalDetail: Decodable, Sendable {
     public var agents: [Agent]?
     public var stats: Stats?
     enum CodingKeys: String, CodingKey { case lastPrompt = "last_prompt", lastReply = "last_reply", tool, agents, stats }
+    /// Nothing known: what the row shows when the hub has no detail for it.
+    public init() {}
 }
 
 /// 63499 → "63k", 1200000 → "1.2M".
