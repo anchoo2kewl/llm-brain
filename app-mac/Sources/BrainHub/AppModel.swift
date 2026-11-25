@@ -422,8 +422,9 @@ final class AppModel {
         // Claim before the first suspension, shared by every window and close entry point.
         guard closingTerminals.insert(ref).inserted else { return }
         // With children "end" the hub ends the whole subtree: those rows show "Closing…" and their panes go too.
-        let ending = [ref] + (children == "end" ? descendants(of: ref, in: machines).filter { closingTerminals.insert($0).inserted } : [])
-        defer { ending.forEach { closingTerminals.remove($0) } }
+        let ending = [ref] + (children == "end" ? descendants(of: ref, in: machines) : [])
+        let claimed = [ref] + ending.dropFirst().filter { closingTerminals.insert($0).inserted } // another close may own some
+        defer { claimed.forEach { closingTerminals.remove($0) } }
         AppDiagnostics.record("terminal_close_requested id=\(ref.id)")
         struct Ignored: Decodable {}
         _ = try await HubClient(base: ref.hub).post(Paths.close(ref.id), json: children.map { ["children": $0] } ?? [:], as: Ignored.self, timeout: 30)

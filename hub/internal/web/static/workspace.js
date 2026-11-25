@@ -206,7 +206,7 @@
       li.parts.kids.textContent = treeOpen[window.wsList.treeStateKey(infos[id])] ? "▾" : "▸";
       li.parts.count.textContent = r.kids ? String(r.kids) : "";
       li.parts.count.title = r.kids ? r.kids + " child session" + (r.kids === 1 ? "" : "s") : "";
-      li.parts.solo.hidden = !r.depth || inEnded;
+      li.parts.solo.hidden = !detachable(t); // the parent link, not the depth: a search shows children flat
       li.parts.kids.title = treeOpen[window.wsList.treeStateKey(infos[id])] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
       li.parts.kids.setAttribute("aria-expanded", treeOpen[window.wsList.treeStateKey(infos[id])] ? "true" : "false");
       li.parts.hub.textContent = r.otherHub;
@@ -558,11 +558,17 @@
       .then(function () { refresh(); }, function (e) { say("Make standalone failed: " + e.message); });
   }
   // A child row dropped on the list goes to the top level.
-  function detachable(t) { return t && t.parent_id > 0 && t.status !== "ended" && t.status !== "failed"; }
+  function live(t) { return t.status !== "ended" && t.status !== "failed"; }
+  function liveRows() { return order.map(function (k) { return infos[k]; }).filter(function (t) { return t && live(t); }); }
+  function detachable(t) { return !!t && t.parent_id > 0 && live(t); }
   list.addEventListener("dragover", function (e) { if (detachable(dragging && infos[dragging])) e.preventDefault(); });
   list.addEventListener("drop", function (e) {
     var t = dragging && infos[dragging];
     if (!detachable(t)) return;
+    // A drop on its own row or in its parent's subtree is a cancelled drag, not "take it out".
+    var on = e.target.closest && e.target.closest(".ws-item"), p = on && infos[on.dataset.id];
+    var parent = liveRows().filter(function (x) { return x.hub === t.parent_hub && x.id === t.parent_id; })[0];
+    if (p && (p === t || p === parent || (parent && window.wsList.descendants(liveRows(), parent).indexOf(p) >= 0))) return;
     e.preventDefault();
     var id = dragging, li = items[id];
     standalone(id, function (m) { if (li) li.parts.prev.textContent = m; });
@@ -585,8 +591,7 @@
       var id = idOf(), t = id && infos[id];
       if (!t || busy) return;
       // A parent ends with its whole subtree (the hub refuses a parent with live children unless told): ask once.
-      var under = t.kind === "session" ? [] : window.wsList.descendants(order.map(function (k) { return infos[k]; }), t)
-        .filter(function (c) { return c.status !== "ended" && c.status !== "failed"; });
+      var under = t.kind === "session" ? [] : window.wsList.descendants(liveRows(), t); // live rows only, like the hub's live children
       if (under.length && !window.confirm("End " + (t.title || "terminal " + id) + " and its " + under.length + " child session" + (under.length === 1 ? "" : "s") + "?")) return;
       busy = true; b.disabled = true;
       var url = t.kind === "session" ? "/api/sessions/" + t.sid + "/close" : "/api/terminals/" + id + "/close";
