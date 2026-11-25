@@ -241,9 +241,7 @@ struct Sidebar: View {
 
     var body: some View {
         let machines = model.machines
-        let all = machines.flatMap { $0.terminals.flatMap(\.all) }
         let ended = model.ended
-        let showProvider = Set((all + ended).map { ProviderMark.letter($0.terminal.provider) }).count > 1
         let treeOpen = self.treeOpen // decoded once per render
         ScrollViewReader { proxy in
         List(selection: $selection) {
@@ -262,7 +260,7 @@ struct Sidebar: View {
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded,
                                     tree: .init(depth: row.depth, children: e.children.count, open: treeOpen.contains(e.ref),
                                                 hub: row.otherHub, toggle: { toggleTree(e.ref) }),
-                                    showProvider: showProvider, end: { end(e.ref) })
+                                    end: { end(e.ref) })
                             .tag(e.ref)
                             .id(e.ref)
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
@@ -319,8 +317,7 @@ struct Sidebar: View {
                 Section {
                     DisclosureGroup(isExpanded: $endedOpen) {
                         ForEach(ended) { e in
-                            TerminalRow(ref: e.ref, terminal: e.terminal, number: nil, selected: selection == e.ref, expanded: $expanded,
-                                        showProvider: showProvider, end: nil)
+                            TerminalRow(ref: e.ref, terminal: e.terminal, number: nil, selected: selection == e.ref, expanded: $expanded, end: nil)
                                 .tag(e.ref)
                                 .id(e.ref)
                                 .contextMenu {

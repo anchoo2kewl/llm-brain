@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { treeStateKey, folder, searchText, isReply, recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher } =
+const { treeStateKey, folder, searchText, isReply, recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher,
+  modelShort, duration, rowMeta, detailRows } =
   createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
 const at = (s) => new Date(Date.parse("2027-01-15T08:00:00Z") + s * 1000).toISOString();
 const term = (id, f = {}) => ({ id, updated: at(f.updated ?? 0), started: at(f.started ?? 0),
@@ -94,4 +95,59 @@ test("folders and search preserve full paths without missing-field words", () =>
   assert.ok(searchText({id: 1, cwd: "/work/brain/hub"}).includes("/work/brain/hub"));
   assert.ok(!searchText({id: 1}).includes("undefined"));
   assert.ok(searchText({id: 1}).includes("~"));
+});
+
+test("model short names: Claude, GPT and Gemini ids; anything else as it is", () => {
+  const cases = { "claude-opus-5-5": "Opus 5.5", "claude-sonnet-4-5-20250929": "Sonnet 4.5", "claude-3-5-sonnet-20241022": "Sonnet 3.5",
+    "claude-opus-5-5[1m]": "Opus 5.5", "claude-fable-5-2": "Fable 5.2", "gpt-6.1-sol": "GPT-6.1-Sol", "gpt-5-codex": "GPT-5-Codex",
+    "gemini-4-carbon": "Gemini 4 Carbon", "gemini-2.5-pro": "Gemini 2.5 Pro", "o3": "o3", "Custom Model": "Custom Model", "": "" };
+  for (const [id, want] of Object.entries(cases)) assert.equal(modelShort(id), want, id);
+  assert.equal(modelShort(undefined), "");
+});
+
+test("durations: seconds, minutes, hours and days", () => {
+  assert.equal(duration(0), "0s");
+  assert.equal(duration(45.9), "45s");
+  assert.equal(duration(180), "3m");
+  assert.equal(duration(3600), "1h");
+  assert.equal(duration(2 * 3600 + 5 * 60), "2h 5m");
+  assert.equal(duration(3 * 86400 + 4 * 3600 + 59), "3d 4h");
+  assert.equal(duration(-5), "0s");
+});
+
+test("row meta: tool mark, model or tool name, context percent", () => {
+  assert.deepEqual(rowMeta({ provider: "claude", model: "claude-opus-5-5", context_used: 92608, context_window: 200000 }),
+    { mark: "CC", tool: "Claude Code", model: "Opus 5.5", pct: 46 });
+  assert.deepEqual(rowMeta({ provider: "codex", cli: "Codex", context_used: 0, context_window: 475000 }), { mark: "CX", tool: "Codex", model: "Codex", pct: null });
+  assert.equal(rowMeta({ cli: "Claude Code" }).mark, "CC", "a session running elsewhere has only cli");
+  assert.equal(rowMeta({ provider: "claude", context_used: 300, context_window: 200 }).pct, 100);
+});
+
+test("details: the same eight rows before and after the hub answers", () => {
+  const now = Date.parse("2026-11-25T12:00:00Z");
+  const t = { id: 7, host: "studio", cwd: "/work/app", branch: "feat/x", provider: "claude", model: "claude-opus-5-5", state: "working",
+    state_since: "2026-11-25T11:57:00Z", started: "2026-11-25T10:00:00Z", context_used: 92608, context_window: 200000, subagents: 2 };
+  const before = detailRows(t, null, now);
+  assert.deepEqual(before.map((r) => r.label), ["Context", "State", "Where", "Account", "Totals", "You", "Agent", "Started"]);
+  assert.equal(before[0].value, "92k of 200k · 46%");
+  assert.equal(before[1].value, "Working · 3m · 2 subagents");
+  assert.equal(before[2].value, "studio · app · feat/x");
+  assert.equal(before[2].title, "studio · /work/app · feat/x");
+  assert.equal(before[3].value, "default login");
+  assert.equal(before[5].value, "…");
+  assert.equal(before[7].value, "2h ago");
+  const d = { tool: 'Bash { "command": "ls" }', last_prompt: "Fix the\nbuild", last_reply: "",
+    stats: { dollars: 0.589, tokens: { input: 32, output: 3770, cache_read: 1110178, cache_write: 58295 }, prompts: 1, tool_calls: 11, tool_errors: 1 } };
+  const after = detailRows(t, d, now);
+  assert.equal(after.length, before.length);
+  assert.equal(after[1].value, "Working · 3m · 2 subagents · Bash");
+  assert.equal(after[1].title, 'Bash { "command": "ls" }');
+  assert.equal(after[4].value, "$0.59 · 1.2M tokens · 1 prompt · 11 tool calls (1 failed)");
+  assert.equal(after[5].value, "Fix the build");
+  assert.equal(after[6].value, "–");
+  const waits = detailRows({ ...t, state: "waiting", needs_owner: true, branch: "main", context_used: undefined }, d, now);
+  assert.equal(waits[1].value.split(" · ")[0], "Waiting for you");
+  assert.equal(waits[0].value, "not reported");
+  assert.equal(waits[2].value, "studio · app", "the default branch is left out");
+  assert.equal(detailRows({ ...t, state: "waiting", ask_kind: "done", needs_owner: false }, d, now)[1].value.split(" · ")[0], "Finished its turn");
 });

@@ -83,6 +83,77 @@
     top.forEach(function (n) { walk(n, 0, "", true); });
     return out;
   }
+  // A model id as a short name: "claude-opus-5-5" -> "Opus 5.5", "gpt-6.1-sol" -> "GPT-6.1-Sol",
+  // "gemini-4-carbon" -> "Gemini 4 Carbon". Date stamps and "[1m]" go. Any other id stays as it is.
+  function modelShort(id) {
+    var raw = String(id || "").trim(), m = raw.toLowerCase().replace(/\[[^\]]*\]$/, "");
+    var parts = m.split("-").filter(function (p) { return p && !/^\d{8}$/.test(p); });
+    function cap(p) { return /^[a-z]/.test(p) ? p[0].toUpperCase() + p.slice(1) : p; }
+    var num = function (p) { return /^\d+(\.\d+)?$/.test(p); };
+    if (parts[0] === "claude" && parts.length > 1) {
+      var words = parts.slice(1).filter(function (p) { return !num(p); }), nums = parts.slice(1).filter(num);
+      return words.map(cap).join(" ") + (nums.length ? " " + nums.join(".") : "");
+    }
+    if (parts[0] === "gpt" && parts.length > 1) return "GPT-" + parts.slice(1).map(cap).join("-");
+    if (parts[0] === "gemini" && parts.length > 1) return parts.map(cap).join(" ");
+    return raw;
+  }
+  // A length of time: "45s", "3m", "2h 5m", "3d 4h".
+  function duration(sec) {
+    var s = Math.max(0, Math.floor(sec || 0));
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m";
+    if (s < 86400) { var m = Math.floor(s % 3600 / 60); return Math.floor(s / 3600) + "h" + (m ? " " + m + "m" : ""); }
+    var h = Math.floor(s % 86400 / 3600);
+    return Math.floor(s / 86400) + "d" + (h ? " " + h + "h" : "");
+  }
+  var TOOLS = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", shell: "Shell" };
+  var MARKS = { claude: "CC", codex: "CX", antigravity: "AG" };
+  function provider(t) { var p = String(t.provider || t.cli || "").toLowerCase(); return p === "claude code" ? "claude" : p; }
+  // The second line of a row: the tool's mark, the model (else the tool's name) and the context used.
+  function rowMeta(t) {
+    var p = provider(t), used = t.context_used, win = t.context_window;
+    var pct = used > 0 && win > 0 ? Math.min(100, Math.round(used * 100 / win)) : null;
+    return { mark: MARKS[p] || ">_", tool: TOOLS[p] || t.cli || p, model: modelShort(t.model) || TOOLS[p] || t.cli || p, pct: pct };
+  }
+  function count(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? Math.floor(n / 1000) + "k" : String(n); }
+  function one(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+  function stateLabel(t) {
+    if (pulses(t, false)) return "Waiting for you";
+    switch (t.state) {
+      case "working": return "Working";
+      case "waiting": return t.ask_kind === "done" ? "Finished its turn" : t.ask_kind === "error" ? "Stopped on an error" : "Waiting";
+      case "blocked": return "Blocked";
+      case "idle": return "Idle";
+      case "ended": return "Ended";
+      default: return t.state ? String(t.state) : "Unknown";
+    }
+  }
+  // The selected row's details: always the same rows, so its height never changes when data arrives. `t` is the
+  // list's row, `d` the hub's /api/terminals/{id}/detail (null until it comes). {label, value, title}.
+  function detailRows(t, d, now) {
+    now = now === undefined ? Date.now() : now;
+    var wait = d ? "–" : "…", since = ms(t.state_since), started = ms(t.started), m = rowMeta(t);
+    var tool = d && one(d.tool), branch = t.branch && ["HEAD", "main", "master"].indexOf(t.branch) < 0 ? t.branch : "";
+    var state = [stateLabel(t), since !== null ? duration((now - since) / 1000) : "",
+      t.subagents > 0 ? plural(t.subagents, "subagent") : "", tool ? tool.split(/[\s{(]/)[0] : ""].filter(Boolean).join(" · ");
+    var s = d && d.stats, tok = 0;
+    if (s && s.tokens) Object.keys(s.tokens).forEach(function (k) { tok += Number(s.tokens[k]) || 0; });
+    var totals = s ? [s.dollars > 0 ? "$" + s.dollars.toFixed(2) : "", tok ? count(tok) + " tokens" : "", plural(s.prompts || 0, "prompt"),
+      plural(s.tool_calls || 0, "tool call") + (s.tool_errors > 0 ? " (" + s.tool_errors + " failed)" : "")].filter(Boolean).join(" · ") : wait;
+    var acct = [t.profile, t.account].filter(Boolean).join(" · ");
+    return [
+      { label: "Context", value: m.pct === null ? "not reported" : count(t.context_used) + " of " + count(t.context_window) + " · " + m.pct + "%" },
+      { label: "State", value: state, title: tool || "" },
+      { label: "Where", value: [t.host, folder(t), branch].filter(Boolean).join(" · "), title: [t.host, t.cwd, t.branch].filter(Boolean).join(" · ") },
+      { label: "Account", value: acct || "default login" },
+      { label: "Totals", value: totals },
+      { label: "You", value: d ? one(d.last_prompt) || "–" : wait, title: d ? one(d.last_prompt) : "" },
+      { label: "Agent", value: d ? one(d.last_reply) || "–" : wait, title: d ? one(d.last_reply) : "" },
+      { label: "Started", value: started !== null ? duration((now - started) / 1000) + " ago" : "–", title: t.started || "" },
+    ].map(function (r) { r.title = r.title || r.value; return r; });
+  }
   // The quick switcher: indices of the names that match, those that start with the query first, in list order.
   function switcher(names, q, limit) {
     q = (q || "").trim().toLowerCase(); limit = limit || 8;
@@ -100,7 +171,7 @@
     return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3})+$/.test(data);
   }
   var api = { treeStateKey: treeStateKey, folder: folder, searchText: searchText, isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
-    pulses: pulses, treeRows: treeRows, switcher: switcher };
+    pulses: pulses, treeRows: treeRows, switcher: switcher, modelShort: modelShort, duration: duration, rowMeta: rowMeta, detailRows: detailRows };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;
 })(this);

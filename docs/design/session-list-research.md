@@ -20,10 +20,11 @@ the Tauri app (Linux, Windows) and the hub web list. The applied spec is [../des
 
 ## Rules
 
-1. **One line per row.** Name, then the folder in a muted colour. Age on the right. No summary in the row: it shows in
-   a tooltip and in the selected session's header (Linear, Things 3, HIG).
-2. **No repeated chips.** Do not show "Claude Code" on every row. Show a small provider mark only, and only when the
-   list has more than one provider. Show context use only at 80 % and more (Linear, Things 3).
+1. **Two short lines per row.** The name and the age; then, muted, the tool, the model and the context used. No folder
+   and no summary in the row: they show in a tooltip and in the selected session's header (Linear, Things 3, HIG).
+   The selected row adds the context bar and a small grid of details (owner request, 2026-11-25).
+2. **No repeated chips.** Do not show "Claude Code" on every row: show a small tool mark (`CC`, `CX`, `AG`) and the
+   model's short name (Linear, Things 3).
 3. **Neutral rows.** Colour only for the selection, the "needs you" signal and errors (Linear, Discord).
 4. **Two levels of attention.** A quiet dot for state; a gentle red pulse only when the session waits for you. A
    finished turn is not a call to action (Discord, Slack).
