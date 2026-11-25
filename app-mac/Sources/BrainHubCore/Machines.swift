@@ -34,6 +34,11 @@ public func recentKey(_ t: Terminal, input: Date? = nil) -> Date {
 /// Whole seconds: a change smaller than one second never reorders the list.
 func wholeSeconds(_ d: Date) -> Date { Date(timeIntervalSince1970: d.timeIntervalSince1970.rounded(.down)) }
 
+/// The live sessions under ref, at every depth and on every hub of the cluster: what ends with it.
+public func descendants(of ref: TerminalRef, in machines: [Machine]) -> [TerminalRef] {
+    machines.lazy.flatMap { $0.terminals.flatMap(\.all) }.first { $0.ref == ref }.map { $0.all.dropFirst().map(\.ref) } ?? []
+}
+
 /// Most recent first; ties: the higher id.
 public func mostRecentFirst(_ a: Machine.Entry, _ b: Machine.Entry) -> Bool {
     a.rank != b.rank ? a.rank > b.rank : a.terminal.id > b.terminal.id

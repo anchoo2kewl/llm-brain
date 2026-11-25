@@ -348,6 +348,7 @@ public enum Paths {
     public static func rename(_ id: Int64) -> String { "/terminals/\(id)/rename" }
     public static func close(_ id: Int64) -> String { "/api/terminals/\(id)/close" }
     public static func detail(_ id: Int64) -> String { "/api/terminals/\(id)/detail" }
+    public static func parent(_ id: Int64) -> String { "/api/terminals/\(id)/parent" }
     public static func send(_ id: Int64) -> String { "/api/terminals/\(id)/send" }
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }

@@ -31,22 +31,29 @@ struct TerminalRow: View {
         let recent = model.recent(ref)
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 8) {
-                StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
+                // One control for the tree: the chevron on the left. Closed hides every row under it.
+                HStack(spacing: 4) {
+                    if tree.children > 0 {
+                        Button { tree.toggle?() } label: {
+                            Image(systemName: tree.open ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold))
+                                .frame(width: 10, height: 16).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .help(tree.open ? "Hide the child sessions (←)" : "Show the \(tree.children) child session\(tree.children == 1 ? "" : "s") (→)")
+                        .accessibilityLabel("\(tree.children) child sessions, \(tree.open ? "shown" : "hidden")")
+                    } else {
+                        Color.clear.frame(width: 10, height: 1) // the names line up
+                    }
+                    StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
+                }
                 // Neutral text: colour is only for the selection, the dot ("needs you" pulses red) and errors.
                 Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
+                if tree.children > 0 {
+                    Text("\(tree.children)").font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
+                        .help("\(tree.children) child session\(tree.children == 1 ? "" : "s")").accessibilityHidden(true)
+                }
                 if let hub = tree.hub { Text(hub).font(.appCaption2).foregroundStyle(.secondary).fixedSize() }
                 Spacer(minLength: 0)
-                if tree.children > 0 {
-                    Button { tree.toggle?() } label: {
-                        HStack(spacing: 2) {
-                            Image(systemName: tree.open ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold))
-                            Text("\(tree.children)")
-                        }.font(.appCaption2)
-                    }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .help(tree.open ? "Hide the child sessions (←)" : "Show the \(tree.children) child session\(tree.children == 1 ? "" : "s") (→)")
-                    .accessibilityLabel("\(tree.children) child sessions, \(tree.open ? "shown" : "hidden")")
-                }
                 ZStack(alignment: .trailing) {
                     TimelineView(.periodic(from: .now, by: 30)) { ctx in
                         Text(Recency.short(recent, now: ctx.date)).font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary)
@@ -70,14 +77,14 @@ struct TerminalRow: View {
                         .fixedSize().help("Context used")
                 }
             }
-            .font(.appCaption2).foregroundStyle(.secondary).padding(.leading, 16).frame(minHeight: 14)
+            .font(.appCaption2).foregroundStyle(.secondary).padding(.leading, 30).frame(minHeight: 14)
             if let m = model.migrations[ref], let p = m.current {
                 Label(m.error.map { "\(m.isClone ? "Clone" : "Move") failed: \($0)" } ?? (m.done ? "\(m.isClone ? "Cloned" : "Moved") to \(model.machineLabel(m.to))" : "\(Migration.label(p.name, to: model.machineLabel(m.to)))…"),
                       systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
                     .font(.appCaption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                    .lineLimit(3).padding(.leading, 16).help(p.detail ?? "")
+                    .lineLimit(3).padding(.leading, 30).help(p.detail ?? "")
             }
-            if selected || open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
+            if selected || open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 30) }
         }
         .padding(.vertical, 2)
         .padding(.leading, CGFloat(tree.depth) * 16)

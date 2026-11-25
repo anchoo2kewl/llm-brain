@@ -200,8 +200,13 @@
       list.appendChild(li);
       paintItem(id);
       li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
-      li.parts.kids.hidden = !r.kids;
-      li.parts.kids.textContent = (treeOpen[window.wsList.treeStateKey(infos[id])] ? "▾ " : "▸ ") + r.kids;
+      // One control: the chevron on the left opens and closes the tree; closed hides every row under it.
+      li.parts.kids.style.visibility = r.kids ? "" : "hidden"; // keeps its place, so the names line up
+      li.parts.kids.tabIndex = r.kids ? 0 : -1;
+      li.parts.kids.textContent = treeOpen[window.wsList.treeStateKey(infos[id])] ? "▾" : "▸";
+      li.parts.count.textContent = r.kids ? String(r.kids) : "";
+      li.parts.count.title = r.kids ? r.kids + " child session" + (r.kids === 1 ? "" : "s") : "";
+      li.parts.solo.hidden = !r.depth || inEnded;
       li.parts.kids.title = treeOpen[window.wsList.treeStateKey(infos[id])] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
       li.parts.kids.setAttribute("aria-expanded", treeOpen[window.wsList.treeStateKey(infos[id])] ? "true" : "false");
       li.parts.hub.textContent = r.otherHub;
@@ -276,7 +281,12 @@
     var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title");
     var num = el("span", "ws-it-num"), age = el("span", "ws-it-age"), prov = el("span", "ws-prov");
     var hub = el("span", "ws-it-hub"); hub.hidden = true; hub.title = "This child session runs on this hub";
-    var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
+    var kids = el("button", "ws-kids"); kids.type = "button"; kids.style.visibility = "hidden";
+    var count = el("span", "ws-it-count");
+    var solo = el("button", "ws-pen", "⇱"); solo.type = "button"; solo.hidden = true;
+    solo.title = "Make standalone: this session leaves its parent, so ending the parent no longer ends it";
+    solo.setAttribute("aria-label", "Make standalone");
+    solo.addEventListener("click", function (e) { e.stopPropagation(); standalone(id, function (m) { prev.textContent = m; }); });
     kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[window.wsList.treeStateKey(infos[id])]); });
     var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
     pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
@@ -284,8 +294,8 @@
     var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; setTimeout(function () { prev.textContent = ""; }, 6000); });
     // The age and the buttons share one place: the buttons show over the age on hover or focus (no dead space).
     var acts = el("span", "ws-acts"), btns = el("span", "ws-btns");
-    btns.append(pen, x); acts.append(age, btns);
-    top.append(dot, title, hub, el("span", "grow"), kids, num, acts);
+    btns.append(pen, solo, x); acts.append(age, btns);
+    top.append(kids, dot, title, count, hub, el("span", "grow"), num, acts);
     var meta = el("div", "ws-it-meta"), model = el("span", "ws-it-model"), pct = el("span", "ws-it-pct");
     meta.append(prov, model, pct);
     var det = el("div", "ws-det"), bar = el("div", "ws-bar"), fill = el("i"), grid = el("dl"), cells = []; // cells update in place: a tooltip stays open
@@ -295,12 +305,13 @@
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
       li.draggable = true;
-      li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "copyMove"; });
+      li.addEventListener("dragstart", function (e) { dragging = id; e.dataTransfer.setData("text/x-brain-terminal", id); e.dataTransfer.effectAllowed = "copyMove"; });
+      li.addEventListener("dragend", function () { dragging = null; });
     }
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     items[id] = li;
-    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
+    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, count: count, solo: solo, hub: hub, prov: prov };
     return li;
   }
   // The selected row's /detail from the hub, asked again every 5 seconds while it shows.
@@ -538,6 +549,24 @@
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
   }
+  // standalone: the session leaves its parent's tree (POST /api/terminals/{id}/parent {"clear": true}); from now on
+  // its lifecycle is its own.
+  var dragging = null;
+  function standalone(id, say) {
+    fetch("/api/terminals/" + encodeURIComponent(id) + "/parent", { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"clear":true}' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "error " + r.status); }); })
+      .then(function () { refresh(); }, function (e) { say("Make standalone failed: " + e.message); });
+  }
+  // A child row dropped on the list goes to the top level.
+  function detachable(t) { return t && t.parent_id > 0 && t.status !== "ended" && t.status !== "failed"; }
+  list.addEventListener("dragover", function (e) { if (detachable(dragging && infos[dragging])) e.preventDefault(); });
+  list.addEventListener("drop", function (e) {
+    var t = dragging && infos[dragging];
+    if (!detachable(t)) return;
+    e.preventDefault();
+    var id = dragging, li = items[id];
+    standalone(id, function (m) { if (li) li.parts.prev.textContent = m; });
+  });
   // closeBtn: × ends the terminal or session (its CLI process on its machine) in one click. Its label names
   // the session, so a screen reader says what it ends; it shows on hover and on keyboard focus.
   function closeBtn(idOf, cls, say) {
@@ -555,9 +584,13 @@
       e.stopPropagation();
       var id = idOf(), t = id && infos[id];
       if (!t || busy) return;
+      // A parent ends with its whole subtree (the hub refuses a parent with live children unless told): ask once.
+      var under = t.kind === "session" ? [] : window.wsList.descendants(order.map(function (k) { return infos[k]; }), t)
+        .filter(function (c) { return c.status !== "ended" && c.status !== "failed"; });
+      if (under.length && !window.confirm("End " + (t.title || "terminal " + id) + " and its " + under.length + " child session" + (under.length === 1 ? "" : "s") + "?")) return;
       busy = true; b.disabled = true;
       var url = t.kind === "session" ? "/api/sessions/" + t.sid + "/close" : "/api/terminals/" + id + "/close";
-      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: under.length ? '{"children":"end"}' : "{}" })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
           if (!x.ok) { say("End failed: " + (x.j.error || "error")); return; }

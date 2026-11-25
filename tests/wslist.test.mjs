@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const { treeStateKey, folder, searchText, isReply, recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher,
-  modelShort, duration, rowMeta, detailRows } =
+  modelShort, duration, rowMeta, detailRows, descendants } =
   createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
 const at = (s) => new Date(Date.parse("2027-01-15T08:00:00Z") + s * 1000).toISOString();
 const term = (id, f = {}) => ({ id, updated: at(f.updated ?? 0), started: at(f.started ?? 0),
@@ -159,4 +159,14 @@ test("details: the same eight rows before and after the hub answers", () => {
   assert.equal(detailRows(t, { stats: { dollars: 0.002, prompts: 1, tool_calls: 0 } }, now)[4].value, "1 prompt · 0 tool calls", "no $0.00");
   for (const status of ["ended", "failed"])
     assert.equal(detailRows({ ...t, status, needs_owner: true }, d, now)[1].value.split(" · ")[0], "Ended", "an ended row never asks for you");
+});
+
+test("descendants: every depth, across hubs, never a session running elsewhere, a loop ends", () => {
+  const a = { id: 1, hub: "h" }, b = { id: 2, hub: "h", parent_hub: "h", parent_id: 1 }, c = { id: 3, hub: "h", parent_hub: "h", parent_id: 2 };
+  const peer = { id: 1, hub: "p", parent_hub: "h", parent_id: 3 }, other = { id: 9, hub: "h" }, ext = { id: "s1", kind: "session", parent_hub: "h", parent_id: 1 };
+  assert.deepEqual(descendants([a, b, c, peer, other, ext], a), [b, c, peer]);
+  assert.deepEqual(descendants([a, b, c], c), []);
+  assert.deepEqual(descendants([{ id: 1 }, { id: 2, parent_id: 1 }], { id: 1 }), [], "an older hub: no tree");
+  const x = { id: 5, hub: "h", parent_hub: "h", parent_id: 6 }, y = { id: 6, hub: "h", parent_hub: "h", parent_id: 5 };
+  assert.deepEqual(descendants([x, y], x), [y], "a loop in bad data ends");
 });

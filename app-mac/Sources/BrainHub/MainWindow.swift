@@ -39,7 +39,9 @@ struct MainWindow: View {
     @ViewState private var panes = WindowPanes()
     @ViewState private var renaming: TerminalRef?
     @ViewState private var newTitle = ""
-    @ViewState private var closing: TerminalRef?
+    /// The terminal the end question is about, and the child count it showed: the action ends only what the owner
+    /// confirmed. One value, so the question and the count never disagree.
+    @ViewState private var closing: (ref: TerminalRef, children: Int)?
     @ViewState private var failure: String?
     @SceneStorage("layout") private var layout = WindowLayout.terminal
     @ViewState private var web = WKWebView()
@@ -47,7 +49,7 @@ struct MainWindow: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: Binding(get: { panes.tree.focusedTerminal }, set: { if let r = $0 { panes.show(r) } }),
-                    rename: startRename, close: { closing = $0 }, end: end, openInWindow: { openWindow(value: $0) }, failure: $failure)
+                    rename: startRename, close: ask, end: end, openInWindow: { openWindow(value: $0) }, failure: $failure)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
             switch (layout, model.hubAddress.flatMap(URL.init(string:))) {
@@ -115,9 +117,11 @@ struct MainWindow: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("End this terminal?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } })) {
-            Button("End Terminal", role: .destructive) { if let ref = closing { end(ref) } }
-        } message: { Text("The process in it stops on its machine.") }
+        .confirmationDialog(endQuestion, isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } })) {
+            Button((closing?.children ?? 0) > 0 ? "End All" : "End Terminal", role: .destructive) {
+                if let c = closing { endNow(c.ref, children: c.children > 0 ? "end" : nil) }
+            }
+        } message: { Text((closing?.children ?? 0) > 0 ? "Their processes stop on their machines." : "The process in it stops on its machine.") }
         .confirmationDialog("Close this pane?", isPresented: Binding(get: { panes.confirmClose }, set: { panes.confirmClose = $0 })) {
             Button("Close Pane") { panes.closeNow() }.keyboardShortcut(.defaultAction)
         } message: { Text("Its agent is still working. The terminal keeps running on its machine; open it again from the sidebar.") }
@@ -150,15 +154,30 @@ struct MainWindow: View {
             select: { i in let refs = model.orderedRefs; if i < refs.count { panes.show(refs[i]) } },
             selected: current,
             rename: { if let s = current { startRename(s) } },
-            close: { closing = current },
+            close: { if let s = current { ask(s) } },
             reconnect: { if let s = current { model.session(s).reconnect() } },
             pane: { panes.perform($0) },
             paneCount: panes.tree.panes.count)
     }
 
-    /// End a terminal: its pane closes here and its CLI stops on its machine.
+    /// End a terminal: its pane closes here and its CLI stops on its machine. A parent ends with its whole subtree,
+    /// after one question.
     private func end(_ ref: TerminalRef) {
-        Task { do { try await model.close(ref) } catch { failure = error.localizedDescription } }
+        if model.liveDescendants(ref) > 0 { ask(ref) } else { endNow(ref) }
+    }
+
+    /// Ask before ending: the question names the child sessions that end too.
+    private func ask(_ ref: TerminalRef) { closing = (ref, model.liveDescendants(ref)) }
+
+    private func endNow(_ ref: TerminalRef, children: String? = nil) {
+        Task { do { try await model.close(ref, children: children) } catch { failure = error.localizedDescription } }
+    }
+
+    private var endQuestion: String {
+        guard let c = closing, c.children > 0 else { return "End this terminal?" }
+        let (ref, n) = (c.ref, c.children)
+        let name = model.terminal(ref).map(TerminalRow.name) ?? "this terminal"
+        return "End \(name) and its \(n) child session\(n == 1 ? "" : "s")?"
     }
 
     private func startRename(_ ref: TerminalRef) {
@@ -279,6 +298,7 @@ struct Sidebar: View {
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
+                                if row.depth > 0 { Button("Make Standalone") { standalone(e.ref) } }
                                 Divider()
                                 Button(model.closingTerminals.contains(e.ref) ? "Closing…" : "End Terminal…", role: .destructive) { close(e.ref) }
                                     .disabled(model.closingTerminals.contains(e.ref))
@@ -371,10 +391,16 @@ struct Sidebar: View {
         }
     }
 
+    /// A row dropped on another machine moves there; a child dropped on its own machine goes to the top level.
     private func dropped(_ providers: [NSItemProvider], on machine: String) -> Bool {
         AppModel.droppedRef(providers) { ref in
-            if model.terminal(ref)?.host != machine { migrate(ref, to: machine, clone: AppModel.cloneModifier) }
+            guard let t = model.terminal(ref) else { return }
+            if t.host != machine { migrate(ref, to: machine, clone: AppModel.cloneModifier) } else if t.isOpen, (t.parentId ?? 0) > 0 { standalone(ref) }
         }
+    }
+
+    private func standalone(_ ref: TerminalRef) {
+        Task { do { try await model.makeStandalone(ref) } catch { failure = error.localizedDescription } }
     }
 
     /// Move (or clone) a terminal to another machine; the new terminal is selected when it is live.

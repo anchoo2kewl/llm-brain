@@ -417,17 +417,32 @@ final class AppModel {
         }
     }
 
-    func close(_ ref: TerminalRef) async throws {
+    /// `children: "end"` ends the whole subtree; the hub refuses a parent with live children without it.
+    func close(_ ref: TerminalRef, children: String? = nil) async throws {
         // Claim before the first suspension, shared by every window and close entry point.
         guard closingTerminals.insert(ref).inserted else { return }
-        defer { closingTerminals.remove(ref) }
+        // With children "end" the hub ends the whole subtree: those rows show "Closing…" and their panes go too.
+        let ending = [ref] + (children == "end" ? descendants(of: ref, in: machines).filter { closingTerminals.insert($0).inserted } : [])
+        defer { ending.forEach { closingTerminals.remove($0) } }
         AppDiagnostics.record("terminal_close_requested id=\(ref.id)")
         struct Ignored: Decodable {}
-        _ = try await HubClient(base: ref.hub).post(Paths.close(ref.id), json: [:], as: Ignored.self, timeout: 30)
+        _ = try await HubClient(base: ref.hub).post(Paths.close(ref.id), json: children.map { ["children": $0] } ?? [:], as: Ignored.self, timeout: 30)
         AppDiagnostics.record("terminal_close_confirmed id=\(ref.id)")
-        for panes in windows.compactMap(\.value) { panes.tree.forget(ref) }
-        sessions[ref]?.stop()
-        sessions[ref] = nil
+        for r in ending {
+            for panes in windows.compactMap(\.value) { panes.tree.forget(r) }
+            sessions[r]?.stop()
+            sessions[r] = nil
+        }
+        await refresh()
+    }
+
+    /// The live sessions under ref, at every depth (on every hub of the cluster).
+    func liveDescendants(_ ref: TerminalRef) -> Int { descendants(of: ref, in: machines).count }
+
+    /// The session leaves its parent's tree: from now on ending the parent does not end it.
+    func makeStandalone(_ ref: TerminalRef) async throws {
+        struct Ignored: Decodable {}
+        _ = try await HubClient(base: ref.hub).post(Paths.parent(ref.id), json: ["clear": true], as: Ignored.self, timeout: 30)
         await refresh()
     }
 

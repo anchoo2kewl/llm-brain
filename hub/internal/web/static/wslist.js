@@ -156,6 +156,16 @@
       { label: "Started", value: started !== null ? duration((now - started) / 1000) + " ago" : "–", title: t.started || "" },
     ].map(function (r) { r.title = r.title || r.value; return r; });
   }
+  // Every session under t, at all depths, through (parent_hub, parent_id) = (hub, id). A loop in bad data ends.
+  function descendants(rows, t) {
+    var out = [], seen = [t];
+    (function walk(p) {
+      rows.forEach(function (c) {
+        if (seen.indexOf(c) < 0 && c.kind !== "session" && p.hub && c.parent_hub === p.hub && c.parent_id === p.id) { seen.push(c); out.push(c); walk(c); }
+      });
+    })(t);
+    return out;
+  }
   // The quick switcher: indices of the names that match, those that start with the query first, in list order.
   function switcher(names, q, limit) {
     q = (q || "").trim().toLowerCase(); limit = limit || 8;
@@ -173,7 +183,7 @@
     return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3})+$/.test(data);
   }
   var api = { treeStateKey: treeStateKey, folder: folder, searchText: searchText, isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
-    pulses: pulses, treeRows: treeRows, switcher: switcher, modelShort: modelShort, duration: duration, rowMeta: rowMeta, detailRows: detailRows };
+    pulses: pulses, treeRows: treeRows, switcher: switcher, modelShort: modelShort, duration: duration, rowMeta: rowMeta, detailRows: detailRows, descendants: descendants };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;
 })(this);

@@ -14,10 +14,10 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-it-top{display:flex;align-items:center;gap:8px;min-height:20px}
 .ws-it-title{font-weight:400;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;outline:none}
 .ws-it-top .grow{flex:1}
-.ws-it-meta{display:flex;align-items:center;gap:6px;margin:2px 0 0 16px;min-height:14px;font-size:11px;color:var(--mut);white-space:nowrap}
+.ws-it-meta{display:flex;align-items:center;gap:6px;margin:2px 0 0 32px;min-height:14px;font-size:11px;color:var(--mut);white-space:nowrap}
 .ws-it-model{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .ws-it-pct{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none}.ws-it-pct.hi{color:var(--bad)}
-.ws-det{margin:6px 0 2px 16px;font-size:11px}
+.ws-det{margin:6px 0 2px 32px;font-size:11px}
 .ws-bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-bottom:6px}
 .ws-bar i{display:block;height:100%;background:var(--acc)}.ws-bar i.mid{background:var(--warn)}.ws-bar i.hi{background:var(--bad)}
 .ws-det dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;margin:0}
@@ -136,7 +136,8 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-item .dot-s.needs{background:var(--st-failed);box-shadow:none;animation:wsneeds 2s ease-in-out infinite}
 @keyframes wsneeds{0%,100%{opacity:1}50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){.ws-item .dot-s.needs{animation:none}}
-.ws-kids{border:0;background:none;color:var(--mut);font:600 11px/1 var(--mono);padding:2px 4px;border-radius:4px;cursor:pointer;flex:none}
+.ws-kids{border:0;background:none;color:var(--mut);font:600 11px/1 var(--mono);padding:2px 0;width:12px;margin-right:-4px;border-radius:4px;cursor:pointer;flex:none}
+.ws-it-count{font:11px/1 var(--mono);color:var(--mut);flex:none}.ws-it-count:empty{display:none}
 .ws-kids:hover{color:var(--acc)}.ws-kids:focus-visible{outline:2px solid var(--acc)}
 /* The rename and end buttons stay in the focus order but never change the row height. */
 .ws-it-top .ws-pen{opacity:1}

@@ -321,6 +321,10 @@ import BrainHubCore
         #expect(top[0].children.map(\.terminal.id) == [2, 3], "children by their own activity")
         #expect(top[0].children[0].children.map { $0.terminal.hubNode } == ["laptop"])
         #expect(top[0].all.count == 4)
+        let ms = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"])
+        #expect(descendants(of: TerminalRef(hub: "h", id: 1), in: ms).map(\.id) == [2, 1, 3], "every depth, the other hub's child too")
+        #expect(descendants(of: TerminalRef(hub: "h", id: 8), in: ms).isEmpty)
+        #expect(descendants(of: TerminalRef(hub: "h", id: 99), in: ms).isEmpty, "not listed")
         let loop = [node(5, "s", parent: ("s", 6), act: 1), node(6, "s", parent: ("s", 5), act: 2), node(7, "s", parent: ("s", 7), act: 3)]
         let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals
         #expect(shown.flatMap(\.all).count == 3, "a loop in bad data never hides a session")
