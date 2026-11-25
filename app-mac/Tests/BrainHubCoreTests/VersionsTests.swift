@@ -21,6 +21,7 @@ import BrainHubCore
         #expect(Versions.available(inCheck: "You’re up to date.") == nil)
         #expect(Versions.available(inCheck: "Installed 0.1.13. Restart Brain Hub to use it.") == nil)
         #expect(Versions.available(inCheck: "Version 0.1 is available: x") == nil)
+        #expect(Versions.available(inCheck: "Version is available") == nil)
     }
 
     @Test func scheduleWithAFakeClock() {
@@ -30,6 +31,8 @@ import BrainHubCore
         #expect(!UpdateSchedule.isDue(now: t0.addingTimeInterval(3599), lastCheck: t0))
         #expect(UpdateSchedule.isDue(now: t0.addingTimeInterval(3600), lastCheck: t0))
         #expect(UpdateSchedule.isDue(now: t0, lastCheck: t0.addingTimeInterval(60)))
+        #expect(!UpdateSchedule.isDue(now: t0.addingTimeInterval(299), lastCheck: t0, failed: true))
+        #expect(UpdateSchedule.isDue(now: t0.addingTimeInterval(300), lastCheck: t0, failed: true))
     }
 
     @Test func hubNotes() {

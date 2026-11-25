@@ -73,7 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated {
                     AppModel.shared.sessions.values.forEach { $0.reconnect() }
-                    Updates.check(manual: false)
+                    // Give the network a moment to come back; a failed check tries again in 5 minutes.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { MainActor.assumeIsolated { Updates.check(manual: false) } }
                 }
             }
         }

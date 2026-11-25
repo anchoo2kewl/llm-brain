@@ -9,6 +9,7 @@ enum Updates {
     static let running = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     static let restartNote = "Sessions run on the hub and stay open. A restart only reopens the app."
     private static var lastCheck: Date?
+    private static var lastFailed = false
     private static var timer: Timer?
 
     /// Check now, then every hour. The app also calls `check` after a wake from sleep.
@@ -18,7 +19,7 @@ enum Updates {
     }
 
     private static func tick() {
-        if UpdateSchedule.isDue(now: Date(), lastCheck: lastCheck) { check(manual: false) }
+        if UpdateSchedule.isDue(now: Date(), lastCheck: lastCheck, failed: lastFailed) { check(manual: false) }
     }
 
     /// Run the update helper. It installs when the user asked or automatic updates are on; otherwise it only
@@ -46,6 +47,7 @@ enum Updates {
                 } catch { return (false, error.localizedDescription) }
             }.value
             checking = false
+            lastFailed = !result.0
             AppDiagnostics.record("update_check manual=\(manual) ok=\(result.0) result=\(result.1.prefix(120))")
             refreshRestart()
             if result.0 {

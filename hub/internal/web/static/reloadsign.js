@@ -26,7 +26,7 @@
       sign.title = "The hub now runs " + v + ". Reload this page to use it. Sessions run on the hub and stay open.";
     }
     function check() {
-      if (document.hidden) return;
+      if (document.hidden && first !== null) return; // a hidden tab still learns its own version at once
       fetch("/api/hub-update/health", { cache: "no-store" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {

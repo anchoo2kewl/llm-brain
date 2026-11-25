@@ -11,8 +11,11 @@ const RELEASES: &str = "https://github.com/anchoo2kewl/llm-brain/releases/tag/cl
 pub const RESTART_NOTE: &str = "Sessions run on the hub and stay open. A restart only reopens the app.";
 const EVERY: Duration = Duration::from_secs(60 * 60);
 const TICK: Duration = Duration::from_secs(60);
+/// After a failed check (for example no network yet after a wake), try again sooner.
+const RETRY: Duration = Duration::from_secs(5 * 60);
 
 static CHECKING: AtomicBool = AtomicBool::new(false);
+static FAILED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Default)]
 struct State {
@@ -20,7 +23,7 @@ struct State {
     ready: Option<String>,
     /// A newer release that this run did not install: the app shows "Update Available".
     available: Option<String>,
-    /// The last version a background check told the user about, so each version notifies one time.
+    /// The last sign ("ready 0.1.13" or "available 0.1.13") a check told the user about, so each one notifies once.
     told: Option<String>,
 }
 static STATE: Mutex<State> = Mutex::new(State { ready: None, available: None, told: None });
@@ -48,10 +51,10 @@ fn valid(v: &str) -> Option<&str> {
 /// A check is due on start, an hour after the last one, and after a wake from sleep. Wall-clock time moves
 /// during sleep, so a tick that comes much later than `TICK` means the computer slept. A clock that moved back
 /// also starts a check.
-pub fn due(now: SystemTime, last_check: Option<SystemTime>, last_tick: SystemTime) -> bool {
+pub fn due(now: SystemTime, last_check: Option<SystemTime>, last_tick: SystemTime, failed: bool) -> bool {
     let Some(last) = last_check else { return true };
     let since = |t: SystemTime| now.duration_since(t).unwrap_or(Duration::MAX);
-    since(last) >= EVERY || since(last_tick) >= 3 * TICK
+    since(last) >= if failed { RETRY } else { EVERY } || since(last_tick) >= 3 * TICK
 }
 
 pub fn pending() -> Option<String> {
@@ -80,9 +83,16 @@ pub fn blocked() -> Option<&'static str> {
 /// The NSIS setup installs for the current user under %LOCALAPPDATA%; the MSI installs under Program Files.
 fn nsis_install() -> bool {
     match (std::env::current_exe(), std::env::var_os("LOCALAPPDATA")) {
-        (Ok(exe), Some(local)) => exe.starts_with(local),
+        (Ok(exe), Some(local)) => inside(&exe.to_string_lossy(), &local.to_string_lossy()),
         _ => false,
     }
+}
+
+/// True when the Windows path `path` is inside the folder `dir`. Windows paths ignore case; an empty folder is never a match.
+fn inside(path: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches(['\\', '/']).to_lowercase();
+    let path = path.to_lowercase();
+    !dir.is_empty() && path.strip_prefix(&dir).is_some_and(|rest| rest.starts_with(['\\', '/']))
 }
 
 /// Where the helper installs: the AppImage itself, or the Windows setup that the restart runs.
@@ -100,7 +110,15 @@ fn target(app: &AppHandle) -> Option<std::path::PathBuf> {
 
 #[cfg(windows)]
 fn setup_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    target(app).ok_or_else(|| "No update setup is ready.".to_owned())
+    // Storage Sense or an antivirus can remove the cached setup. Then keep the app open and check again.
+    match target(app) {
+        Some(path) if path.is_file() => Ok(path),
+        _ => {
+            state().ready = None;
+            crate::refresh_restart(app);
+            Err("The downloaded update is gone. Use Check for Updates… to download it again.".to_owned())
+        }
+    }
 }
 
 /// Start the new version after this process ends, then end this process. The new process waits for this one
@@ -166,7 +184,7 @@ pub fn schedule(app: &AppHandle) {
         let (mut last_check, mut last_tick) = (None, SystemTime::now());
         loop {
             let now = SystemTime::now();
-            if due(now, last_check, last_tick) {
+            if due(now, last_check, last_tick, FAILED.load(Ordering::Acquire)) {
                 last_check = Some(now);
                 check(&app, false);
             }
@@ -207,6 +225,7 @@ pub fn check(app: &AppHandle, manual: bool) {
             }
             Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
         })();
+        FAILED.store(result.is_err(), Ordering::Release);
         CHECKING.store(false, Ordering::Release);
         let text = result.as_deref().unwrap_or_default();
         let news = {
@@ -214,10 +233,15 @@ pub fn check(app: &AppHandle, manual: bool) {
             if let Some(v) = installed_version(text) {
                 s.ready = Some(v.to_owned());
                 s.available = None;
-            } else if let Some(v) = available_version(text) {
-                s.available = Some(v.to_owned());
+            } else if result.is_ok() {
+                // "You're up to date" clears a release that was withdrawn.
+                s.available = available_version(text).map(str::to_owned);
             }
-            let latest = s.ready.clone().or_else(|| s.available.clone());
+            let latest = match (&s.ready, &s.available) {
+                (Some(v), _) => Some(format!("ready {v}")),
+                (None, Some(v)) => Some(format!("available {v}")),
+                (None, None) => None,
+            };
             let news = latest.is_some() && latest != s.told;
             if news {
                 s.told = latest;
@@ -263,12 +287,25 @@ mod tests {
     fn schedule_with_a_fake_clock() {
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let at = |s: u64| t0 + Duration::from_secs(s);
-        assert!(due(t0, None, t0), "first tick checks");
-        assert!(!due(at(60), Some(t0), at(0)), "a minute later");
-        assert!(!due(at(3599), Some(t0), at(3540)), "just under an hour");
-        assert!(due(at(3600), Some(t0), at(3540)), "an hour later");
-        assert!(due(at(900), Some(t0), at(60)), "wake: the last tick was 14 minutes ago");
-        assert!(!due(at(900), Some(t0), at(840)), "normal tick");
-        assert!(due(t0, Some(at(60)), at(60)), "clock moved back");
+        assert!(due(t0, None, t0, false), "first tick checks");
+        assert!(!due(at(60), Some(t0), at(0), false), "a minute later");
+        assert!(!due(at(3599), Some(t0), at(3540), false), "just under an hour");
+        assert!(due(at(3600), Some(t0), at(3540), false), "an hour later");
+        assert!(due(at(900), Some(t0), at(60), false), "wake: the last tick was 14 minutes ago");
+        assert!(!due(at(900), Some(t0), at(840), false), "normal tick");
+        assert!(due(t0, Some(at(60)), at(60), false), "clock moved back");
+        assert!(!due(at(240), Some(t0), at(180), true), "a failed check waits a little");
+        assert!(due(at(300), Some(t0), at(240), true), "then tries again after 5 minutes");
+    }
+
+    #[test]
+    fn windows_install_folder() {
+        let local = r"C:\Users\Ann\AppData\Local";
+        assert!(inside(r"C:\Users\Ann\AppData\Local\Brain Hub\brain-hub.exe", local));
+        assert!(inside(r"c:\users\ann\appdata\local\Brain Hub\brain-hub.exe", local), "case does not matter");
+        assert!(inside(r"C:\Users\Ann\AppData\Local\Brain Hub\brain-hub.exe", r"C:\Users\Ann\AppData\Local\"));
+        assert!(!inside(r"C:\Program Files\Brain Hub\brain-hub.exe", local), "MSI");
+        assert!(!inside(r"C:\Users\Ann\AppData\LocalLow\Brain Hub\brain-hub.exe", local), "a sibling folder");
+        assert!(!inside(r"C:\Program Files\Brain Hub\brain-hub.exe", ""), "empty LOCALAPPDATA");
     }
 }
