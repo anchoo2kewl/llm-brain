@@ -286,7 +286,7 @@ struct Sidebar: View {
                         let e = row.entry
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded,
                                     tree: .init(depth: row.depth, children: e.children.count, open: treeOpen.contains(e.ref),
-                                                hub: row.otherHub, toggle: { toggleTree(e.ref) }),
+                                                hub: row.otherHub, toggle: { toggleTree(e.ref) }, roll: e.children.isEmpty ? nil : Rollup(e)),
                                     end: { end(e.ref) })
                             .tag(e.ref)
                             .id(e.ref)

@@ -83,7 +83,8 @@ public struct Rollup: Equatable, Sendable {
 public func needsQueue(_ entries: [Machine.Entry]) -> [TerminalRef] {
     func since(_ t: Terminal) -> Date { t.needsOwnerSince.flatMap(parseHubTime) ?? t.stateSince.flatMap(parseHubTime) ?? recentKey(t) }
     return entries.filter { $0.terminal.isOpen && Recency.pulses($0.terminal, opened: false) }
-        .sorted { since($0.terminal) != since($1.terminal) ? since($0.terminal) < since($1.terminal) : $0.terminal.id < $1.terminal.id }
+        .sorted { since($0.terminal) != since($1.terminal) ? since($0.terminal) < since($1.terminal)
+            : $0.terminal.id != $1.terminal.id ? $0.terminal.id < $1.terminal.id : $0.ref.hub < $1.ref.hub }
         .map(\.ref)
 }
 
@@ -127,7 +128,7 @@ public extension Terminal {
     /// "Idle 14m · 2 commits ahead". The git part needs the hub's `git`; without it the line shows what it has.
     func statusLine(_ kids: Rollup? = nil, now: Date = Date()) -> String {
         let pulse = Recency.pulses(self, opened: false)
-        if let k = kids, k.working > 0, !pulse, state == .waiting || state == .idle {
+        if let k = kids, k.working > 0, isOpen, askKind != "error", !pulse, state == .waiting || state == .idle {
             return "Waiting on \(k.working) \(k.working == 1 ? "child" : "children")"
         }
         let dur = stateSince.flatMap(parseHubTime).map { " " + duration(now.timeIntervalSince($0)) } ?? ""

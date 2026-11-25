@@ -326,6 +326,14 @@ import BrainHubCore
                                                                           TerminalRef(hub: "h", id: 3)], "every depth, the other hub's child too")
         #expect(descendants(of: TerminalRef(hub: "l", id: 1), in: ms).isEmpty, "the same id on another hub is another session")
         #expect(descendants(of: TerminalRef(hub: "h", id: 8), in: ms).isEmpty)
+        // Hold my place: rows keep the keys they had; new activity does not move them.
+        let late = ts.map { t in t.id == 8 ? { var x = t; x.lastActivity = "2027-01-15T09:00:00Z"; return x }() : t }
+        let before = ms.flatMap(\.terminals).map(\.terminal.id)
+        let keys = Dictionary(ms.flatMap { $0.terminals.flatMap(\.all) }.map { ($0.ref, $0.recent) }, uniquingKeysWith: { a, _ in a })
+        #expect(machines(terminals: late.map { ($0.hubNode == "laptop" ? "l" : "h", $0) }, live: [], nodes: ["m"], held: keys)
+            .flatMap(\.terminals).map(\.terminal.id) == before, "held: no row moves")
+        #expect(machines(terminals: late.map { ($0.hubNode == "laptop" ? "l" : "h", $0) }, live: [], nodes: ["m"])
+            .flatMap(\.terminals).map(\.terminal.id).first == 8, "released: it moves up")
         #expect(descendants(of: TerminalRef(hub: "h", id: 99), in: ms).isEmpty, "not listed")
         let loop = [node(5, "s", parent: ("s", 6), act: 1), node(6, "s", parent: ("s", 5), act: 2), node(7, "s", parent: ("s", 7), act: 3)]
         let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals

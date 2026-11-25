@@ -165,9 +165,10 @@
     if (n) reveal(n);
   }
   function reveal(t) {
-    for (var p = t, n = 0; p && p.parent_id > 0 && n < 8; n++) {
+    for (var p = t, seen = [t]; p && p.parent_id > 0; ) { // every ancestor; a loop in bad data ends
       p = liveRows().filter(function (x) { return x.hub === p.parent_hub && x.id === p.parent_id; })[0];
-      if (p) treeOpen[window.wsList.treeStateKey(p)] = true;
+      if (!p || seen.indexOf(p) >= 0) break;
+      seen.push(p); treeOpen[window.wsList.treeStateKey(p)] = true;
     }
     setPref("ws.treeOpen", treeOpen); renderList(); show(t.id);
   }

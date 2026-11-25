@@ -18,6 +18,8 @@ struct TerminalRow: View {
         var open = false
         var hub: String?
         var toggle: (() -> Void)?
+        /// Its subtree in numbers (rows with children).
+        var roll: Rollup?
     }
     var tree = Tree()
     /// One click on × ends the terminal (its CLI stops on its machine).
@@ -30,7 +32,7 @@ struct TerminalRow: View {
         let state = model.state(ref), wants = model.wantsYou(ref), open = expanded.contains(ref)
         let recent = model.recent(ref)
         // A closed parent shows its subtree in numbers and pulses for a child that waits for you.
-        let roll = tree.children > 0 && !tree.open ? model.entry(ref).map(Rollup.init) : nil
+        let roll = tree.open ? nil : tree.roll
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 8) {
                 // One control for the tree: the chevron on the left. Closed hides every row under it.
@@ -73,7 +75,7 @@ struct TerminalRow: View {
             HStack(spacing: 6) {
                 ProviderMark(mark: meta.mark, tool: meta.tool)
                 if let roll, !roll.label.isEmpty {
-                    Button(roll.label) { model.reveal = roll.first ?? ref }.buttonStyle(.plain).lineLimit(1)
+                    Button(roll.label) { if let f = roll.first { model.reveal = f } else { tree.toggle?() } }.buttonStyle(.plain).lineLimit(1)
                         .foregroundStyle(roll.needs > 0 ? AnyShapeStyle(SessionStyle.needsYou) : AnyShapeStyle(.secondary))
                         .help("Open the tree at the child that has waited longest")
                 } else {
@@ -91,7 +93,7 @@ struct TerminalRow: View {
                     .font(.appCaption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .lineLimit(3).padding(.leading, 30).help(p.detail ?? "")
             }
-            if selected || open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 30) }
+            if selected || open { TerminalDetailView(ref: ref, terminal: t, kids: tree.roll).padding(.leading, 30) }
         }
         .padding(.vertical, 2)
         .padding(.leading, CGFloat(tree.depth) * 16)
@@ -221,6 +223,7 @@ struct ProviderMark: View {
 struct TerminalDetailView: View {
     let ref: TerminalRef
     let terminal: Terminal
+    var kids: Rollup?
     @ViewState private var detail: TerminalDetail?
     @ViewState private var note: String?
 
@@ -240,7 +243,7 @@ struct TerminalDetailView: View {
             if let note { Text(note).font(.appCaption2).foregroundStyle(.secondary).lineLimit(1) }
             TimelineView(.periodic(from: .now, by: 5)) { ctx in
                 Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
-                    ForEach(terminal.detailRows(detail, now: ctx.date, kids: AppModel.shared.entry(ref).map(Rollup.init)), id: \.label) { r in
+                    ForEach(terminal.detailRows(detail, now: ctx.date, kids: kids), id: \.label) { r in
                         GridRow {
                             Text(r.label).foregroundStyle(.tertiary)
                             Text(r.value).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(r.help)
@@ -283,20 +286,16 @@ struct NeedsBar: View {
 
     var body: some View {
         let n = model.needsQueue.count
-        if n > 0 || model.held != nil {
-            HStack(spacing: 8) {
-                if n > 0 {
-                    Button("Needs me (\(n))", action: go).controlSize(.small)
-                        .help("Open the session that has waited longest for you (⌘J). Again: the next one.")
-                }
-                Spacer(minLength: 0)
-                if model.held != nil {
-                    Text("order paused").font(.appCaption2).foregroundStyle(.secondary)
-                        .help("The rows keep their places while the pointer is in the list")
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 4)
+        // Always the same height: nothing under the pointer moves when the button or the mark comes or goes.
+        HStack(spacing: 8) {
+            Button("Needs me (\(n))", action: go).controlSize(.small).opacity(n > 0 ? 1 : 0).disabled(n == 0)
+                .help("Open the session that has waited longest for you (⌘J). Again: the next one.")
+                .accessibilityHidden(n == 0)
+            Spacer(minLength: 0)
+            Text("order paused").font(.appCaption2).foregroundStyle(.secondary).opacity(model.held != nil ? 1 : 0)
+                .help("The rows keep their places while the pointer is in the list")
         }
+        .padding(.horizontal, 12).padding(.vertical, 4)
     }
 }
 

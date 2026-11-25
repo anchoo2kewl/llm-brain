@@ -114,9 +114,6 @@ final class AppModel {
                                uniquingKeysWith: { a, _ in a }) : nil
     }
 
-    /// This row in the cluster's tree (with the rows under it).
-    func entry(_ ref: TerminalRef) -> Machine.Entry? { machines.lazy.flatMap { $0.terminals.flatMap(\.all) }.first { $0.ref == ref } }
-
     /// Handoff: the hub compacts the conversation, or starts a successor session as a child. One request per session.
     private(set) var handingOff: Set<TerminalRef> = []
     struct HandoffReply: Decodable { var mode: String; var id: Int64? }

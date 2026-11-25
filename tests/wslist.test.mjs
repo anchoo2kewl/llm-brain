@@ -175,9 +175,10 @@ test("descendants: every depth, across hubs, never a session running elsewhere, 
 test("context levels: one place for the thresholds; handoff from 80 % on a hub that offers it", () => {
   assert.deepEqual([74, 75, 84, 85, 100].map(contextLevel), ["normal", "warn", "warn", "high", "high"]);
   assert.equal(contextLevel(null), "");
-  const row = (used, f = {}) => ({ id: 1, status: "live", context_used: used, context_window: 100, needs_owner_since: null, ...f });
+  const row = (used, f = {}) => ({ id: 1, status: "live", context_used: used, context_window: 100, needs_owner_since: null, git: {}, ...f });
   assert.deepEqual([79, 80].map((u) => handoffOffered(row(u))), [false, true]);
-  const old = row(90); delete old.needs_owner_since;
+  const old = row(90); delete old.needs_owner_since; delete old.git;
+  assert.equal(handoffOffered(row(90, { git: null })), false, "a null is not a sign: the same rule as the Mac app");
   assert.equal(handoffOffered(old), false, "an older hub: no action");
   assert.equal(handoffOffered({ ...old, handoff: true }), true, "the hub's own flag wins");
   assert.equal(handoffOffered(row(90, { handoff: false })), false);
@@ -197,6 +198,8 @@ test("needs me: the longest wait first, one entry per session, then the next one
   assert.equal(nextNeeds(q, a), c, "it wraps");
   assert.equal(nextNeeds(needsQueue([a, busy]), busy), a, "after an answer the current one left the queue");
   assert.equal(nextNeeds([], a), null);
+  const h1 = { ...a, hub: "b" }, h2 = { ...a, hub: "a" };
+  assert.deepEqual(needsQueue([h1, h2]).map((t) => t.hub), ["a", "b"], "the same id and time on two hubs: by hub");
 });
 
 test("rollup: a closed parent counts its subtree at all depths", () => {
@@ -220,4 +223,6 @@ test("status line: state and time, then git; a parent waits on its children", ()
   assert.equal(statusLine({ state: "waiting", ask_kind: "done", state_since: s(2) }, { working: 3 }, now), "Waiting on 3 children");
   assert.equal(statusLine({ state: "waiting", needs_owner: true, state_since: s(2) }, { working: 3 }, now), "Waiting for you 2m", "a question comes first");
   assert.equal(statusLine({ state: "working", state_since: s(1) }, null, now), "Working 1m", "an older hub: no git part");
+  assert.equal(statusLine({ state: "waiting", status: "ended" }, { working: 2 }, now), "Ended", "an ended parent never waits on children");
+  assert.equal(statusLine({ state: "waiting", ask_kind: "error" }, { working: 2 }, now), "Stopped on an error");
 });

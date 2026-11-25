@@ -139,6 +139,8 @@ import BrainHubCore
         #expect(line({ ($0.state, $0.askKind) = (.waiting, "done") }, kids: roll) == "Waiting on 2 children")
         #expect(line({ ($0.state, $0.needsOwner, $0.stateSince) = (.waiting, true, ago(2)) }, kids: roll) == "Waiting for you 2m")
         #expect(line { ($0.state, $0.stateSince) = (.working, ago(1)) } == "Working 1m", "an older hub: no git part")
+        #expect(line({ ($0.state, $0.status) = (.waiting, "ended") }, kids: roll).hasPrefix("Ended"), "an ended parent never waits on children")
+        #expect(line({ ($0.state, $0.askKind) = (.waiting, "error") }, kids: roll).hasPrefix("Stopped on an error"))
     }
 
     @Test func olderDetailWithoutTokensStillDecodes() throws {

@@ -138,7 +138,8 @@
   function live(t) { return t.status !== "ended" && t.status !== "failed"; }
   // The hub answers POST /api/terminals/{id}/handoff (it sends needs_owner_since, or says so with "handoff").
   function handoffOffered(t) {
-    var p = rowMeta(t).pct, can = typeof t.handoff === "boolean" ? t.handoff : "needs_owner_since" in t;
+    // The hub's own flag; else a hub that sends the 0.1.15 fields (the same rule as the Mac app, which cannot see a null).
+    var p = rowMeta(t).pct, can = typeof t.handoff === "boolean" ? t.handoff : t.needs_owner_since != null || t.git != null;
     return can && live(t) && t.kind !== "session" && p !== null && p >= LEVEL.handoff;
   }
   // Since when the session waits for the owner: one continuous period counts once.
@@ -146,7 +147,7 @@
   // The sessions that wait for the owner, the longest wait first; ties by the lower id.
   function needsQueue(rows) {
     return rows.filter(function (t) { return t.kind !== "session" && live(t) && pulses(t, false); })
-      .sort(function (a, b) { return needsSince(a) - needsSince(b) || (a.id > b.id ? 1 : a.id < b.id ? -1 : 0); });
+      .sort(function (a, b) { return needsSince(a) - needsSince(b) || (a.id > b.id ? 1 : a.id < b.id ? -1 : 0) || ((a.hub || "") < (b.hub || "") ? -1 : (a.hub || "") > (b.hub || "") ? 1 : 0); });
   }
   // Needs me: the longest wait first; from a session in the queue, the next one (after an answer it leaves the queue).
   function nextNeeds(queue, current) {
@@ -167,7 +168,7 @@
   function statusLine(t, kids, now) {
     now = now === undefined ? Date.now() : now;
     var since = ms(t.state_since), dur = since !== null ? " " + duration((now - since) / 1000) : "", g = t.git, label = stateLabel(t);
-    if (kids && kids.working > 0 && !pulses(t, false) && (t.state === "waiting" || t.state === "idle"))
+    if (kids && kids.working > 0 && live(t) && t.ask_kind !== "error" && !pulses(t, false) && (t.state === "waiting" || t.state === "idle"))
       return "Waiting on " + kids.working + (kids.working === 1 ? " child" : " children");
     var files = g && g.files_changed > 0 ? plural(g.files_changed, "file") + " (+" + (g.insertions || 0) + "/−" + (g.deletions || 0) + ")" : "";
     var ahead = g && g.ahead > 0 ? plural(g.ahead, "commit") + " ahead" : "";
@@ -277,7 +278,7 @@
     post("/api/terminals/" + encodeURIComponent(id) + "/handoff", {})
       .then(function (j) { say(j.mode === "successor" ? "Successor session " + j.id + " started" : "Compacting the conversation"); done(j); },
         function (e) { say("Handoff failed: " + e.message); })
-      .then(function () { delete busy[id]; });
+      .then(function () { delete busy[id]; }, function () { delete busy[id]; });
   }
 
   root.wsSide = { needsButton: needsButton, hold: hold, handoff: handoff, standalone: standalone };
