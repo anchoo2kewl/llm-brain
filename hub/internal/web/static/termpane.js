@@ -45,6 +45,9 @@
     function send(data) {
       var b = typeof data === "string" ? enc.encode(data) : data;
       lastIn = Date.now(); answered = false; seen = true;
+      // The owner typed, pasted or sent: it orders the session list. Replies the terminal sends by itself (cursor
+      // position, device attributes, focus in and out, OSC answers) are not input.
+      if (opts.onInput && !(window.wsList && window.wsList.isReply(data))) opts.onInput();
       if (ws && ws.readyState === 1) ws.send(b);
       else if (queued.length < 500) queued.push(b);
     }

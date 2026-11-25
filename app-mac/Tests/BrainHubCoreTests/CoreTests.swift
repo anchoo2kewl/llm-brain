@@ -240,59 +240,90 @@ import BrainHubCore
                                       (hub, t(3, "studio", "live", "3")), (hub, t(4, "other", "starting", "4")),
                                       (hub, t(5, "studio", "ended", "5"))],
                           live: live,
-                          nodes: ["studio", "laptop"], keep: [TerminalRef(hub: hub, id: 5)])
+                          nodes: ["studio", "laptop"])
         #expect(ms.map(\.name) == ["studio", "laptop", "other"])
-        #expect(ms[0].terminals.map(\.terminal.id) == [5, 3], "ended ones only when kept; newest first")
+        #expect(ms[0].terminals.map(\.terminal.id) == [3], "open ones in the list")
+        let ended = endedSessions(terminals: [(hub, t(2, "studio", "ended", "2")), (hub, t(5, "studio", "ended", "5")), (hub, t(6, "laptop", "failed", "6"))],
+                                  keep: [TerminalRef(hub: hub, id: 5), TerminalRef(hub: hub, id: 6)])
+        #expect(ended.map(\.terminal.id) == [6, 5], "ended ones only when kept, one group for every machine")
         #expect(ms[1].elsewhere.map(\.id) == [9])
+        let more = try JSONDecoder().decode([LiveSession].self, from: Data(#"""
+            [{"id":3,"title":"a","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:20.900Z","messages":1},
+             {"id":4,"title":"b","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:20.100Z","messages":1},
+             {"id":2,"title":"c","host":"m","cli":"x","cwd":"~","updated":"2027-01-15T08:00:30Z","messages":1}]
+            """#.utf8))
+        #expect(machines(terminals: [], live: more, nodes: ["m"])[0].elsewhere.map(\.id) == [2, 4, 3], "by activity, whole seconds, ties by id")
     }
 }
 
 @Suite struct SidebarOrder {
-    func term(_ id: Int64, started: String?, updated: String = "1", state: AgentState? = nil) -> Terminal {
-        var t = Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated, state: state)
-        t.started = started
+    /// A row from hub 0.1.12: `act` = last_activity_at, `input` = last_input_at (seconds after a fixed start).
+    func term(_ id: Int64, act: Int? = nil, input: Int? = nil, started: Int = 0, updated: Int? = 0, state: AgentState? = nil) -> Terminal {
+        func at(_ s: Int) -> String { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_800_000_000 + Double(s))) }
+        var t = Terminal(id: id, title: "", host: "m", cli: "x", provider: "x", cwd: "~", status: "live", updated: updated.map(at) ?? "", state: state)
+        (t.started, t.lastActivity, t.lastInput) = (at(started), act.map(at), input.map(at))
         return t
     }
-    func ids(_ ts: [Terminal]) -> [Int64] {
-        machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals.map(\.ref.id)
+    func ids(_ ts: [Terminal], inputs: [Int64: Int] = [:]) -> [Int64] {
+        let local = Dictionary(uniqueKeysWithValues: inputs.map { (TerminalRef(hub: "h", id: $0.key), Date(timeIntervalSince1970: 1_800_000_000 + Double($0.value))) })
+        return machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], inputs: local)[0].terminals.map(\.ref.id)
     }
 
-    @Test func newestStartedFirst() {
-        let ts = [term(1, started: "2026-01-01T00:00:01Z"), term(2, started: "2026-01-01T00:00:03.5Z"),
-                  term(3, started: "2026-01-01T00:00:02Z"), term(4, started: "2026-01-01T00:00:02Z")]
-        #expect(ids(ts) == [2, 4, 3, 1], "ties: the higher id first")
-        #expect(ids([term(1, started: nil), term(3, started: nil), term(2, started: nil)]) == [3, 2, 1], "an older hub: by id")
+    @Test func outputAndInputMoveARowUp() {
+        let base = [term(1, act: 10), term(2, act: 20), term(3, act: 30)]
+        #expect(ids(base) == [3, 2, 1])
+        #expect(ids([term(1, act: 40), term(2, act: 20), term(3, act: 30)]) == [1, 3, 2], "agent output moves it up")
+        #expect(ids([term(1, act: 10, input: 50), term(2, act: 20), term(3, act: 30)]) == [1, 3, 2], "owner input moves it up")
+        #expect(ids(base, inputs: [2: 60]) == [2, 3, 1], "input this app sent counts on an older hub too")
     }
 
-    @Test func childrenNestUnderTheirParentNewestFirst() {
-        func node(_ id: Int64, _ hub: String, parent: (String, Int64)? = nil, started: String) -> Terminal {
-            var t = term(id, started: started)
+    @Test func nothingElseMovesARow() {
+        let base = [term(1, act: 10), term(2, act: 20)]
+        // A spinner or a state flip that the hub does not count as activity changes no timestamp.
+        #expect(ids([term(1, act: 10, updated: 99, state: .waiting), term(2, act: 20, state: .working)]) == ids(base))
+        #expect(ids([term(1, act: 20), term(2, act: 20)]) == [2, 1], "ties: the higher id first")
+        // Less than a second apart is a tie: jitter never reorders.
+        var a = term(1, act: 20), b = term(2, act: 20)
+        a.lastActivity = "2027-01-15T08:00:20.900Z"; b.lastActivity = "2027-01-15T08:00:20.100Z"
+        #expect(ids([a, b]) == [2, 1])
+    }
+
+    @Test func olderHubUsesUpdatedThenStart() {
+        #expect(ids([term(1, updated: 50), term(2, updated: 40)]) == [1, 2])
+        #expect(ids([term(1, started: 6, updated: nil), term(2, started: 5, updated: nil)]) == [1, 2], "start time only when there is nothing else")
+    }
+
+    @Test func aParentRisesWithItsChildrenAndChildrenFollowTheirOwnActivity() {
+        func node(_ id: Int64, _ hub: String, parent: (String, Int64)? = nil, act: Int) -> Terminal {
+            var t = term(id, act: act)
             (t.hubNode, t.parentHub, t.parentId) = (hub, parent?.0, parent?.1)
             return t
         }
-        let ts = [node(1, "studio", started: "2026-01-01T00:00:01Z"),
-                  node(2, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:02Z"),
-                  node(3, "studio", parent: ("studio", 1), started: "2026-01-01T00:00:03Z"),
-                  node(1, "laptop", parent: ("studio", 2), started: "2026-01-01T00:00:04Z"), // same id, another hub
-                  node(9, "studio", parent: ("studio", 77), started: "2026-01-01T00:00:05Z")] // parent not listed
-        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
-        #expect(top.map(\.terminal.id) == [9, 1])
-        #expect(top[1].children.map(\.terminal.id) == [3, 2])
-        #expect(top[1].children[1].children.map { $0.terminal.hubNode } == ["laptop"])
-        #expect(top[1].all.count == 4)
-        #expect(ids([term(1, started: nil), term(2, started: nil)]) == [2, 1], "an older hub: flat")
-        let loop = [node(5, "s", parent: ("s", 6), started: "2026-01-01T00:00:01Z"), node(6, "s", parent: ("s", 5), started: "2026-01-01T00:00:02Z"),
-                    node(7, "s", parent: ("s", 7), started: "2026-01-01T00:00:03Z")]
-        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"], keep: [])[0].terminals
+        let ts = [node(1, "studio", act: 1),
+                  node(2, "studio", parent: ("studio", 1), act: 50),
+                  node(3, "studio", parent: ("studio", 1), act: 40),
+                  node(1, "laptop", parent: ("studio", 2), act: 2), // same id, another hub
+                  node(8, "studio", act: 30),
+                  node(9, "studio", parent: ("studio", 77), act: 5)] // parent not listed: top level
+        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals
+        #expect(top.map(\.terminal.id) == [1, 8, 9], "the conductor rises: its child worked at 50")
+        #expect(top[0].children.map(\.terminal.id) == [2, 3], "children by their own activity")
+        #expect(top[0].children[0].children.map { $0.terminal.hubNode } == ["laptop"])
+        #expect(top[0].all.count == 4)
+        let loop = [node(5, "s", parent: ("s", 6), act: 1), node(6, "s", parent: ("s", 5), act: 2), node(7, "s", parent: ("s", 7), act: 3)]
+        let shown = machines(terminals: loop.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals
         #expect(shown.flatMap(\.all).count == 3, "a loop in bad data never hides a session")
     }
+}
 
-    @Test func activityAndStateNeverReorder() {
-        let before = [term(1, started: "2026-01-01T00:00:01Z"), term(2, started: "2026-01-01T00:00:02Z")]
-        let after = [term(1, started: "2026-01-01T00:00:01Z", updated: "2026-01-02T00:00:00Z", state: .waiting),
-                     term(2, started: "2026-01-01T00:00:02Z", state: .ended)]
-        #expect(ids(before) == [2, 1] && ids(after) == [2, 1])
-        #expect(ids(after + [term(3, started: "2026-01-01T00:00:03Z")]) == [3, 2, 1], "a new terminal goes on top")
+@Suite struct QuickSwitcher {
+    @Test func prefixFirstThenContainsInSidebarOrder() {
+        let names = ["Memory sync", "DB migration", "Docs site", "scratch", "Old db"]
+        #expect(switcherMatches(names, query: "db") == [1, 4])
+        #expect(switcherMatches(names, query: "s") == [3, 0, 2], "starts with s first, then contains s")
+        #expect(switcherMatches(names, query: "  ") == [0, 1, 2, 3, 4])
+        #expect(switcherMatches(names, query: "", limit: 2) == [0, 1])
+        #expect(switcherMatches(names, query: "zzz").isEmpty)
     }
 }
 

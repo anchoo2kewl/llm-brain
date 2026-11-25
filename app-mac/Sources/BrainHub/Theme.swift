@@ -20,6 +20,10 @@ enum SessionStyle {
             : NSColor(srgbRed: 0xb4 / 255, green: 0x53 / 255, blue: 0x09 / 255, alpha: 1)
     })
     static let endedOpacity = 0.55
+    /// A row moving to its new place in the list: short and calm; none with Reduce Motion.
+    static var move: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeInOut(duration: 0.2)
+    }
     /// The hub's --st-failed token: the slow red pulse of a session that waits for you.
     static let needsYou = Color(nsColor: NSColor(name: nil) { a in
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

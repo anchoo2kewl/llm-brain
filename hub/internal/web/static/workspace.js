@@ -52,6 +52,7 @@
       isFocused: function () { return document.hasFocus() && st.slots[st.focus] === info.id; },
       onSay: function (t) { var s = shownAt(info.id); if (s >= 0 && slotEls[s]) slotEls[s].msg.textContent = t; },
       onState: function () { paintItem(info.id); paintSlot(shownAt(info.id)); badge(); },
+      onInput: function () { noteInput(info.id); },
       onStatus: function (s) {
         if (!s.status) return;
         info.status = s.status; info.error = s.error; paintItem(info.id);
@@ -103,16 +104,19 @@
       Object.keys(infos).forEach(function (k) {
         if (infos[k].kind === "session" && st.slots.indexOf(k) >= 0 && !live.some(function (x) { return "s" + x.id === k; })) ts.push(infos[k]);
       });
-      var seen = {};
-      ts.sort(window.wsList.newestFirst); // never by activity: rows stay where they are
+      var seen = {}, seenTree = {};
+      ts.sort(window.wsList.byRecent(keyOf)); // strictly the latest activity or interaction
       order = ts.map(function (t) { return t.id; });
       ts.forEach(function (t) {
-        seen[t.id] = true;
+        seen[t.id] = true; seenTree[window.wsList.treeStateKey(t)] = true;
         var old = infos[t.id];
         infos[t.id] = t;
         if (old && old.title !== t.title && slotOf(t.id) >= 0) paintSlot(slotOf(t.id));
         attach(t);
       });
+      Object.keys(treeOpen).forEach(function (id) { if (!seenTree[id]) delete treeOpen[id]; }); // ended parents
+      setPref("ws.treeOpen", treeOpen);
+      Object.keys(inputs).forEach(function (id) { if (!seen[id]) delete inputs[id]; });
       Object.keys(infos).forEach(function (id) {
         if (!seen[id]) { delete infos[id]; drop(id); }
         else if (infos[id].status === "ended" || infos[id].status === "failed") drop(id);
@@ -141,19 +145,51 @@
     if (i.blocked) return "blocked";
     return p ? p.state() : "idle";
   }
+  // When the owner last typed or pasted into each terminal from this page (an older hub does not report input).
+  // Input times live in memory, as in the Mac app: a reused id after a hub reset never inherits an old time.
+  var inputs = {}, treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
+  function pref(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch (e) { return d; } }
+  function setPref(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } }
+  function keyOf(t) { return window.wsList.recentKey(t, inputs[t.id]); }
+  var inputTimer = null;
+  function noteInput(id) { // at most once a second
+    var now = Date.now();
+    if (inputs[id] && now - inputs[id] < 1000) return;
+    inputs[id] = now;
+    if (inputTimer) return; // one update per second while the owner types
+    inputTimer = setTimeout(function () {
+      inputTimer = null;
+      order = order.filter(function (k) { return infos[k]; }); // a row closed meanwhile
+      order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); });
+      renderList();
+    }, 1000);
+  }
+  var calm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   function renderList() {
-    var q = (document.getElementById("wsq").value || "").toLowerCase();
+    var q = (document.getElementById("wsq").value || "").trim().toLowerCase();
     var top = list.scrollTop; // emptying the list would scroll it to the top
     var focused = list.contains(document.activeElement) ? document.activeElement : null; // and drop the focus
+    var before = {}; // where each row was: a moved row glides from there
+    Object.keys(items).forEach(function (k) { if (items[k].isConnected) before[k] = items[k].getBoundingClientRect().top; });
+    function liveOrder() { // the live rows in list order: only a change here moves the view to the selection
+      return Array.prototype.filter.call(list.children, function (li) { return li.dataset.id && !li.ended; }).map(function (li) { return li.dataset.id; }).join(",");
+    }
+    var was = liveOrder(), hadRows = Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",");
     list.textContent = "";
     var header = false;
+    var all = order.map(function (id) { return infos[id]; });
+    var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
+    var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
+    var mixed = all.reduce(function (m, t) { m[PROV[provOf(t)] || ">_"] = 1; return m; }, {});
+    mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
-    var rows = q ? order.map(function (id) { return { t: infos[id], depth: 0, kids: 0, otherHub: "" }; })
-      : window.wsList.treeRows(order.map(function (id) { return infos[id]; }), treeOpen);
-    rows.forEach(function (r) {
+    // The filter is the quick switcher: names that start with the text first, then the rest that match.
+    var rows = q ? window.wsList.switcher(all.map(function (t) { return window.wsList.searchText(t); }), q, all.length)
+        .map(function (i) { return { t: all[i], depth: 0, kids: 0, otherHub: "" }; })
+      : window.wsList.treeRows(live, treeOpen, keyOf);
+    function put(r, inEnded) {
       var t = r.t, id = t.id;
-      if (q && (t.title + " " + t.cwd + " " + t.cli + " " + t.host).toLowerCase().indexOf(q) < 0) return;
-      if (t.kind === "session" && !header) {
+      if (t.kind === "session" && !header && !inEnded && !q) { // a search is one flat list
         header = true;
         var h = el("li", "ws-sect", "Running elsewhere");
         h.setAttribute("role", "presentation");
@@ -161,22 +197,56 @@
         list.appendChild(h);
       }
       var li = items[id] || makeItem(id);
+      li.dataset.id = id;
       list.appendChild(li);
+      li.mixed = mixed;
       paintItem(id);
-      li.style.marginLeft = r.depth ? r.depth * 14 + "px" : "";
+      li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
       li.parts.kids.hidden = !r.kids;
-      li.parts.kids.textContent = (treeOpen[id] ? "▾ " : "▸ ") + r.kids;
-      li.parts.kids.title = treeOpen[id] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
-      li.parts.kids.setAttribute("aria-expanded", treeOpen[id] ? "true" : "false");
+      li.parts.kids.textContent = (treeOpen[window.wsList.treeStateKey(infos[id])] ? "▾ " : "▸ ") + r.kids;
+      li.parts.kids.title = treeOpen[window.wsList.treeStateKey(infos[id])] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
+      li.parts.kids.setAttribute("aria-expanded", treeOpen[window.wsList.treeStateKey(infos[id])] ? "true" : "false");
       li.parts.hub.textContent = r.otherHub;
       li.parts.hub.hidden = !r.otherHub;
       li.kids = r.kids;
-    });
+      li.ended = !!inEnded;
+    }
+    rows.forEach(function (r) { put(r, false); });
+    // Ended and failed sessions leave the live list: one collapsed group at the bottom.
+    var eh = null;
+    if (ended.length && !q) {
+      eh = el("li", "ws-sect ws-ended", (endedOpen ? "▾ " : "▸ ") + "Ended (" + ended.length + ")");
+      eh.setAttribute("role", "button"); eh.tabIndex = 0; eh.setAttribute("aria-expanded", endedOpen ? "true" : "false");
+      eh.onclick = eh.onkeydown = function (e) {
+        if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault(); endedOpen = !endedOpen; setPref("ws.endedOpen", endedOpen); renderList();
+      };
+      list.appendChild(eh);
+      if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }, true); });
+    }
     list.scrollTop = top;
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+    else if (focused && focused.classList.contains("ws-ended") && eh) eh.focus({ preventScroll: true }); // a new header element
+    if (Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",") === hadRows) return;
+    // The live order changed: the selected row stays in view (before the glide is measured). Then each moved row
+    // glides to its new place (none with reduced motion).
+    var on = list.querySelector(".ws-item.on");
+    if (on && !q && liveOrder() !== was) on.scrollIntoView({ block: "nearest" });
+    if (!calm.matches) Object.keys(before).forEach(function (k) {
+      var li = items[k];
+      if (!li || !li.isConnected) return;
+      var dy = before[k] - li.getBoundingClientRect().top;
+      if (!dy) return;
+      li.style.transition = "none"; li.style.transform = "translateY(" + dy + "px)";
+      li.getBoundingClientRect(); // apply the start position before the transition
+      li.style.transition = "transform 200ms ease"; li.style.transform = "";
+      setTimeout(function () { li.style.transition = ""; }, 250); // back to the CSS transition
+    });
   }
-  var treeOpen = {}; // parents whose child sessions show
-  function setTree(id, open) { if (open) treeOpen[id] = true; else delete treeOpen[id]; renderList(); if (items[id]) items[id].focus(); }
+  function setTree(id, open) {
+    if (open) treeOpen[window.wsList.treeStateKey(infos[id])] = true; else delete treeOpen[window.wsList.treeStateKey(infos[id])];
+    setPref("ws.treeOpen", treeOpen); renderList(); if (items[id]) items[id].focus();
+  }
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Terminals");
   // Up and Down move the selection through the list, like a native sidebar.
@@ -187,7 +257,7 @@
     if (at < 0) return;
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") { // open or close a parent's child sessions
       var pid = order.filter(function (k) { return items[k] === e.target; })[0];
-      if (pid === undefined || !e.target.kids || !!treeOpen[pid] === (e.key === "ArrowRight")) return;
+      if (pid === undefined || !e.target.kids || !!treeOpen[window.wsList.treeStateKey(infos[pid])] === (e.key === "ArrowRight")) return;
       e.preventDefault();
       setTree(pid, e.key === "ArrowRight");
       return;
@@ -199,18 +269,25 @@
     if (id !== undefined) show(id);
     next.focus({ preventScroll: false });
   });
+  // One line per row (docs/design.md): dot, name, muted folder, then the age. The summary is in the tooltip.
   function makeItem(id) {
     var li = el("li", "ws-item");
     li.tabIndex = 0;
     li.setAttribute("role", "option");
-    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), num = el("span", "ws-it-num");
-    var age = el("span", "ws-it-age"); age.title = "Last activity or input";
-    var hub = el("span", "bdg host"); hub.hidden = true; hub.title = "This child session runs on this hub";
+    var top = el("div", "ws-it-top"), dot = el("span", "dot-s"), title = el("span", "ws-it-title"), dir = el("span", "ws-it-dir");
+    var num = el("span", "ws-it-num"), age = el("span", "ws-it-age"), prov = el("span", "ws-prov");
+    var hub = el("span", "ws-it-hub"); hub.hidden = true; hub.title = "This child session runs on this hub";
     var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
-    kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[id]); });
-    top.append(dot, title, hub, kids, age, num);
-    var badges = el("div", "ws-badges"), meta = el("div", "ws-it-meta"), prev = el("div", "ws-it-prev");
-    li.append(top, badges, meta, prev);
+    kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[window.wsList.treeStateKey(infos[id])]); });
+    var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
+    pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
+    var prev = el("div", "ws-it-prev"); // only a close error, for a moment
+    var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; setTimeout(function () { prev.textContent = ""; }, 6000); });
+    // The age and the buttons share one place: the buttons show over the age on hover or focus (no dead space).
+    var acts = el("span", "ws-acts"), btns = el("span", "ws-btns");
+    btns.append(pen, x); acts.append(age, btns);
+    top.append(dot, title, dir, hub, prov, kids, num, acts);
+    li.append(top, prev);
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
       li.draggable = true;
@@ -218,15 +295,13 @@
     }
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
-    var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
-    pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
-    top.insertBefore(pen, num);
-    var x = closeBtn(function () { return id; }, "ws-pen ws-close", function (msg) { prev.textContent = msg; });
-    top.insertBefore(x, num);
     items[id] = li;
-    li.parts = { dot: dot, title: title, meta: meta, prev: prev, num: num, badges: badges, close: x, age: age, kids: kids, hub: hub };
+    li.parts = { dot: dot, title: title, dir: dir, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
+  function folder(t) { return window.wsList.folder(t); }
+  var PROV = { claude: "CC", codex: "CX", antigravity: "AG", "claude code": "CC" };
+  function provOf(t) { return (t.provider || t.cli || "").toLowerCase(); }
   var seenIds = {}, seenKey = {};
   function paintItem(id) {
     var li = items[id], t = infos[id];
@@ -235,22 +310,28 @@
     var on = slotOf(id) === st.focus;
     li.className = "ws-item s-" + s + (t.kind === "session" ? " ext" : "") + (on ? " on" : slotOf(id) >= 0 ? " shown" : "");
     li.setAttribute("aria-selected", on ? "true" : "false");
-    badgesFor(li.parts.badges, t);
     // Opened since its state last changed: it stops pulsing. A new question makes it pulse again.
     var key = [t.state || "", t.ask_kind || "", t.blocked ? 1 : 0, t.needs_owner ? 1 : 0, t.ask || ""].join("/");
     if (seenKey[id] !== key) { seenKey[id] = key; delete seenIds[id]; }
     if (on) seenIds[id] = true;
-    var when = window.wsList.lastActive(t), pulse = window.wsList.pulses(t, on || seenIds[id]);
+    var when = window.wsList.lastActive(t, inputs[id]), pulse = window.wsList.pulses(t, on || seenIds[id]);
     li.parts.dot.title = pulse ? "waiting for you" : dotTitle[s] || s;
     li.parts.dot.className = "dot-s " + s + (pulse ? " needs" : "");
     li.parts.dot.style.opacity = pulse || s === "working" ? "" : String(window.wsList.dotOpacity(when));
     li.parts.age.textContent = window.wsList.shortAge(when);
     if (li.parts.title.getAttribute("contenteditable") !== "true") li.parts.title.textContent = t.title || "terminal " + id;
-    li.parts.meta.textContent = t.cli + " · " + t.cwd;
+    li.parts.dir.textContent = folder(t);
+    li.parts.prov.hidden = !li.mixed;
+    li.parts.prov.textContent = PROV[provOf(t)] || ">_";
     li.parts.close.sync();
     var slot = slotOf(id);
-    li.parts.num.textContent = slot >= 0 ? String(slot + 1) : "";
-    li.parts.prev.textContent = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host) : p ? p.lastLine() : "";
+    li.parts.num.hidden = true; // the pane header shows its number; the tooltip says it here
+    // Everything the one line leaves out.
+    var ask = s === "ended" ? (t.error || t.status) : s === "blocked" ? "Waiting on a macOS permission prompt on " + shortHost(t.host)
+      : t.ask ? t.ask : p ? p.lastLine() : "";
+    li.title = [(t.title || "terminal " + id) + " · " + (pulse ? "waiting for you" : dotTitle[s] || s), ask,
+      (t.kind === "session" ? "Outside the hub, read-only · " : "") + t.cli + " on " + shortHost(t.host) + " · " + t.cwd,
+      slot >= 0 ? "In pane " + (slot + 1) : ""].filter(Boolean).join("\n");
   }
   // badgesFor: where it runs. Hub terminals: the Mac. Sessions started elsewhere: OUTSIDE HUB, the Mac, read-only.
   function shortHost(h) { return /macbook/i.test(h) ? "MacBook" : /studio/i.test(h) ? "Studio" : h; }
@@ -261,8 +342,7 @@
       box.appendChild(el("span", "bdg host", shortHost(t.host)));
       box.appendChild(el("span", "bdg ro", "read-only"));
     } else {
-      box.appendChild(el("span", "bdg hub", "HUB"));
-      box.appendChild(el("span", "bdg host", shortHost(t.host)));
+      box.appendChild(el("span", "bdg host", shortHost(t.host))); // a hub terminal is the normal case: no "HUB" chip
     }
   }
   function badge() {
@@ -739,6 +819,7 @@
     else if (k === "Enter") toggleZoom();
     else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
     else if (k === "N" || k === "n") openNew();
+    else if (k === "K" || k === "k") { wsq.focus(); wsq.select(); }
     else if (k === "J" || k === "j") { var w = order.filter(function (id) { return stateOf(id) === "waiting"; }); if (w.length) show(w[0]); }
     else return true;
     e.preventDefault();
@@ -747,7 +828,23 @@
   // Capture phase on the document: runs before xterm sees the key, so a shortcut never reaches the shell.
   document.addEventListener("keydown", function (e) { if (!shortcut(e)) e.stopPropagation(); }, true);
   document.querySelectorAll(".ws-layouts button").forEach(function (b) { b.onclick = function () { setLayout(b.getAttribute("data-layout")); }; });
-  document.getElementById("wsq").addEventListener("input", renderList);
+  var wsq = document.getElementById("wsq");
+  wsq.addEventListener("input", renderList);
+  // The quick switcher: Ctrl+Shift+K (Cmd+K on a Mac) goes to the filter; Enter opens the first match, Down the list.
+  wsq.placeholder = "Go to a session…  (Ctrl+Shift+K)";
+  wsq.addEventListener("keydown", function (e) {
+    var first = list.querySelector(".ws-item");
+    if (e.key === "Enter" && first) { // the shown row, ended ones too
+      e.preventDefault();
+      var id = Object.keys(infos).map(function (k) { return infos[k].id; }).filter(function (k) { return items[k] === first; })[0];
+      if (id !== undefined) show(id);
+    }
+    else if (e.key === "ArrowDown" && first) { e.preventDefault(); first.focus(); }
+    else if (e.key === "Escape") { wsq.value = ""; renderList(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if ((e.key || "").toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); wsq.focus(); wsq.select(); }
+  }, true);
   narrow.addEventListener && narrow.addEventListener("change", layout);
 
   // ------------------------------------------------------------ new terminal

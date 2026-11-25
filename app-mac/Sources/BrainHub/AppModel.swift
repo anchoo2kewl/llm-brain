@@ -100,7 +100,7 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], keep: Set(sessions.keys))
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs)
     }
 
     var machineNames: [String] { machines.map(\.name) }
@@ -132,6 +132,25 @@ final class AppModel {
         return t.needsAnswer || !seen.contains(ref)
     }
     var waitingCount: Int { allRefs.filter(wantsYou).count }
+    /// Ended terminals this app still holds: one "Ended" group, most recent first.
+    var ended: [Machine.Entry] { endedSessions(terminals: terminals, keep: Set(sessions.keys), inputs: inputs) }
+
+    /// When the owner last typed, pasted or sent to each terminal from this app. An older hub does not report input,
+    /// so the sidebar order uses this too.
+    private(set) var inputs: [TerminalRef: Date] = [:]
+
+    /// At most once a second per terminal: every key would redraw the sidebar.
+    func noteInput(_ ref: TerminalRef) {
+        let now = Date()
+        if let last = inputs[ref], now.timeIntervalSince(last) < 1 { return }
+        inputs[ref] = now
+    }
+
+    /// The row's age and order time: the hub's activity and input, and this app's own input.
+    func recent(_ ref: TerminalRef) -> Date? {
+        terminal(ref).map { recentKey($0, input: inputs[ref]) }.flatMap { $0 == .distantPast ? nil : $0 }
+    }
+
     /// The dot pulses red: the agent waits for you and you have not opened it since.
     func pulses(_ ref: TerminalRef) -> Bool {
         terminal(ref).map { Recency.pulses($0, opened: seen.contains(ref) || focused == ref) } ?? false
@@ -523,6 +542,7 @@ extension AppModel {
         struct OK: Decodable {}
         do {
             _ = try await HubClient(base: ref.hub).post(Paths.send(ref.id), json: ["text": text, "keys": ["Enter"]], as: OK.self)
+            noteInput(ref) // only input the hub took moves the row
             await refresh()
         } catch { NSLog("Brain Hub: reply failed: %@", error.localizedDescription) }
     }

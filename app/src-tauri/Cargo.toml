@@ -1,6 +1,6 @@
 [package]
 name = "brain-hub"
-version = "0.1.12"
+version = "0.1.13"
 description = "Desktop client (Linux, Windows) for the llm-brain hub"
 edition = "2021"
 rust-version = "1.77"

@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppDiagnostics.record("app_started version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
             AppModel.shared.requestNotifications()
             KeyRouter.install()
+            Snapshot.scheduleIfAsked()
             GlobalHotkey.register()
             Updates.check(manual: false)
             // After sleep the sockets are dead but may not know it yet.

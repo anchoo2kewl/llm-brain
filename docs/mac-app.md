@@ -47,12 +47,12 @@ their first lines).
 
 ## The window
 
-- **Sidebar**: each machine of the cluster and its open terminals, newest first. The order never changes when an
-  agent works or waits; only a new terminal (on top) or an ended one changes it. One row is selected: the accent bar
-  and the bold title. The dot says what the agent does: blue working, orange waiting for you, a slow red pulse when
-  it needs an answer, grey ended. The time (`now`, `2m`, `1h`) is the last activity or input. Child sessions show under their parent: click the
-  count, or press → and ←. See [design.md](design.md). "Running elsewhere" lists Claude
-  Code and Codex conversations that run outside the hub; double-click one to continue it in a hub terminal.
+- **Sidebar**: each machine of the cluster and its open terminals, one line each: the state dot, the name, the
+  folder and the age. The session with the latest activity or input is at the top; status and selection never move
+  a row. One row is selected: the accent bar and the bold name. The dot pulses red, slowly, when a session needs an
+  answer. Child sessions show under their parent: click the count, or press → and ←. Ended sessions go to the
+  collapsed "Ended" group at the bottom. The summary is in the row's tooltip and in the window subtitle; **Show
+  Details** in the context menu opens the rest. See [design.md](design.md).
 - **Panes**: a window starts with one pane. Split it up to 9 panes. Click a terminal in the sidebar to show it in the
   focused pane. Closing a pane only removes the view: the terminal keeps running on its machine. **End Terminal**
   stops it.
@@ -71,6 +71,9 @@ their first lines).
 - **Pasted images**: a preview shows at the top right of the pane until you press Return. Its red × hides the preview
   only; the path stays in the CLI's input.
 - **Settings → Hubs** shows each hub's version and its update state, and "App 0.1.x · Hub 0.1.y" at the bottom.
+
+- **Screenshots for docs**: `BRAINHUB_SNAPSHOT=/path/shot.png` makes the app write its front window to that PNG
+  5 seconds after launch (`BRAINHUB_SNAPSHOT_DELAY` changes the delay). It needs no Screen Recording permission.
 
 ## From any terminal
 

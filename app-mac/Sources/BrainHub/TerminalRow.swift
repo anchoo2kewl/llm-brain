@@ -1,7 +1,8 @@
 import BrainHubCore
 import SwiftUI
 
-/// One terminal in the sidebar: its state, which CLI it runs, what it asks, and (opened) the detail of its agent.
+/// One terminal in the sidebar, on one line (docs/design.md): the state dot, the name, the folder in a muted colour,
+/// then the age. The summary, the account and the shortcut are in the tooltip; the detail opens from the context menu.
 struct TerminalRow: View {
     let ref: TerminalRef
     let terminal: Terminal
@@ -18,6 +19,8 @@ struct TerminalRow: View {
         var toggle: (() -> Void)?
     }
     var tree = Tree()
+    /// The list has more than one provider: show a small provider mark.
+    var showProvider = false
     /// One click on × ends the terminal (its CLI stops on its machine).
     var end: (() -> Void)?
     @ViewState private var hovering = false
@@ -26,69 +29,45 @@ struct TerminalRow: View {
     var body: some View {
         let t = terminal
         let state = model.state(ref), wants = model.wantsYou(ref), open = expanded.contains(ref)
+        let recent = model.recent(ref)
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Button { if open { expanded.remove(ref) } else { expanded.insert(ref) } } label: {
-                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.appCaption2).frame(width: 10)
-                }
-                .buttonStyle(.plain).foregroundStyle(.tertiary)
-                .accessibilityLabel(open ? "Hide detail" : "Show detail")
-                StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: t.lastActive).help(Self.help(state, t))
-                // Attention is the dot and the title colour, never a row background: only the selection looks selected.
+            HStack(alignment: .center, spacing: 8) {
+                StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
+                // Neutral text: colour is only for the selection, the dot ("needs you" pulses red) and errors.
                 Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
-                    .foregroundStyle(wants ? AnyShapeStyle(SessionStyle.attention) : AnyShapeStyle(.primary))
-                if let hub = tree.hub {
-                    Text(hub).font(.appCaption2).foregroundStyle(.secondary).help("This child session runs on the hub \(hub)")
+                // The folder gives way first; the marks on the right keep their size.
+                Text(Self.folder(t)).font(.appCaption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                if let hub = tree.hub { Text(hub).font(.appCaption2).foregroundStyle(.secondary).fixedSize() }
+                Spacer(minLength: 0)
+                if showProvider { ProviderMark(provider: t.provider) }
+                if let f = t.contextFraction, f >= 0.8 {
+                    Text("\(Int(f * 100))%").font(.appCaption2.monospacedDigit()).foregroundStyle(f >= 0.9 ? .red : .secondary)
+                        .fixedSize().help("Context used")
                 }
                 if tree.children > 0 {
                     Button { tree.toggle?() } label: {
-                        Label("\(tree.children)", systemImage: tree.open ? "chevron.down" : "chevron.right")
-                            .font(.appCaption2).labelStyle(.titleAndIcon)
+                        HStack(spacing: 2) {
+                            Image(systemName: tree.open ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold))
+                            Text("\(tree.children)")
+                        }.font(.appCaption2)
                     }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .help(tree.open ? "Hide the child sessions (←)" : "Show the \(tree.children) child session\(tree.children == 1 ? "" : "s") (→)")
                     .accessibilityLabel("\(tree.children) child sessions, \(tree.open ? "shown" : "hidden")")
                 }
-                Spacer(minLength: 0)
-                if let n = t.subagents, n > 0 {
-                    Label("\(n)", systemImage: "arrow.triangle.branch").font(.appCaption2).foregroundStyle(.secondary)
-                        .help("\(n) subagent\(n == 1 ? "" : "s") running")
+                ZStack(alignment: .trailing) {
+                    TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                        Text(Recency.short(recent, now: ctx.date)).font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    .opacity(end != nil && (hovering || model.closingTerminals.contains(ref)) ? 0 : 1)
+                    if let end, hovering || model.closingTerminals.contains(ref) {
+                        SessionCloseButton(closing: model.closingTerminals.contains(ref), action: end)
+                            .help("End \(Self.name(t)): stops its CLI on \(t.host)")
+                    }
                 }
-                // How long ago it ran or got input. It never moves the row.
-                TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                    Text(Recency.short(t.lastActive, now: ctx.date)).font(.appCaption2.monospacedDigit()).foregroundStyle(.secondary)
-                }
-                .help("Last activity or input")
-                if let number, number < 9 { Text("⌘\(number + 1)").font(.appCaption2).foregroundStyle(.tertiary) }
-                if let end {
-                    SessionCloseButton(closing: model.closingTerminals.contains(ref), action: end)
-                        .opacity(hovering || model.closingTerminals.contains(ref) ? 1 : 0)
-                        .help("End \(Self.name(t)): stops its CLI on \(t.host)")
-                        .accessibilityLabel("End \(Self.name(t))")
-                }
+                .frame(minWidth: 26, alignment: .trailing).fixedSize()
             }
-            HStack(spacing: 6) {
-                Badge(provider: t.provider, text: t.badge)
-                if let p = t.profile, !p.isEmpty {
-                    Text(p).font(.app(10, .medium)).padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay(Capsule().stroke(.secondary.opacity(0.5))).foregroundStyle(.secondary)
-                        .help("Account: \(p)\(t.account.map { " · \($0)" } ?? "")")
-                }
-                Text(t.branch.map { $0.isEmpty || $0 == "HEAD" ? t.cwd : "\(t.cwd) · \($0)" } ?? t.cwd)
-                    .font(.appCaption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 0)
-                if let f = t.contextFraction, f >= 0.7 {
-                    Text("\(Int(f * 100))%").font(.appCaption2).foregroundStyle(f >= 0.9 ? .red : .orange)
-                        .help("Context used")
-                }
-            }
-            .padding(.leading, 16)
-            // Always two lines, empty or not, so a row keeps its height when its agent starts or stops asking.
-            let ask = (state == .waiting || state == .blocked) ? (t.ask ?? t.fix).flatMap { $0.isEmpty ? nil : $0 } : nil
-            Text(ask.map { "\(AppModel.headline(t)): \($0)" } ?? " ").font(.appCaption)
-                .lineLimit(open ? 6 : 2, reservesSpace: !open)
-                .foregroundStyle(wants ? AnyShapeStyle(state == .blocked || t.askKind == "error" ? .red : SessionStyle.attention) : AnyShapeStyle(.secondary))
-                .padding(.leading, 16)
+            .frame(minHeight: 22)
             if let m = model.migrations[ref], let p = m.current {
                 Label(m.error.map { "\(m.isClone ? "Clone" : "Move") failed: \($0)" } ?? (m.done ? "\(m.isClone ? "Cloned" : "Moved") to \(model.machineLabel(m.to))" : "\(Migration.label(p.name, to: model.machineLabel(m.to)))…"),
                       systemImage: m.error != nil ? "exclamationmark.triangle" : m.done ? "checkmark.circle" : "arrow.right.circle")
@@ -98,14 +77,35 @@ struct TerminalRow: View {
             if open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 16) }
         }
         .padding(.vertical, 2)
-        .padding(.leading, CGFloat(tree.depth) * 14)
+        .padding(.leading, CGFloat(tree.depth) * 16)
         .opacity(state == .ended ? SessionStyle.endedOpacity : 1)
         .overlay(alignment: .leading) {
             if selected { RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3).padding(.leading, -8) }
         }
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .help(Self.tooltip(t, state: state, number: number))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAction(named: "End Terminal") { end?() }
+    }
+
+    /// The last folder of the working directory, and the branch when it is not the default.
+    static func folder(_ t: Terminal) -> String {
+        let last = (t.cwd as NSString).lastPathComponent
+        let dir = t.cwd == "~" || last.isEmpty ? (t.cwd.hasPrefix("/") ? "/" : "~") : last
+        guard let b = t.branch, !b.isEmpty, b != "HEAD", b != "main", b != "master" else { return dir }
+        return "\(dir) · \(b)"
+    }
+
+    /// Everything the one line leaves out.
+    static func tooltip(_ t: Terminal, state: AgentState, number: Int?) -> String {
+        var lines = [name(t) + " · " + help(state, t)]
+        if state == .waiting || state == .blocked, let ask = [t.ask, t.fix].compactMap({ $0 }).first(where: { !$0.isEmpty }) { lines.append(ask) }
+        lines.append("\(t.badge) on \(t.host) · \(t.cwd)" + (t.branch.map { $0.isEmpty ? "" : " · \($0)" } ?? ""))
+        if let p = t.profile, !p.isEmpty { lines.append("Account: \(p)" + (t.account.map { " · \($0)" } ?? "")) }
+        if let n = t.subagents, n > 0 { lines.append("\(n) subagent\(n == 1 ? "" : "s") running") }
+        if let number, number < 9 { lines.append("⌘\(number + 1) shows it") }
+        return lines.joined(separator: "\n")
     }
 
     static func name(_ t: Terminal) -> String { t.title.isEmpty ? t.badge : t.title }
@@ -133,14 +133,14 @@ struct SessionCloseButton: View {
                     ProgressView().controlSize(.small)
                     Text("Closing…").font(.appCaption)
                 } else {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 24, weight: .semibold))
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 13))
                 }
             }
-            .frame(minWidth: 32, minHeight: 32)
+            .frame(minWidth: 22, minHeight: 22)
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.red)
+        .foregroundStyle(.secondary)
         .disabled(closing)
         .accessibilityLabel(closing ? "Closing session" : "Close session")
     }
@@ -187,22 +187,22 @@ struct StateDot: View {
     }
 }
 
-/// Which CLI a terminal runs, in its own colour.
-struct Badge: View {
+/// Which CLI a terminal runs, as a small muted mark. Shown only when the list has more than one CLI.
+struct ProviderMark: View {
     let provider: String
-    let text: String
 
     var body: some View {
-        Text(text).font(.app(10, .medium)).padding(.horizontal, 5).padding(.vertical, 1)
-            .foregroundStyle(color).background(color.opacity(0.16), in: Capsule())
+        Text(Self.letter(provider)).font(.app(9, .medium)).foregroundStyle(.secondary)
+            .frame(width: 16, height: 14).overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.quaternary))
+            .help(provider).accessibilityLabel(provider)
     }
 
-    private var color: SwiftUI.Color {
-        switch provider {
-        case "claude": .orange
-        case "codex": .teal
-        case "antigravity": .blue
-        default: .gray
+    static func letter(_ p: String) -> String {
+        switch p {
+        case "claude": "CC"
+        case "codex": "CX"
+        case "antigravity": "AG"
+        default: ">_"
         }
     }
 }

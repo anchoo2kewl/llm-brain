@@ -31,6 +31,7 @@ final class TerminalSession {
         engine.onExit = { [weak self] in Task { await self?.exited() } }
         engine.onFiles = { [weak self] files in self?.upload(files) }
         engine.onReturn = { [weak self] in self?.clearPreviews() }
+        engine.onInput = { [weak self] in if let self { self.model?.noteInput(self.ref) } }
         connect()
     }
 
@@ -99,6 +100,7 @@ final class TerminalSession {
                 for f in files { paths.append(try await client.upload(Paths.upload(host: host, terminal: ref.id), name: f.name, data: f.data)) }
                 note = nil
                 engine.paste(pastedPaths(paths))
+                model?.noteInput(ref)
                 pasted += files.compactMap { f in NSImage(data: f.data).map { PastedPreview(name: f.name, image: $0) } }
             } catch {
                 show("Could not copy to \(host): \(error.localizedDescription)")
@@ -119,7 +121,10 @@ final class TerminalSession {
     func clearPreviews() { if !pasted.isEmpty { pasted = [] } }
 
     /// Bytes as if typed: send-prefix, copy-mode.
-    func send(_ d: Data) { engine.send(d) }
+    func send(_ d: Data) {
+        model?.noteInput(ref)
+        engine.send(d)
+    }
 }
 
 /// A pasted image's preview.
