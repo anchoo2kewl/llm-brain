@@ -102,8 +102,35 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs)
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs, held: held ?? [:])
     }
+
+    /// Hold my place: while the pointer is in the sidebar, each row keeps the sort key it had when it came in, so no
+    /// row moves (⌘1 to ⌘9 follow the same order). States, counts and pulses stay live. Leaving orders once.
+    private(set) var held: [TerminalRef: Date]?
+    func hold(_ on: Bool) {
+        guard on != (held != nil) else { return }
+        held = on ? Dictionary(terminals.map { (TerminalRef(hub: $0.hub, id: $0.terminal.id), recentKey($0.terminal, input: inputs[TerminalRef(hub: $0.hub, id: $0.terminal.id)])) },
+                               uniquingKeysWith: { a, _ in a }) : nil
+    }
+
+    /// This row in the cluster's tree (with the rows under it).
+    func entry(_ ref: TerminalRef) -> Machine.Entry? { machines.lazy.flatMap { $0.terminals.flatMap(\.all) }.first { $0.ref == ref } }
+
+    /// Handoff: the hub compacts the conversation, or starts a successor session as a child. One request per session.
+    private(set) var handingOff: Set<TerminalRef> = []
+    struct HandoffReply: Decodable { var mode: String; var id: Int64? }
+    func handoff(_ ref: TerminalRef) async throws -> HandoffReply? {
+        guard handingOff.insert(ref).inserted else { return nil }
+        defer { handingOff.remove(ref) }
+        let r = try await HubClient(base: ref.hub).post(Paths.handoff(ref.id), json: [:], as: HandoffReply.self, timeout: 60)
+        await refresh()
+        if r.mode == "successor", let id = r.id { reveal = TerminalRef(hub: ref.hub, id: id) }
+        return r
+    }
+
+    /// Needs me: the sessions that wait for the owner, the longest wait first (every hub of the cluster).
+    var needsQueue: [TerminalRef] { BrainHubCore.needsQueue(machines.flatMap { $0.terminals.flatMap(\.all) }) }
 
     var machineNames: [String] { machines.map(\.name) }
 

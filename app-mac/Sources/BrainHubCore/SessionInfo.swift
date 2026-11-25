@@ -52,6 +52,48 @@ public struct RowMeta: Equatable, Sendable {
     }
 }
 
+/// Context colours, in one place: normal below 75 %, warn from 75 %, high from 85 %. Handoff is offered from 80 %.
+public enum ContextLevel: String, Sendable {
+    case normal, warn, high
+    public static let handoffPercent = 80
+    public init(percent: Int) { self = percent >= 85 ? .high : percent >= 75 ? .warn : .normal }
+}
+
+/// A parent's subtree in numbers, all depths: what a closed parent shows on its second line.
+public struct Rollup: Equatable, Sendable {
+    public var needs = 0, working = 0, waiting = 0, total = 0
+    /// The child to open from the rollup: the longest wait.
+    public var first: TerminalRef?
+    public init(_ e: Machine.Entry) {
+        let ds = Array(e.all.dropFirst())
+        total = ds.count
+        for c in ds {
+            if Recency.pulses(c.terminal, opened: false) { needs += 1 } else if c.terminal.state == .working { working += 1 }
+            else if c.terminal.state == .waiting { waiting += 1 }
+        }
+        first = needsQueue(ds).first
+    }
+    public var label: String {
+        [needs > 0 ? "\(needs) need\(needs == 1 ? "s" : "") you" : "", working > 0 ? "\(working) working" : ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// The sessions that wait for the owner, the longest wait first; ties by the lower id. One continuous period counts once.
+public func needsQueue(_ entries: [Machine.Entry]) -> [TerminalRef] {
+    func since(_ t: Terminal) -> Date { t.needsOwnerSince.flatMap(parseHubTime) ?? t.stateSince.flatMap(parseHubTime) ?? recentKey(t) }
+    return entries.filter { $0.terminal.isOpen && Recency.pulses($0.terminal, opened: false) }
+        .sorted { since($0.terminal) != since($1.terminal) ? since($0.terminal) < since($1.terminal) : $0.terminal.id < $1.terminal.id }
+        .map(\.ref)
+}
+
+/// Needs me: the longest wait first; from a session in the queue, the next one (after an answer it leaves the queue).
+public func nextNeeds(_ queue: [TerminalRef], current: TerminalRef?) -> TerminalRef? {
+    guard !queue.isEmpty else { return nil }
+    guard let current, let i = queue.firstIndex(of: current) else { return queue[0] }
+    return queue[(i + 1) % queue.count]
+}
+
 /// One line of the selected row's details.
 public struct DetailRow: Equatable, Sendable {
     public var label: String
@@ -75,15 +117,35 @@ public extension Terminal {
         }
     }
 
+    /// The hub answers POST /api/terminals/{id}/handoff: its own flag, else a hub that sends the 0.1.15 fields.
+    var handoffOffered: Bool {
+        guard isOpen, let p = RowMeta(self).percent, p >= ContextLevel.handoffPercent else { return false }
+        return handoff ?? (needsOwnerSince != nil || git != nil)
+    }
+
+    /// The open row's one-line status: "Working 9m · 5 files (+112/−19)", "Waiting on 3 children",
+    /// "Idle 14m · 2 commits ahead". The git part needs the hub's `git`; without it the line shows what it has.
+    func statusLine(_ kids: Rollup? = nil, now: Date = Date()) -> String {
+        let pulse = Recency.pulses(self, opened: false)
+        if let k = kids, k.working > 0, !pulse, state == .waiting || state == .idle {
+            return "Waiting on \(k.working) \(k.working == 1 ? "child" : "children")"
+        }
+        let dur = stateSince.flatMap(parseHubTime).map { " " + duration(now.timeIntervalSince($0)) } ?? ""
+        let plural = { (n: Int, w: String) in "\(n) \(w)\(n == 1 ? "" : "s")" }
+        let files = (git?.filesChanged ?? 0) > 0 ? plural(git!.filesChanged!, "file") + " (+\(git?.insertions ?? 0)/−\(git?.deletions ?? 0))" : ""
+        let ahead = (git?.ahead ?? 0) > 0 ? plural(git!.ahead!, "commit") + " ahead" : ""
+        let extra = state == .working ? files : (ahead.isEmpty ? files : ahead)
+        return stateLabel + dur + (extra.isEmpty ? "" : " · " + extra)
+    }
+
     /// The selected row's details: always the same rows, so its height never changes when data arrives. `d` is the
     /// hub's `/api/terminals/{id}/detail`, nil until it comes.
-    func detailRows(_ d: TerminalDetail?, now: Date = Date()) -> [DetailRow] {
+    func detailRows(_ d: TerminalDetail?, now: Date = Date(), kids: Rollup? = nil) -> [DetailRow] {
         let wait = d == nil ? "…" : "–"
         let one = { (s: String?) in (s ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ") }
         let plural = { (n: Int, w: String) in "\(n) \(w)\(n == 1 ? "" : "s")" }
         let tool = one(d?.tool)
-        let since = stateSince.flatMap(parseHubTime)
-        let state = [stateLabel, since.map { duration(now.timeIntervalSince($0)) } ?? "",
+        let state = [statusLine(kids, now: now),
                      (subagents ?? 0) > 0 ? plural(subagents!, "subagent") : "",
                      tool.split(whereSeparator: { " {(".contains($0) }).first.map(String.init) ?? ""]
             .filter { !$0.isEmpty }.joined(separator: " · ")
@@ -100,8 +162,8 @@ public extension Terminal {
         let started = self.started.flatMap(parseHubTime)
         func row(_ l: String, _ v: String, _ h: String? = nil) -> DetailRow { DetailRow(label: l, value: v, help: h.flatMap { $0.isEmpty ? nil : $0 } ?? v) }
         return [
+            row("Now", state, tool.isEmpty ? nil : tool),
             row("Context", meta.percent.map { "\(shortCount(contextUsed!)) of \(shortCount(contextWindow!)) · \($0)%" } ?? "not reported"),
-            row("State", state, tool.isEmpty ? nil : tool),
             row("Where", [host, folder, br ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
                 [host, cwd, branch ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")),
             row("Account", account.isEmpty ? "default login" : account),

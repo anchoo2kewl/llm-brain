@@ -151,7 +151,26 @@
   var inputs = {}, treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
   function pref(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch (e) { return d; } }
   function setPref(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } }
-  function keyOf(t) { return window.wsList.recentKey(t, inputs[t.id]); }
+  function keyOf(t) { var h = heldKey(t.id); return h !== undefined ? h : window.wsList.recentKey(t, inputs[t.id]); }
+  // Hold my place (wslist.js): no row moves while the pointer or the focus is in the list; it orders once on leave.
+  var paused = el("span", "ws-paused", "order paused"); paused.hidden = true; paused.title = "The rows keep their places while you are in the list";
+  var sideHead = document.querySelector("#ws-side .ws-head"); sideHead.insertBefore(paused, sideHead.querySelector(".grow"));
+  var heldKey = window.wsSide.hold(list, paused, function () {
+    var s = {}; order.forEach(function (k) { if (infos[k]) s[k] = window.wsList.recentKey(infos[k], inputs[k]); }); return s;
+  }, function () { order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); }); renderList(); });
+  // Needs me: the longest wait first; again, the next one. Its parents open so its row shows.
+  var paintNeeds = window.wsSide.needsButton(sideHead, goNeeds);
+  function goNeeds() {
+    var n = window.wsList.nextNeeds(window.wsList.needsQueue(liveRows()), infos[st.slots[st.focus]]);
+    if (n) reveal(n);
+  }
+  function reveal(t) {
+    for (var p = t, n = 0; p && p.parent_id > 0 && n < 8; n++) {
+      p = liveRows().filter(function (x) { return x.hub === p.parent_hub && x.id === p.parent_id; })[0];
+      if (p) treeOpen[window.wsList.treeStateKey(p)] = true;
+    }
+    setPref("ws.treeOpen", treeOpen); renderList(); show(t.id);
+  }
   var inputTimer = null;
   function noteInput(id) { // at most once a second
     var now = Date.now();
@@ -198,6 +217,7 @@
       var li = items[id] || makeItem(id);
       li.dataset.id = id;
       list.appendChild(li);
+      li.closedKids = r.kids > 0 && !treeOpen[window.wsList.treeStateKey(t)]; // a closed parent shows its subtree's rollup
       paintItem(id);
       li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
       // One control: the chevron on the left opens and closes the tree; closed hides every row under it.
@@ -228,6 +248,7 @@
       if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }, true); });
     }
     list.scrollTop = top;
+    paintNeeds(window.wsList.needsQueue(liveRows()).length);
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
     else if (focused && focused.classList.contains("ws-ended") && eh) eh.focus({ preventScroll: true }); // a new header element
     if (Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",") === hadRows) return;
@@ -297,10 +318,19 @@
     btns.append(pen, solo, x); acts.append(age, btns);
     top.append(kids, dot, title, count, hub, el("span", "grow"), num, acts);
     var meta = el("div", "ws-it-meta"), model = el("span", "ws-it-model"), pct = el("span", "ws-it-pct");
-    meta.append(prov, model, pct);
+    var roll = el("button", "ws-roll"); roll.type = "button"; roll.hidden = true; roll.title = "Open the tree at the child that has waited longest";
+    roll.addEventListener("click", function (e) { e.stopPropagation(); if (roll.first) reveal(roll.first); else setTree(id, true); });
+    meta.append(prov, model, roll, pct);
     var det = el("div", "ws-det"), bar = el("div", "ws-bar"), fill = el("i"), grid = el("dl"), cells = []; // cells update in place: a tooltip stays open
     bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Context used"); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
-    bar.append(fill); det.append(bar, grid); det.hidden = true;
+    var handoff = el("button", "small ws-handoff", "Handoff"); handoff.type = "button"; handoff.hidden = true;
+    handoff.title = "Context is nearly full: the hub compacts this conversation, or starts a successor session as a child";
+    handoff.addEventListener("click", function (e) {
+      e.stopPropagation();
+      window.wsSide.handoff(id, function (m) { prev.textContent = m; }, function (j) { refresh(function () { if (j.mode === "successor" && infos[j.id]) reveal(infos[j.id]); }); });
+    });
+    var barRow = el("div", "ws-barrow"); barRow.append(bar, handoff);
+    bar.append(fill); det.append(barRow, grid); det.hidden = true;
     li.append(top, meta, det, prev);
     li.addEventListener("click", function () { show(id); });
     if (infos[id].kind !== "session") {
@@ -311,7 +341,7 @@
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     items[id] = li;
-    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, count: count, solo: solo, hub: hub, prov: prov };
+    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, roll: roll, handoff: handoff, prev: prev, num: num, close: x, age: age, kids: kids, count: count, solo: solo, hub: hub, prov: prov };
     return li;
   }
   // The selected row's /detail from the hub, asked again every 5 seconds while it shows.
@@ -335,7 +365,8 @@
     var key = [t.state || "", t.ask_kind || "", t.blocked ? 1 : 0, t.needs_owner ? 1 : 0, t.ask || ""].join("/");
     if (seenKey[id] !== key) { seenKey[id] = key; delete seenIds[id]; }
     if (on) seenIds[id] = true;
-    var when = window.wsList.lastActive(t, inputs[id]), pulse = window.wsList.pulses(t, on || seenIds[id]);
+    var roll = li.closedKids ? window.wsList.rollup(liveRows(), t) : null;
+    var when = window.wsList.lastActive(t, inputs[id]), pulse = window.wsList.pulses(t, on || seenIds[id]) || !!(roll && roll.needs);
     li.parts.dot.title = pulse ? "waiting for you" : dotTitle[s] || s;
     li.parts.dot.className = "dot-s " + s + (pulse ? " needs" : "");
     li.parts.dot.style.opacity = pulse || s === "working" ? "" : String(window.wsList.dotOpacity(when));
@@ -344,18 +375,25 @@
     var m = window.wsList.rowMeta(t);
     li.parts.prov.textContent = m.mark; li.parts.prov.title = m.tool;
     li.parts.model.textContent = m.model;
+    li.parts.model.hidden = !!(roll && roll.label);
+    li.parts.roll.hidden = !(roll && roll.label);
+    li.parts.roll.textContent = roll ? roll.label : "";
+    li.parts.roll.className = "ws-roll" + (roll && roll.needs ? " needs" : "");
+    li.parts.roll.first = roll && roll.first;
+    var lvl = window.wsList.contextLevel(m.pct);
     li.parts.pct.textContent = m.pct === null ? "" : m.pct + "%";
     li.parts.pct.title = "Context used";
-    li.parts.pct.className = "ws-it-pct" + (m.pct >= 90 ? " hi" : "");
+    li.parts.pct.className = "ws-it-pct " + lvl;
+    li.parts.handoff.hidden = !(on && window.wsList.handoffOffered(t));
     if (on && li.parts.det.hidden) loadDetail(id); // just selected: fresh numbers now
     li.parts.det.hidden = !on;
     if (on) {
       li.parts.fill.style.width = (m.pct || 0) + "%";
-      li.parts.fill.className = m.pct >= 90 ? "hi" : m.pct >= 70 ? "mid" : "";
+      li.parts.fill.className = lvl;
       li.parts.bar.setAttribute("aria-valuenow", String(m.pct || 0));
       li.parts.bar.setAttribute("aria-valuetext", m.pct === null ? "not reported" : m.pct + "%");
       var known = t.state ? t : Object.assign({}, t, { state: s }); // an older hub sends no state: the pane's
-      window.wsList.detailRows(known, t.kind === "session" ? {} : details[id] || null).forEach(function (r, i) { // no /detail outside the hub
+      window.wsList.detailRows(known, t.kind === "session" ? {} : details[id] || null, undefined, window.wsList.rollup(liveRows(), t)).forEach(function (r, i) { // no /detail outside the hub
         if (!li.parts.cells[i]) { li.parts.cells[i] = [el("dt"), el("dd")]; li.parts.grid.append(li.parts.cells[i][0], li.parts.cells[i][1]); }
         var dt = li.parts.cells[i][0], dd = li.parts.cells[i][1];
         if (dt.textContent !== r.label) dt.textContent = r.label;
@@ -387,6 +425,7 @@
   }
   function badge() {
     var n = order.filter(function (id) { return stateOf(id) === "waiting"; }).length;
+    paintNeeds(window.wsList.needsQueue(liveRows()).length);
     document.title = (n ? "(" + n + ") " : "") + "Workspace · llm-brain hub";
   }
   setInterval(function () { order.forEach(function (id) { if (stateOf(id) === "working") paintItem(id); }); }, 2000);
@@ -549,14 +588,8 @@
     clear.onclick = function (e) { e.stopPropagation(); var at = st.zoom ? st.focus : s.i; st.slots[at] = null; st.zoom = false; layout(); };
     return s;
   }
-  // standalone: the session leaves its parent's tree (POST /api/terminals/{id}/parent {"clear": true}); from now on
-  // its lifecycle is its own.
   var dragging = null;
-  function standalone(id, say) {
-    fetch("/api/terminals/" + encodeURIComponent(id) + "/parent", { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"clear":true}' })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "error " + r.status); }); })
-      .then(function () { refresh(); }, function (e) { say("Make standalone failed: " + e.message); });
-  }
+  function standalone(id, say) { window.wsSide.standalone(id, say, function () { refresh(); }); }
   // A child row dropped on the list goes to the top level.
   function live(t) { return t.status !== "ended" && t.status !== "failed"; }
   function liveRows() { return order.map(function (k) { return infos[k]; }).filter(function (t) { return t && live(t); }); }
@@ -887,7 +920,7 @@
     else if (k === "L" || k === "l") setLayout(ORDER[(ORDER.indexOf(st.layout) + 1) % ORDER.length]);
     else if (k === "N" || k === "n") openNew();
     else if (k === "K" || k === "k") { wsq.focus(); wsq.select(); }
-    else if (k === "J" || k === "j") { var w = order.filter(function (id) { return stateOf(id) === "waiting"; }); if (w.length) show(w[0]); }
+    else if (k === "J" || k === "j") goNeeds();
     else return true;
     e.preventDefault();
     return false;

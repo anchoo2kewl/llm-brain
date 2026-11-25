@@ -7,6 +7,7 @@ import WebKit
 struct WindowActions {
     var newTerminal: () -> Void
     var search: () -> Void
+    var needsMe: () -> Void
     var select: (Int) -> Void
     var selected: TerminalRef?
     var rename: () -> Void
@@ -151,6 +152,7 @@ struct MainWindow: View {
         return WindowActions(
             newTerminal: { if model.hub != nil { panes.showNew = true } },
             search: { panes.showSearch = true },
+            needsMe: { if let r = nextNeeds(model.needsQueue, current: current) { panes.show(r) } },
             select: { i in let refs = model.orderedRefs; if i < refs.count { panes.show(refs[i]) } },
             selected: current,
             rename: { if let s = current { startRename(s) } },
@@ -384,6 +386,8 @@ struct Sidebar: View {
         .onKeyPress(.rightArrow) { setTree(selection, open: true) }
         .onKeyPress(.leftArrow) { setTree(selection, open: false) }
         .onDrop(of: [.utf8PlainText, .plainText], isTargeted: $draggingOverSidebar) { _ in false }
+        .onHover { model.hold($0) } // Hold my place
+        .safeAreaInset(edge: .top) { NeedsBar { if let r = nextNeeds(model.needsQueue, current: selection) { selection = r } } }
         .safeAreaInset(edge: .bottom) {
             if draggingOverSidebar {
                 MachineDropPanel { ref, n, clone in migrate(ref, to: n, clone: clone) }
