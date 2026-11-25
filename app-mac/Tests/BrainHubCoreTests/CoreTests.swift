@@ -277,6 +277,17 @@ import BrainHubCore
         #expect(ids(base, inputs: [2: 60]) == [2, 3, 1], "input this app sent counts on an older hub too")
     }
 
+    @Test func activityMovesRowsButNotTheCycle() {
+        func cycle(_ ts: [Terminal]) -> [Int64] {
+            byStart(machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"])[0].terminals).map(\.ref.id)
+        }
+        let before = [term(1, act: 10, started: 1), term(2, act: 20, started: 2), term(3, act: 30, started: 3)]
+        let after = [term(1, act: 40, started: 1), term(2, act: 20, started: 2), term(3, act: 30, started: 3)]
+        #expect(ids(before) != ids(after), "output reorders the rows")
+        #expect(cycle(before) == [1, 2, 3] && cycle(after) == [1, 2, 3], "next/previous keeps its order")
+        #expect(cycle([term(5, started: 1), term(4, started: 1)]) == [4, 5], "ties: the lower id first")
+    }
+
     @Test func nothingElseMovesARow() {
         let base = [term(1, act: 10), term(2, act: 20)]
         // A spinner or a state flip that the hub does not count as activity changes no timestamp.

@@ -329,7 +329,13 @@ struct Sidebar: View {
             }
         }
         // The order follows activity at once; the selected row stays selected and in view.
-        .onChange(of: model.allRefs) { if let s = selection { proxy.scrollTo(s) } }
+        .onChange(of: model.allRefs) {
+            if let s = selection { proxy.scrollTo(s) }
+            // Forget open parents that are gone, only after a good refresh: an outage must not clear the saved state.
+            guard model.loaded, model.hubError == nil else { return }
+            let kept = treeOpen.intersection(model.allRefs)
+            if kept != treeOpen { treeOpen = kept }
+        }
         // A row that moves glides to its new place (no motion with Reduce Motion).
         .animation(SessionStyle.move, value: model.allRefs)
         // A child picked elsewhere (⌘K, a notification): open its parents so its row shows, then show it.

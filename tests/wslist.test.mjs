@@ -74,7 +74,8 @@ test("quick switcher: names that start with the query first, in list order", () 
 
 test("terminal replies are not owner input", () => {
   for (const r of ["\x1b[0n", "\x1b[12;5R", "\x1b[?1;1R", "\x1b[?62;22c", "\x1b[>0;10;1c", "\x1b[I", "\x1b[O",
-    "\x1b]11;rgb:0d0d/1111/1717\x07", "\x1b]10;rgb:e6e6/eded/f3f3\x1b\\", "\x1b[I\x1b[12;5R", "\x1b[?2026;2$y", "\x1bP1$r0m\x1b\\", "\x1bP>|xterm.js(5.5)\x1b\\"]) assert.ok(isReply(r), JSON.stringify(r));
+    "\x1b]11;rgb:0d0d/1111/1717\x07", "\x1b]10;rgb:e6e6/eded/f3f3\x1b\\", "\x1b[I\x1b[12;5R", "\x1b[?2026;2$y", "\x1bP1$r0m\x1b\\", "\x1bP>|xterm.js(5.5)\x1b\\",
+    "\x1b[<64;10;5M", "\x1b[<0;3;4m", "\x1b[M !!", "\x1b[<65;1;1M\x1b[<65;1;1M"]) assert.ok(isReply(r), JSON.stringify(r));
   for (const k of ["a", "\r", "\x1b[A", "\x1b[1;5D", "\x1b", "\x03", "hello\x1b[0n", "\x1b[200~text\x1b[201~"]) assert.ok(!isReply(k), JSON.stringify(k));
 });
 

@@ -97,7 +97,7 @@
   // (ESC[0n, ESC[12;5R, ESC[?1;1R), device attributes (ESC[?62c, ESC[>0;10;1c), focus in and out (ESC[I, ESC[O)
   // and OSC answers (ESC]…BEL or ESC]…ESC\).
   function isReply(data) {
-    return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\))+$/.test(data);
+    return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3})+$/.test(data);
   }
   var api = { treeStateKey: treeStateKey, folder: folder, searchText: searchText, isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
     pulses: pulses, treeRows: treeRows, switcher: switcher };

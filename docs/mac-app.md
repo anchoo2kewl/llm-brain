@@ -120,7 +120,7 @@ After the last window closes the app keeps running: click the Dock icon, use ⌘
 
 The app reads your tmux config (`~/.tmux.conf`, else `~/.config/tmux/tmux.conf`) and uses its prefix and bindings, on
 top of tmux's defaults (prefix C-b, `%` and `"` split, arrows and `o` move, `x` closes, `z` zooms, `c` new terminal,
-`n`/`p` next and previous terminal, `0`–`9` terminal by number, `[` copy mode, C-arrows and M-arrows resize). It
+`n`/`p` next and previous terminal (in start order, so a row that moves up does not change the cycle), `0`–`9` terminal by number, `[` copy mode, C-arrows and M-arrows resize). It
 understands `set -g prefix`, `set -g base-index`, `unbind` (also `-a`, `-n`) and `bind` (also `-n` and `-r`) for
 `split-window`, `select-pane`, `resize-pane` (also `-Z`), `kill-pane`, `new-window`, `next-window`,
 `previous-window`, `select-window`, `copy-mode` and `send-prefix`. Other lines are ignored. Press the prefix twice to
