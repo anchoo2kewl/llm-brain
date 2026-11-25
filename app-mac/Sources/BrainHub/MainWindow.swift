@@ -298,7 +298,7 @@ struct Sidebar: View {
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
                                 Button("Rename…") { rename(e.ref) }
-                                if row.depth > 0 { Button("Make Standalone") { standalone(e.ref) } }
+                                if e.terminal.isOpen, (e.terminal.parentId ?? 0) > 0 { Button("Make Standalone") { standalone(e.ref) } }
                                 Divider()
                                 Button(model.closingTerminals.contains(e.ref) ? "Closing…" : "End Terminal…", role: .destructive) { close(e.ref) }
                                     .disabled(model.closingTerminals.contains(e.ref))
