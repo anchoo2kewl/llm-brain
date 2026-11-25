@@ -10,7 +10,7 @@
   }
 
   function start() {
-    if (root.top !== root) return; // an embedded pane: its page shows the sign
+    if (root.top !== root) return; // an embedded pane: the hub page around it shows the sign and its reload reloads the pane
     var first = null, sign = null;
     function show(v) {
       if (!sign) {
