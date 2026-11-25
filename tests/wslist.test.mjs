@@ -92,4 +92,5 @@ test("folders and search preserve full paths without missing-field words", () =>
   for (const [cwd, want] of [["/", "/"], ["~", "~"], ["/a/b/", "b"], ["", "~"]]) assert.equal(folder({cwd}), want);
   assert.ok(searchText({id: 1, cwd: "/work/brain/hub"}).includes("/work/brain/hub"));
   assert.ok(!searchText({id: 1}).includes("undefined"));
+  assert.ok(searchText({id: 1}).includes("~"));
 });

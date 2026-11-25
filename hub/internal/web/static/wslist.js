@@ -51,7 +51,7 @@
     if (!c) return /^\/+$/.test(raw) ? "/" : "~";
     return c === "~" ? "~" : c.split("/").pop();
   }
-  function searchText(t) { return [t.title || "terminal " + t.id, t.cwd, t.cli, t.host].filter(Boolean).join(" "); }
+  function searchText(t) { return [t.title || "terminal " + t.id, t.cwd || folder(t), t.cli, t.host].filter(Boolean).join(" "); }
   // The session tree: each row under its parent, (parent_hub, parent_id) = (hub, id). A hub without these fields, or a
   // child whose parent is not listed, gives a flat list. Children follow their own activity; a parent ranks by the
   // most recent row under it (`keyOf`, default recentKey). `open` holds the ids of the parents whose children show.

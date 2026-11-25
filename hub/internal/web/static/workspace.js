@@ -114,8 +114,9 @@
         if (old && old.title !== t.title && slotOf(t.id) >= 0) paintSlot(slotOf(t.id));
         attach(t);
       });
-      Object.keys(treeOpen).forEach(function (id) { if (!seenTree[id]) delete treeOpen[id]; }); // ended parents
-      setPref("ws.treeOpen", treeOpen);
+      var pruned = false;
+      Object.keys(treeOpen).forEach(function (id) { if (!seenTree[id]) { delete treeOpen[id]; pruned = true; } });
+      if (pruned) setPref("ws.treeOpen", treeOpen);
       Object.keys(inputs).forEach(function (id) { if (!seen[id]) delete inputs[id]; });
       Object.keys(infos).forEach(function (id) {
         if (!seen[id]) { delete infos[id]; drop(id); }
