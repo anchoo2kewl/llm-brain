@@ -76,14 +76,12 @@ struct MainWindow: View {
             }
             if let v = model.restartVersion {
                 ToolbarItem {
-                    Button { Updates.restart() } label: { Label("Restart to Update", systemImage: "arrow.clockwise.circle.fill") }
-                        .labelStyle(.titleAndIcon).buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
+                    Button { Updates.restart() } label: { UpdateSign(title: "Restart to Update", icon: "arrow.clockwise.circle.fill", color: .green) }
                         .help("Version \(v) is installed. Restart Brain Hub to use it. \(Updates.restartNote)")
                 }
             } else if let v = model.availableVersion {
                 ToolbarItem {
-                    Button { Updates.check(manual: true) } label: { Label("Update Available", systemImage: "arrow.down.circle.fill") }
-                        .labelStyle(.titleAndIcon).buttonStyle(.bordered).controlSize(.small)
+                    Button { Updates.check(manual: true) } label: { UpdateSign(title: "Update Available", icon: "arrow.down.circle.fill", color: .accentColor) }
                         .help("Version \(v) is available. Click to download and install it. \(Updates.restartNote)")
                 }
             }
@@ -438,4 +436,13 @@ struct TreeRow {
     var depth: Int
     /// The child's hub, when it is not its parent's.
     var otherHub: String?
+}
+
+/// A light toolbar sign: a colored icon and normal-weight text in the standard toolbar button, not a filled pill.
+private struct UpdateSign: View {
+    let title: String, icon: String, color: Color
+    var body: some View {
+        Label { Text(title).foregroundStyle(.primary) } icon: { Image(systemName: icon).foregroundStyle(color) }
+            .labelStyle(.titleAndIcon)
+    }
 }
