@@ -219,6 +219,13 @@ struct Sidebar: View {
         return []
     }
 
+    /// Forget open parents that are gone, only after a good refresh: an outage must not clear the saved state.
+    private func forgetGoneParents() {
+        guard model.loaded, model.hubError == nil else { return }
+        let kept = treeOpen.intersection(model.allRefs)
+        if kept != treeOpen { treeOpen = kept }
+    }
+
     private func toggleTree(_ ref: TerminalRef) {
         var open = treeOpen
         if open.contains(ref) { open.remove(ref) } else { open.insert(ref) }
@@ -331,10 +338,7 @@ struct Sidebar: View {
         // The order follows activity at once; the selected row stays selected and in view.
         .onChange(of: model.allRefs) {
             if let s = selection { proxy.scrollTo(s) }
-            // Forget open parents that are gone, only after a good refresh: an outage must not clear the saved state.
-            guard model.loaded, model.hubError == nil else { return }
-            let kept = treeOpen.intersection(model.allRefs)
-            if kept != treeOpen { treeOpen = kept }
+            forgetGoneParents()
         }
         // A row that moves glides to its new place (no motion with Reduce Motion).
         .animation(SessionStyle.move, value: model.allRefs)
