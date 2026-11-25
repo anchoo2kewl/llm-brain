@@ -7,6 +7,7 @@ import WebKit
 struct WindowActions {
     var newTerminal: () -> Void
     var search: () -> Void
+    var needsMe: () -> Void
     var select: (Int) -> Void
     var selected: TerminalRef?
     var rename: () -> Void
@@ -151,6 +152,7 @@ struct MainWindow: View {
         return WindowActions(
             newTerminal: { if model.hub != nil { panes.showNew = true } },
             search: { panes.showSearch = true },
+            needsMe: { if let r = nextNeeds(model.needsQueue, current: current) { panes.show(r) } },
             select: { i in let refs = model.orderedRefs; if i < refs.count { panes.show(refs[i]) } },
             selected: current,
             rename: { if let s = current { startRename(s) } },
@@ -222,6 +224,7 @@ struct Sidebar: View {
         nonmutating set { treeOpenStore = String(decoding: (try? JSONEncoder().encode(Array(newValue))) ?? Data(), as: UTF8.self) }
     }
     @ViewState private var draggingOverSidebar = false
+    @ViewState private var sidebarID = UUID()
     private var model: AppModel { AppModel.shared }
 
     /// The rows to show: each top-level session, then its open children (and theirs), one level deeper each.
@@ -284,7 +287,7 @@ struct Sidebar: View {
                         let e = row.entry
                         TerminalRow(ref: e.ref, terminal: e.terminal, number: index[e.ref], selected: selection == e.ref, expanded: $expanded,
                                     tree: .init(depth: row.depth, children: e.children.count, open: treeOpen.contains(e.ref),
-                                                hub: row.otherHub, toggle: { toggleTree(e.ref) }),
+                                                hub: row.otherHub, toggle: { toggleTree(e.ref) }, roll: e.children.isEmpty ? nil : Rollup(e)),
                                     end: { end(e.ref) })
                             .tag(e.ref)
                             .id(e.ref)
@@ -384,6 +387,9 @@ struct Sidebar: View {
         .onKeyPress(.rightArrow) { setTree(selection, open: true) }
         .onKeyPress(.leftArrow) { setTree(selection, open: false) }
         .onDrop(of: [.utf8PlainText, .plainText], isTargeted: $draggingOverSidebar) { _ in false }
+        .onHover { model.hold($0, by: sidebarID) } // Hold my place
+        .onDisappear { model.hold(false, by: sidebarID) }
+        .safeAreaInset(edge: .top) { NeedsBar { if let r = nextNeeds(model.needsQueue, current: selection) { selection = r } } }
         .safeAreaInset(edge: .bottom) {
             if draggingOverSidebar {
                 MachineDropPanel { ref, n, clone in migrate(ref, to: n, clone: clone) }

@@ -18,6 +18,8 @@ struct TerminalRow: View {
         var open = false
         var hub: String?
         var toggle: (() -> Void)?
+        /// Its subtree in numbers (rows with children).
+        var roll: Rollup?
     }
     var tree = Tree()
     /// One click on × ends the terminal (its CLI stops on its machine).
@@ -29,6 +31,8 @@ struct TerminalRow: View {
         let t = terminal
         let state = model.state(ref), wants = model.wantsYou(ref), open = expanded.contains(ref)
         let recent = model.recent(ref)
+        // A closed parent shows its subtree in numbers and pulses for a child that waits for you.
+        let roll = tree.open ? nil : tree.roll
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 8) {
                 // One control for the tree: the chevron on the left. Closed hides every row under it.
@@ -44,7 +48,7 @@ struct TerminalRow: View {
                     } else {
                         Color.clear.frame(width: 10, height: 1) // the names line up
                     }
-                    StateDot(state: state, wants: wants, pulse: model.pulses(ref), age: recent)
+                    StateDot(state: state, wants: wants, pulse: model.pulses(ref) || (roll?.needs ?? 0) > 0, age: recent)
                 }
                 // Neutral text: colour is only for the selection, the dot ("needs you" pulses red) and errors.
                 Text(Self.name(t)).lineLimit(1).fontWeight(selected ? .bold : .regular)
@@ -70,11 +74,16 @@ struct TerminalRow: View {
             let meta = RowMeta(t)
             HStack(spacing: 6) {
                 ProviderMark(mark: meta.mark, tool: meta.tool)
-                Text(meta.model).lineLimit(1).truncationMode(.tail)
+                if let roll, !roll.label.isEmpty {
+                    Button(roll.label) { if let f = roll.first { model.reveal = f } else { tree.toggle?() } }.buttonStyle(.plain).lineLimit(1)
+                        .foregroundStyle(roll.needs > 0 ? AnyShapeStyle(SessionStyle.needsYou) : AnyShapeStyle(.secondary))
+                        .help("Open the tree at the child that has waited longest")
+                } else {
+                    Text(meta.model).lineLimit(1).truncationMode(.tail)
+                }
                 Spacer(minLength: 0)
                 if let p = meta.percent {
-                    Text("\(p)%").monospacedDigit().foregroundStyle(p >= 90 ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                        .fixedSize().help("Context used")
+                    Text("\(p)%").monospacedDigit().foregroundStyle(ContextLevel(percent: p).style).fixedSize().help("Context used")
                 }
             }
             .font(.appCaption2).foregroundStyle(.secondary).padding(.leading, 30).frame(minHeight: 14)
@@ -84,7 +93,7 @@ struct TerminalRow: View {
                     .font(.appCaption).foregroundStyle(m.error != nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .lineLimit(3).padding(.leading, 30).help(p.detail ?? "")
             }
-            if selected || open { TerminalDetailView(ref: ref, terminal: t).padding(.leading, 30) }
+            if selected || open { TerminalDetailView(ref: ref, terminal: t, kids: tree.roll).padding(.leading, 30) }
         }
         .padding(.vertical, 2)
         .padding(.leading, CGFloat(tree.depth) * 16)
@@ -214,20 +223,27 @@ struct ProviderMark: View {
 struct TerminalDetailView: View {
     let ref: TerminalRef
     let terminal: Terminal
+    var kids: Rollup?
     @ViewState private var detail: TerminalDetail?
+    @ViewState private var note: String?
 
     var body: some View {
         let f = terminal.contextFraction ?? 0, known = RowMeta(terminal).percent, p = known ?? 0 // colours follow the % the row shows
+        let level = ContextLevel(percent: p)
         VStack(alignment: .leading, spacing: 4) {
             // Drawn, not a ProgressView: a selected list row turns a ProgressView's tint grey.
-            Capsule().fill(.quaternary).frame(height: 4)
-                .overlay(alignment: .leading) {
-                    GeometryReader { g in Capsule().fill(p >= 90 ? Color.red : p >= 70 ? .orange : .blue).frame(width: g.size.width * f) }
-                }
-                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue(known.map { "\($0) percent" } ?? "not reported")
+            HStack(spacing: 8) {
+                Capsule().fill(.quaternary).frame(height: 4)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { g in Capsule().fill(level == .high ? Color.red : level == .warn ? .orange : .blue).frame(width: g.size.width * f) }
+                    }
+                    .accessibilityElement().accessibilityLabel("Context used").accessibilityValue(known.map { "\($0) percent" } ?? "not reported")
+                if terminal.handoffOffered { HandoffButton(ref: ref, say: { note = $0 }) }
+            }
+            if let note { Text(note).font(.appCaption2).foregroundStyle(.secondary).lineLimit(1) }
             TimelineView(.periodic(from: .now, by: 5)) { ctx in
                 Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
-                    ForEach(terminal.detailRows(detail, now: ctx.date), id: \.label) { r in
+                    ForEach(terminal.detailRows(detail, now: ctx.date, kids: kids), id: \.label) { r in
                         GridRow {
                             Text(r.label).foregroundStyle(.tertiary)
                             Text(r.value).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(r.help)
@@ -238,6 +254,7 @@ struct TerminalDetailView: View {
             }
         }
         .font(.appCaption)
+        .onChange(of: terminal.handoffOffered) { if !terminal.handoffOffered { note = nil } }
         .task(id: ref) {
             detail = nil // never show another session's numbers
             while !Task.isCancelled {
@@ -248,5 +265,59 @@ struct TerminalDetailView: View {
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+    }
+}
+
+extension ContextLevel {
+    /// The colour of the context percent: grey, amber, red.
+    var style: AnyShapeStyle {
+        switch self {
+        case .normal: AnyShapeStyle(.secondary)
+        case .warn: AnyShapeStyle(.orange)
+        case .high: AnyShapeStyle(.red)
+        }
+    }
+}
+
+/// The sidebar's top line: "Needs me (N)" (⌘J opens the longest wait; again, the next one) and "order paused" while
+/// the pointer holds the rows in place.
+struct NeedsBar: View {
+    let go: () -> Void
+    private var model: AppModel { AppModel.shared }
+
+    var body: some View {
+        let n = model.needsQueue.count
+        // Always the same height: nothing under the pointer moves when the button or the mark comes or goes.
+        HStack(spacing: 8) {
+            Button("Needs me (\(n))", action: go).controlSize(.small).opacity(n > 0 ? 1 : 0).disabled(n == 0)
+                .help("Open the session that has waited longest for you (⌘J). Again: the next one.")
+                .accessibilityHidden(n == 0)
+            Spacer(minLength: 0)
+            Text("order paused").font(.appCaption2).foregroundStyle(.secondary).opacity(model.held != nil ? 1 : 0)
+                .help("The rows keep their places while the pointer is in the list")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 4)
+    }
+}
+
+/// Handoff, for a context that is nearly full: the hub compacts the conversation, or starts a successor session as a
+/// child of this one.
+struct HandoffButton: View {
+    let ref: TerminalRef
+    let say: (String?) -> Void
+    private var model: AppModel { AppModel.shared }
+
+    var body: some View {
+        Button(model.handingOff.contains(ref) ? "Handing off…" : "Handoff") {
+            say(nil)
+            Task {
+                do {
+                    let r = try await model.handoff(ref)
+                    say(r.map { $0.mode == "successor" ? "Successor session \($0.id ?? 0) started" : "Compacting the conversation" })
+                } catch { say("Handoff failed: \(error.localizedDescription)") }
+            }
+        }
+        .controlSize(.small).disabled(model.handingOff.contains(ref))
+        .help("Context is nearly full: the hub compacts this conversation, or starts a successor session as a child")
     }
 }

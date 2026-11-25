@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const { treeStateKey, folder, searchText, isReply, recentKey, byRecent, lastActive, shortAge, dotOpacity, pulses, treeRows, switcher,
-  modelShort, duration, rowMeta, detailRows, descendants } =
+  modelShort, duration, rowMeta, detailRows, descendants,
+  contextLevel, handoffOffered, needsQueue, nextNeeds, rollup, statusLine } =
   createRequire(import.meta.url)("../hub/internal/web/static/wslist.js");
 const at = (s) => new Date(Date.parse("2027-01-15T08:00:00Z") + s * 1000).toISOString();
 const term = (id, f = {}) => ({ id, updated: at(f.updated ?? 0), started: at(f.started ?? 0),
@@ -129,9 +130,9 @@ test("details: the same eight rows before and after the hub answers", () => {
   const t = { id: 7, host: "studio", cwd: "/work/app", branch: "feat/x", provider: "claude", model: "claude-opus-5-5", state: "working",
     state_since: "2026-11-25T11:57:00Z", started: "2026-11-25T10:00:00Z", context_used: 92608, context_window: 200000, subagents: 2 };
   const before = detailRows(t, null, now);
-  assert.deepEqual(before.map((r) => r.label), ["Context", "State", "Where", "Account", "Totals", "You", "Agent", "Started"]);
-  assert.equal(before[0].value, "92k of 200k · 46%");
-  assert.equal(before[1].value, "Working · 3m · 2 subagents");
+  assert.deepEqual(before.map((r) => r.label), ["Now", "Context", "Where", "Account", "Totals", "You", "Agent", "Started"]);
+  assert.equal(before[0].value, "Working 3m · 2 subagents");
+  assert.equal(before[1].value, "92k of 200k · 46%");
   assert.equal(before[2].value, "studio · app · feat/x");
   assert.equal(before[2].title, "studio · /work/app · feat/x");
   assert.equal(before[3].value, "default login");
@@ -141,24 +142,24 @@ test("details: the same eight rows before and after the hub answers", () => {
     stats: { dollars: 0.589, tokens: { input: 32, output: 3770, cache_read: 1110178, cache_write: 58295 }, prompts: 1, tool_calls: 11, tool_errors: 1 } };
   const after = detailRows(t, d, now);
   assert.equal(after.length, before.length);
-  assert.equal(after[1].value, "Working · 3m · 2 subagents · Bash");
-  assert.equal(after[1].title, 'Bash { "command": "ls" }');
+  assert.equal(after[0].value, "Working 3m · 2 subagents · Bash");
+  assert.equal(after[0].title, 'Bash { "command": "ls" }');
   assert.equal(after[4].value, "$0.59 · 1.2M tokens · 1 prompt · 11 tool calls (1 failed)");
   assert.equal(after[5].value, "Fix the build");
   assert.equal(after[6].value, "–");
   const waits = detailRows({ ...t, state: "waiting", needs_owner: true, branch: "main", context_used: undefined }, d, now);
-  assert.equal(waits[1].value.split(" · ")[0], "Waiting for you");
-  assert.equal(waits[0].value, "not reported");
+  assert.ok(waits[0].value.startsWith("Waiting for you 3m"));
+  assert.equal(waits[1].value, "not reported");
   assert.equal(waits[2].value, "studio · app", "the default branch is left out");
-  assert.equal(detailRows({ ...t, state: "waiting", ask_kind: "done", needs_owner: false }, d, now)[1].value.split(" · ")[0], "Finished its turn");
-  const lbl = (f) => detailRows({ ...t, ...f }, d, now)[1].value.split(" · ")[0];
+  assert.ok(detailRows({ ...t, state: "waiting", ask_kind: "done", needs_owner: false }, d, now)[0].value.startsWith("Finished its turn"));
+  const lbl = (f) => detailRows({ ...t, ...f, state_since: undefined, subagents: 0 }, d, now)[0].value.split(" · ")[0];
   assert.deepEqual([lbl({ state: "waiting", ask_kind: "error" }), lbl({ state: "blocked" }), lbl({ state: "idle" }), lbl({ state: undefined })],
     ["Stopped on an error", "Waiting for you", "Idle", "Unknown"], "blocked asks for you on a hub without needs_owner");
   assert.equal(detailRows({ ...t, profile: "work", account: "dev@example.com" }, d, now)[3].value, "work · dev@example.com");
   assert.deepEqual(detailRows(t, {}, now).slice(4, 7).map((r) => r.value), ["–", "–", "–"], "no detail: dashes, not dots");
   assert.equal(detailRows(t, { stats: { dollars: 0.002, prompts: 1, tool_calls: 0 } }, now)[4].value, "1 prompt · 0 tool calls", "no $0.00");
   for (const status of ["ended", "failed"])
-    assert.equal(detailRows({ ...t, status, needs_owner: true }, d, now)[1].value.split(" · ")[0], "Ended", "an ended row never asks for you");
+    assert.ok(detailRows({ ...t, status, needs_owner: true }, d, now)[0].value.startsWith("Ended"), "an ended row never asks for you");
 });
 
 test("descendants: every depth, across hubs, never a session running elsewhere, a loop ends", () => {
@@ -169,4 +170,59 @@ test("descendants: every depth, across hubs, never a session running elsewhere, 
   assert.deepEqual(descendants([{ id: 1 }, { id: 2, parent_id: 1 }], { id: 1 }), [], "an older hub: no tree");
   const x = { id: 5, hub: "h", parent_hub: "h", parent_id: 6 }, y = { id: 6, hub: "h", parent_hub: "h", parent_id: 5 };
   assert.deepEqual(descendants([x, y], x), [y], "a loop in bad data ends");
+});
+
+test("context levels: one place for the thresholds; handoff from 80 % on a hub that offers it", () => {
+  assert.deepEqual([74, 75, 84, 85, 100].map(contextLevel), ["normal", "warn", "warn", "high", "high"]);
+  assert.equal(contextLevel(null), "");
+  const row = (used, f = {}) => ({ id: 1, status: "live", context_used: used, context_window: 100, needs_owner_since: null, git: {}, ...f });
+  assert.deepEqual([79, 80].map((u) => handoffOffered(row(u))), [false, true]);
+  const old = row(90); delete old.needs_owner_since; delete old.git;
+  assert.equal(handoffOffered(row(90, { git: null })), false, "a null is not a sign: the same rule as the Mac app");
+  assert.equal(handoffOffered(old), false, "an older hub: no action");
+  assert.equal(handoffOffered({ ...old, handoff: true }), true, "the hub's own flag wins");
+  assert.equal(handoffOffered(row(90, { handoff: false })), false);
+  assert.equal(handoffOffered(row(90, { status: "ended" })), false);
+});
+
+test("needs me: the longest wait first, one entry per session, then the next one", () => {
+  const at = (m) => "2026-11-25T12:" + String(m).padStart(2, "0") + ":00Z";
+  const a = { id: 1, state: "waiting", needs_owner: true, needs_owner_since: at(10) };
+  const b = { id: 2, state: "waiting", needs_owner: true, needs_owner_since: at(5) };
+  const c = { id: 3, state: "blocked", state_since: at(1) }; // an older hub: no needs_owner, blocked asks
+  const busy = { id: 4, state: "working", needs_owner: false }, gone = { ...a, id: 5, status: "ended" }, ext = { ...a, id: "s1", kind: "session" };
+  const q = needsQueue([a, b, c, busy, gone, ext]);
+  assert.deepEqual(q.map((t) => t.id), [3, 2, 1]);
+  assert.equal(nextNeeds(q, null), c, "from anywhere: the longest wait");
+  assert.equal(nextNeeds(q, b), a, "from one in the queue: the next");
+  assert.equal(nextNeeds(q, a), c, "it wraps");
+  assert.equal(nextNeeds(needsQueue([a, busy]), busy), a, "after an answer the current one left the queue");
+  assert.equal(nextNeeds([], a), null);
+  const h1 = { ...a, hub: "b" }, h2 = { ...a, hub: "a" };
+  assert.deepEqual(needsQueue([h1, h2]).map((t) => t.hub), ["a", "b"], "the same id and time on two hubs: by hub");
+});
+
+test("rollup: a closed parent counts its subtree at all depths", () => {
+  const p = { id: 1, hub: "h", state: "waiting", needs_owner: false };
+  const kid = (id, parent, f) => ({ id, hub: "h", parent_hub: "h", parent_id: parent, ...f });
+  const rows = [p, kid(2, 1, { state: "working" }), kid(3, 1, { state: "waiting", needs_owner: true, needs_owner_since: "2026-11-25T12:09:00Z" }),
+    kid(4, 3, { state: "waiting", needs_owner: true, needs_owner_since: "2026-11-25T12:01:00Z" }), kid(5, 2, { state: "working" }),
+    kid(6, 1, { state: "working", status: "ended" })];
+  const r = rollup(rows, p);
+  assert.deepEqual([r.needs, r.working, r.label], [2, 2, "2 need you · 2 working"]);
+  assert.equal(r.first.id, 4, "the oldest wait opens first");
+  assert.equal(rollup([p], p).label, "");
+  assert.equal(rollup(rows.slice(0, 3), p).label, "1 needs you · 1 working");
+});
+
+test("status line: state and time, then git; a parent waits on its children", () => {
+  const now = Date.parse("2026-11-25T12:00:00Z"), s = (m) => new Date(now - m * 60000).toISOString();
+  assert.equal(statusLine({ state: "working", state_since: s(9), git: { files_changed: 5, insertions: 112, deletions: 19 } }, null, now), "Working 9m · 5 files (+112/−19)");
+  assert.equal(statusLine({ state: "idle", state_since: s(14), git: { ahead: 2, files_changed: 1 } }, null, now), "Idle 14m · 2 commits ahead");
+  assert.equal(statusLine({ state: "idle", state_since: s(14), git: { ahead: 0, files_changed: 1, insertions: 3 } }, null, now), "Idle 14m · 1 file (+3/−0)");
+  assert.equal(statusLine({ state: "waiting", ask_kind: "done", state_since: s(2) }, { working: 3 }, now), "Waiting on 3 children");
+  assert.equal(statusLine({ state: "waiting", needs_owner: true, state_since: s(2) }, { working: 3 }, now), "Waiting for you 2m", "a question comes first");
+  assert.equal(statusLine({ state: "working", state_since: s(1) }, null, now), "Working 1m", "an older hub: no git part");
+  assert.equal(statusLine({ state: "waiting", status: "ended" }, { working: 2 }, now), "Ended", "an ended parent never waits on children");
+  assert.equal(statusLine({ state: "waiting", ask_kind: "error" }, { working: 2 }, now), "Stopped on an error");
 });

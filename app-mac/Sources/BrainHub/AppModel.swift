@@ -102,8 +102,40 @@ final class AppModel {
     var client: HubClient? { hub.flatMap { try? HubClient(base: $0) } }
 
     var machines: [Machine] {
-        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs)
+        BrainHubCore.machines(terminals: terminals, live: live, nodes: nodes?.names ?? [], inputs: inputs, held: held ?? [:])
     }
+
+    /// Hold my place: while the pointer is in the sidebar, each row keeps the sort key it had when it came in, so no
+    /// row moves (⌘1 to ⌘9 follow the same order). States, counts and pulses stay live. Leaving orders once.
+    private(set) var held: [TerminalRef: Date]?
+    /// The sidebars (one per window) that hold the order now: the keys are taken on the first, dropped after the last.
+    private var holders: Set<UUID> = []
+    func hold(_ on: Bool, by sidebar: UUID) {
+        if on { holders.insert(sidebar) } else { holders.remove(sidebar) }
+        if holders.isEmpty { held = nil } else if held == nil { held = [:]; keepHeldKeys() }
+    }
+    /// A session that arrives during the hold keeps the key it came with.
+    private func keepHeldKeys() {
+        guard var h = held else { return }
+        for (hub, t) in terminals { let r = TerminalRef(hub: hub, id: t.id); if h[r] == nil { h[r] = recentKey(t, input: inputs[r]) } }
+        held = h
+    }
+
+    /// Handoff: the hub compacts the conversation, or starts a successor session as a child. One request per session.
+    private(set) var handingOff: Set<TerminalRef> = []
+    struct HandoffReply: Decodable { var mode: String; var id: Int64? }
+    func handoff(_ ref: TerminalRef) async throws -> HandoffReply? {
+        guard handingOff.insert(ref).inserted else { return nil }
+        defer { handingOff.remove(ref) }
+        let r = try await HubClient(base: ref.hub).post(Paths.handoff(ref.id), json: [:], as: HandoffReply.self, timeout: 60)
+        guard r.mode == "compact" || (r.mode == "successor" && r.id != nil) else { throw HubError("Unexpected reply from the hub: \(r.mode)") }
+        await refresh()
+        if r.mode == "successor", let id = r.id { reveal = TerminalRef(hub: ref.hub, id: id) }
+        return r
+    }
+
+    /// Needs me: the sessions that wait for the owner, the longest wait first (every hub of the cluster).
+    var needsQueue: [TerminalRef] { BrainHubCore.needsQueue(machines.flatMap { $0.terminals.flatMap(\.all) }) }
 
     var machineNames: [String] { machines.map(\.name) }
 
@@ -294,6 +326,7 @@ final class AppModel {
             rememberNodes(nodes, base: client.base)
             let fresh = waiting.subtracting(inboxWaiting)
             (self.nodes, self.terminals, self.live, self.inboxWaiting, hubError, loaded) = (nodes, all, live, waiting, nil, true)
+            keepHeldKeys()
             let inFront = NSApp.isActive ? focused : nil
             for (hub, t) in all {
                 let ref = TerminalRef(hub: hub, id: t.id)

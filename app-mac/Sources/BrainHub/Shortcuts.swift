@@ -38,6 +38,7 @@ struct Shortcut: Identifiable {
     static let search = Shortcut(group: "Terminals", title: "Search Conversations…", key: "k", modifiers: .command)
     static let reconnect = Shortcut(group: "Terminals", title: "Reconnect", key: "r", modifiers: [.command, .shift])
     static let endTerminal = Shortcut(group: "Terminals", title: "End Terminal…", key: "w", modifiers: [.command, .shift])
+    static let needsMe = Shortcut(group: "Terminals", title: "Next Session That Needs You", key: "j", modifiers: .command)
     static let showN = (1...9).map {
         Shortcut(group: "Terminals", title: "Show Terminal \($0)", key: KeyEquivalent(Character(String($0))), modifiers: .command)
     }
@@ -50,7 +51,7 @@ struct Shortcut: Identifiable {
     static let closePane = Shortcut(group: "Panes", title: "Close Pane", key: "w", modifiers: [.command, .option])
 
     static let all: [Shortcut] = [newWindow, showTerminals, close, settings, shortcuts, help, newTerminal, search, reconnect,
-                                  endTerminal] + showN + [splitRight, splitDown, nextPane, previousPane, zoomPane, closePane]
+                                  endTerminal, needsMe] + showN + [splitRight, splitDown, nextPane, previousPane, zoomPane, closePane]
 }
 
 extension View {

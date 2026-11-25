@@ -67,10 +67,11 @@ private enum HubTime {
 /// Group terminals by machine. `nodes` (the cluster's machines, this hub first) come first even with nothing open,
 /// so a new terminal can go there; other hosts follow by name. Ended terminals are in `endedSessions`. Rows are most recent first (`recentKey`, with `inputs`: when this app
 /// last sent input to each terminal); the conversations running elsewhere: higher id first.
+/// `held` (Hold my place): the sort keys taken when the owner entered the list; those rows keep their places.
 public func machines(terminals: [(hub: String, terminal: Terminal)], live: [LiveSession], nodes: [String],
-                     inputs: [TerminalRef: Date] = [:]) -> [Machine] {
+                     inputs: [TerminalRef: Date] = [:], held: [TerminalRef: Date] = [:]) -> [Machine] {
     var byHost: [String: [Machine.Entry]] = [:]
-    for e in sessionTree(entries(terminals, open: true, keep: [], inputs: inputs)) { byHost[e.terminal.host, default: []].append(e) }
+    for e in sessionTree(entries(terminals, open: true, keep: [], inputs: inputs, held: held)) { byHost[e.terminal.host, default: []].append(e) }
     let liveByHost = Dictionary(grouping: live, by: \.host)
     var names: [String] = []
     for n in nodes where !names.contains(n) { names.append(n) }
@@ -93,11 +94,11 @@ public func endedSessions(terminals: [(hub: String, terminal: Terminal)], keep: 
 
 /// The open (or the kept ended) terminals as rows with their order key.
 func entries(_ terminals: [(hub: String, terminal: Terminal)], open: Bool, keep: Set<TerminalRef>,
-             inputs: [TerminalRef: Date]) -> [Machine.Entry] {
+             inputs: [TerminalRef: Date], held: [TerminalRef: Date] = [:]) -> [Machine.Entry] {
     terminals.compactMap { hub, t in
         let ref = TerminalRef(hub: hub, id: t.id)
         guard t.isOpen == open, open || keep.contains(ref) else { return nil }
-        let key = recentKey(t, input: inputs[ref])
+        let key = held[ref] ?? recentKey(t, input: inputs[ref])
         return Machine.Entry(ref: ref, terminal: t, recent: key, rank: key)
     }
 }

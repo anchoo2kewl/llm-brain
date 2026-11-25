@@ -132,22 +132,64 @@
       default: return t.state ? String(t.state) : "Unknown";
     }
   }
+  // Context colours, in one place: normal below 75 %, warn from 75 %, high from 85 %. Handoff is offered from 80 %.
+  var LEVEL = { warn: 75, high: 85, handoff: 80 };
+  function contextLevel(pct) { return pct === null || pct === undefined ? "" : pct >= LEVEL.high ? "high" : pct >= LEVEL.warn ? "warn" : "normal"; }
+  function live(t) { return t.status !== "ended" && t.status !== "failed"; }
+  // The hub answers POST /api/terminals/{id}/handoff (it sends needs_owner_since, or says so with "handoff").
+  function handoffOffered(t) {
+    // The hub's own flag; else a hub that sends the 0.1.15 fields (the same rule as the Mac app, which cannot see a null).
+    var p = rowMeta(t).pct, can = typeof t.handoff === "boolean" ? t.handoff : t.needs_owner_since != null || t.git != null;
+    return can && live(t) && t.kind !== "session" && p !== null && p >= LEVEL.handoff;
+  }
+  // Since when the session waits for the owner: one continuous period counts once.
+  function needsSince(t) { var v = ms(t.needs_owner_since); return v !== null ? v : (v = ms(t.state_since)) !== null ? v : recentKey(t); }
+  // The sessions that wait for the owner, the longest wait first; ties by the lower id.
+  function needsQueue(rows) {
+    return rows.filter(function (t) { return t.kind !== "session" && live(t) && pulses(t, false); })
+      .sort(function (a, b) { return needsSince(a) - needsSince(b) || (a.id > b.id ? 1 : a.id < b.id ? -1 : 0) || ((a.hub || "") < (b.hub || "") ? -1 : (a.hub || "") > (b.hub || "") ? 1 : 0); });
+  }
+  // Needs me: the longest wait first; from a session in the queue, the next one (after an answer it leaves the queue).
+  function nextNeeds(queue, current) {
+    if (!queue.length) return null;
+    var i = queue.indexOf(current);
+    return i < 0 ? queue[0] : queue[(i + 1) % queue.length];
+  }
+  // A parent's subtree in numbers, all depths: what a closed parent shows on its second line.
+  function rollup(rows, t) {
+    var ds = descendants(rows.filter(live), t), r = { needs: 0, working: 0 };
+    ds.forEach(function (c) { if (pulses(c, false)) r.needs++; else if (c.state === "working") r.working++; });
+    r.label = [r.needs ? r.needs + " need" + (r.needs === 1 ? "s" : "") + " you" : "", r.working ? r.working + " working" : ""].filter(Boolean).join(" · ");
+    r.first = needsQueue(ds)[0] || null; // the child to open from the rollup
+    return r;
+  }
+  // The open row's one-line status: "Working 9m · 5 files (+112/−19)", "Waiting on 3 children", "Idle 14m · 2 commits ahead".
+  // The git part needs the hub's `git` field; without it the line shows what it has.
+  function statusLine(t, kids, now) {
+    now = now === undefined ? Date.now() : now;
+    var since = ms(t.state_since), dur = since !== null ? " " + duration((now - since) / 1000) : "", g = t.git, label = stateLabel(t);
+    if (kids && kids.working > 0 && live(t) && t.ask_kind !== "error" && !pulses(t, false) && (t.state === "waiting" || t.state === "idle"))
+      return "Waiting on " + kids.working + (kids.working === 1 ? " child" : " children");
+    var files = g && g.files_changed > 0 ? plural(g.files_changed, "file") + " (+" + (g.insertions || 0) + "/−" + (g.deletions || 0) + ")" : "";
+    var ahead = g && g.ahead > 0 ? plural(g.ahead, "commit") + " ahead" : "";
+    return label + dur + ((t.state === "working" ? files : ahead || files) ? " · " + (t.state === "working" ? files : ahead || files) : "");
+  }
   // The selected row's details: always the same rows, so its height never changes when data arrives. `t` is the
   // list's row, `d` the hub's /api/terminals/{id}/detail (null until it comes). {label, value, title}.
-  function detailRows(t, d, now) {
+  function detailRows(t, d, now, kids) {
     now = now === undefined ? Date.now() : now;
-    var wait = d ? "–" : "…", since = ms(t.state_since), started = ms(t.started), m = rowMeta(t);
+    var wait = d ? "–" : "…", started = ms(t.started), m = rowMeta(t);
     var tool = d && one(d.tool), branch = t.branch && ["HEAD", "main", "master"].indexOf(t.branch) < 0 ? t.branch : "";
-    var state = [stateLabel(t), since !== null ? duration((now - since) / 1000) : "",
-      t.subagents > 0 ? plural(t.subagents, "subagent") : "", tool ? tool.split(/[\s{(]/)[0] : ""].filter(Boolean).join(" · ");
+    var state = [statusLine(t, kids, now), t.subagents > 0 ? plural(t.subagents, "subagent") : "", tool ? tool.split(/[\s{(]/)[0] : ""]
+      .filter(Boolean).join(" · ");
     var s = d && d.stats, tok = 0;
     if (s && s.tokens) Object.keys(s.tokens).forEach(function (k) { tok += Number(s.tokens[k]) || 0; });
     var totals = s ? [s.dollars >= 0.005 ? "$" + s.dollars.toFixed(2) : "", tok ? count(tok) + " tokens" : "", plural(s.prompts || 0, "prompt"),
       plural(s.tool_calls || 0, "tool call") + (s.tool_errors > 0 ? " (" + s.tool_errors + " failed)" : "")].filter(Boolean).join(" · ") : wait;
     var acct = [t.profile, t.account].filter(Boolean).join(" · ");
     return [
+      { label: "Now", value: state, title: tool || "" },
       { label: "Context", value: m.pct === null ? "not reported" : count(t.context_used) + " of " + count(t.context_window) + " · " + m.pct + "%" },
-      { label: "State", value: state, title: tool || "" },
       { label: "Where", value: [t.host, folder(t), branch].filter(Boolean).join(" · "), title: [t.host, t.cwd, t.branch].filter(Boolean).join(" · ") },
       { label: "Account", value: acct || "default login" },
       { label: "Totals", value: totals },
@@ -183,7 +225,75 @@
     return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3})+$/.test(data);
   }
   var api = { treeStateKey: treeStateKey, folder: folder, searchText: searchText, isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
-    pulses: pulses, treeRows: treeRows, switcher: switcher, modelShort: modelShort, duration: duration, rowMeta: rowMeta, detailRows: detailRows, descendants: descendants };
+    pulses: pulses, treeRows: treeRows, switcher: switcher, modelShort: modelShort, duration: duration, rowMeta: rowMeta, detailRows: detailRows, descendants: descendants,
+    contextLevel: contextLevel, handoffOffered: handoffOffered, needsQueue: needsQueue, nextNeeds: nextNeeds, rollup: rollup, statusLine: statusLine };
+  // The sidebar's attention tools (docs/design.md): the "Needs me" button, "Hold my place", Make Standalone and
+  // Handoff. Page wiring only; the rules above are tested. workspace.js calls window.wsSide.
+  if (typeof document === "object") (function () {
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+  // Needs me (N): a header button that opens the longest wait (Ctrl+Shift+J does the same). Hidden at 0.
+  function needsButton(head, go) {
+    var b = el("button", "small ws-needs"); b.type = "button"; b.hidden = true;
+    b.title = "Open the session that has waited longest for you (Ctrl+Shift+J). Again: the next one.";
+    b.addEventListener("click", go);
+    head.insertBefore(b, head.querySelector(".grow"));
+    return function paint(n) { b.hidden = !n; b.textContent = "Needs me (" + n + ")"; };
+  }
+
+  // Hold my place: while the pointer or the keyboard focus is in the list, each row keeps its sort key, so no row moves.
+  // States, counts and pulses stay live. On leave the list orders once (with the usual glide).
+  function hold(list, mark, snapshot, release) {
+    var held = null;
+    function show(v) { mark.style.visibility = v ? "" : "hidden"; } // keeps its space: nothing beside it moves
+    show(false);
+    function on() { if (!held) { held = snapshot(); show(true); } }
+    function off() {
+      if (!held || list.matches(":hover") || list.contains(document.activeElement)) return;
+      held = null; show(false); release();
+    }
+    list.addEventListener("mouseenter", on);
+    list.addEventListener("focusin", on);
+    list.addEventListener("mouseleave", function () { setTimeout(off, 0); });
+    list.addEventListener("focusout", function () { setTimeout(off, 0); });
+    // A session that arrives during the hold keeps the key it came with.
+    function key(id, live) { if (held && !Object.prototype.hasOwnProperty.call(held, id)) held[id] = live; return held ? held[id] : live; }
+    key.check = function () { setTimeout(off, 0); }; // after a render: a removed focused row ends the hold
+    return key;
+  }
+
+  // A POST with a JSON body; the promise fails with the hub's error text.
+  function post(url, body) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { if (r.ok) throw new Error("the hub sent no JSON"); return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "error " + r.status); return j; }); });
+  }
+
+  // Make standalone: the session leaves its parent's tree; from now on its lifecycle is its own.
+  function standalone(id, say, done) {
+    post("/api/terminals/" + encodeURIComponent(id) + "/parent", { clear: true }).then(done, function (e) { say("Make standalone failed: " + e.message); });
+  }
+
+  // Handoff: the hub compacts the conversation, or starts a successor session as a child (POST /handoff). One request
+  // at a time per session.
+  var busy = {};
+  function handoff(id, say, done) {
+    if (busy[id]) return;
+    busy[id] = true;
+    say("Handing off…");
+    post("/api/terminals/" + encodeURIComponent(id) + "/handoff", {})
+      .then(function (j) {
+        if (j.mode === "successor" && j.id) say("Successor session " + j.id + " started");
+        else if (j.mode === "compact") say("Compacting the conversation");
+        else throw new Error("unexpected reply from the hub");
+        done(j);
+      })
+      .then(null,
+        function (e) { say("Handoff failed: " + e.message); })
+      .then(function () { delete busy[id]; }, function () { delete busy[id]; });
+  }
+
+  root.wsSide = { needsButton: needsButton, hold: hold, handoff: handoff, standalone: standalone };
+  })();
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;
 })(this);

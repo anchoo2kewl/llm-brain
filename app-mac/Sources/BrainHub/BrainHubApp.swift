@@ -116,6 +116,7 @@ struct HubCommands: Commands {
         CommandGroup(after: .newItem) {
             Button(Shortcut.newTerminal.title) { actions?.newTerminal() }.shortcut(.newTerminal).disabled(actions == nil)
             Button(Shortcut.search.title) { actions?.search() }.shortcut(.search).disabled(actions == nil)
+            Button(Shortcut.needsMe.title) { actions?.needsMe() }.shortcut(.needsMe).disabled(actions == nil)
         }
         CommandMenu("Terminal") {
             ForEach(Array(Shortcut.showN.enumerated()), id: \.offset) { i, s in

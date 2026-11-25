@@ -43,6 +43,11 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     public var childCount: Int?
     /// Set by the hub only when the session waits on you: a question or a permission prompt.
     public var needsOwner: Bool?
+    /// Since when it waits for the owner (one continuous period), its git summary, and whether the hub offers a
+    /// handoff for it (hub 0.1.15). An older hub sends none of them.
+    public var needsOwnerSince: String?
+    public var git: GitSummary?
+    public var handoff: Bool?
     /// The login profile it runs with (nil = the machine's default login), and who that login is.
     public var profile: String?
     public var account: String?
@@ -50,7 +55,7 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, title, host, cli, provider, cwd, status, error, updated, state, ask, askKind = "ask_kind", fix, model, branch
         case contextUsed = "context_used", contextWindow = "context_window", subagents, started, profile, account
-        case stateSince = "state_since"
+        case stateSince = "state_since", needsOwnerSince = "needs_owner_since", git, handoff
         case lastActivity = "last_activity_at", lastInput = "last_input_at"
         case hubNode = "hub", parentHub = "parent_hub", parentId = "parent_id", childCount = "children", needsOwner = "needs_owner"
     }
@@ -81,6 +86,23 @@ public struct Terminal: Codable, Hashable, Sendable, Identifiable {
     /// When it last ran or got input: the later of the two, else `updated`.
     public var lastActive: Date? {
         [lastActivity, lastInput].compactMap { $0.flatMap(parseHubTime) }.max() ?? parseHubTime(updated)
+    }
+}
+
+/// The hub's git summary of a session's worktree. It can be stale: `checkedAt` says when the hub looked.
+public struct GitSummary: Codable, Hashable, Sendable {
+    public var filesChanged: Int?
+    public var insertions: Int?
+    public var deletions: Int?
+    public var ahead: Int?
+    public var dirty: Bool?
+    public var base: String?
+    public var checkedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case filesChanged = "files_changed", insertions, deletions, ahead, dirty, base, checkedAt = "checked_at"
+    }
+    public init(filesChanged: Int? = nil, insertions: Int? = nil, deletions: Int? = nil, ahead: Int? = nil) {
+        (self.filesChanged, self.insertions, self.deletions, self.ahead) = (filesChanged, insertions, deletions, ahead)
     }
 }
 
@@ -349,6 +371,7 @@ public enum Paths {
     public static func close(_ id: Int64) -> String { "/api/terminals/\(id)/close" }
     public static func detail(_ id: Int64) -> String { "/api/terminals/\(id)/detail" }
     public static func parent(_ id: Int64) -> String { "/api/terminals/\(id)/parent" }
+    public static func handoff(_ id: Int64) -> String { "/api/terminals/\(id)/handoff" }
     public static func send(_ id: Int64) -> String { "/api/terminals/\(id)/send" }
     public static func move(_ id: Int64) -> String { "/api/sessions/\(id)/move" }
     public static func continueSession(_ id: Int64) -> String { "/api/sessions/\(id)/continue" }

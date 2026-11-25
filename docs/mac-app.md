@@ -108,6 +108,7 @@ Notifications, Brain Hub.
 | --- | --- |
 | ⌘T | New terminal |
 | ⌘K | Search conversations |
+| ⌘J | Next session that needs you (the longest wait first) |
 | ⌘1 … ⌘9 | Show terminal 1 … 9 (sidebar order) in the focused pane |
 | ⌘D, ⇧⌘D | Split right, split down |
 | ⌘], ⌘[ | Next pane, previous pane |

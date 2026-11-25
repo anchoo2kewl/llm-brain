@@ -49,9 +49,9 @@ import BrainHubCore
     @Test func detailRowsKeepTheirShape() throws {
         let now = try #require(ISO8601DateFormatter().date(from: "2026-11-25T12:00:00Z"))
         let before = term().detailRows(nil, now: now)
-        #expect(before.map(\.label) == ["Context", "State", "Where", "Account", "Totals", "You", "Agent", "Started"])
-        #expect(before[0].value == "92k of 200k · 46%")
-        #expect(before[1].value == "Working · 3m · 2 subagents")
+        #expect(before.map(\.label) == ["Now", "Context", "Where", "Account", "Totals", "You", "Agent", "Started"])
+        #expect(before[1].value == "92k of 200k · 46%")
+        #expect(before[0].value == "Working 3m · 2 subagents")
         #expect(before[2].value == "studio · app · feat/x" && before[2].help == "studio · /work/app · feat/x")
         #expect(before[3].value == "default login")
         #expect(before[5].value == "…")
@@ -61,16 +61,18 @@ import BrainHubCore
         let d = try JSONDecoder().decode(TerminalDetail.self, from: Data(json.utf8))
         let after = term().detailRows(d, now: now)
         #expect(after.count == before.count)
-        #expect(after[1].value == "Working · 3m · 2 subagents · Bash" && after[1].help == #"Bash { "command": "ls" }"#)
+        #expect(after[0].value == "Working 3m · 2 subagents · Bash" && after[0].help == #"Bash { "command": "ls" }"#)
         #expect(after[4].value == "$0.59 · 1.2M tokens · 1 prompt · 11 tool calls (1 failed)")
         #expect(after[5].value == "Fix the build" && after[6].value == "–")
         let waits = term { ($0.state, $0.needsOwner, $0.branch, $0.contextUsed) = (.waiting, true, "main", nil) }.detailRows(d, now: now)
-        #expect(waits[1].value.hasPrefix("Waiting for you · "))
-        #expect(waits[0].value == "not reported")
+        #expect(waits[0].value.hasPrefix("Waiting for you 3m"))
+        #expect(waits[1].value == "not reported")
         #expect(waits[2].value == "studio · app")
         let done = term { ($0.state, $0.askKind, $0.needsOwner) = (.waiting, "done", false) }.detailRows(d, now: now)
-        #expect(done[1].value.hasPrefix("Finished its turn"))
-        func label(_ f: (inout Terminal) -> Void) -> Substring { term(f).detailRows(d, now: now)[1].value.split(separator: " · ")[0] }
+        #expect(done[0].value.hasPrefix("Finished its turn"))
+        func label(_ f: (inout Terminal) -> Void) -> Substring {
+            term { f(&$0); ($0.stateSince, $0.subagents) = (nil, 0) }.detailRows(d, now: now)[0].value.split(separator: " · ")[0]
+        }
         #expect(label { ($0.state, $0.askKind) = (.waiting, "error") } == "Stopped on an error")
         #expect(label { $0.state = .blocked } == "Waiting for you")
         #expect(label { $0.state = .idle } == "Idle")
@@ -79,8 +81,66 @@ import BrainHubCore
         #expect(term().detailRows(TerminalDetail(), now: now)[4...6].map(\.value) == ["–", "–", "–"])
         #expect(term { $0.started = "" }.detailRows(d, now: now)[7].help == "–")
         for status in ["ended", "failed"] {
-            #expect(term { ($0.status, $0.needsOwner) = (status, true) }.detailRows(d, now: now)[1].value.hasPrefix("Ended"))
+            #expect(term { ($0.status, $0.needsOwner) = (status, true) }.detailRows(d, now: now)[0].value.hasPrefix("Ended"))
         }
+    }
+
+    @Test func contextLevelsAndHandoff() {
+        #expect([74, 75, 84, 85, 100].map { ContextLevel(percent: $0) } == [.normal, .warn, .warn, .high, .high])
+        func at(_ used: Int, _ f: (inout Terminal) -> Void = { _ in }) -> Terminal {
+            term { ($0.contextUsed, $0.contextWindow, $0.needsOwnerSince, $0.git) = (used, 100, nil, GitSummary()); f(&$0) }
+        }
+        #expect([79, 80].map { at($0).handoffOffered } == [false, true])
+        #expect(!at(90) { $0.git = nil }.handoffOffered, "an older hub: no action")
+        #expect(at(90) { ($0.git, $0.handoff) = (nil, true) }.handoffOffered, "the hub's own flag wins")
+        #expect(!at(90) { $0.handoff = false }.handoffOffered)
+        #expect(!at(90) { $0.status = "ended" }.handoffOffered)
+    }
+
+    private func entries(_ ts: [Terminal]) -> [Machine.Entry] {
+        machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"]).flatMap(\.terminals).flatMap(\.all)
+    }
+
+    @Test func needsMeQueue() {
+        func w(_ id: Int64, _ f: (inout Terminal) -> Void) -> Terminal { term { $0.id = id; $0.hubNode = "h"; ($0.parentHub, $0.parentId) = (nil, nil); f(&$0) } }
+        let a = w(1) { ($0.state, $0.needsOwner, $0.needsOwnerSince) = (.waiting, true, "2026-11-25T12:10:00Z") }
+        let b = w(2) { ($0.state, $0.needsOwner, $0.needsOwnerSince) = (.waiting, true, "2026-11-25T12:05:00Z") }
+        let c = w(3) { ($0.state, $0.needsOwner, $0.stateSince) = (.blocked, nil, "2026-11-25T12:01:00Z") } // an older hub
+        let busy = w(4) { ($0.state, $0.needsOwner) = (.working, false) }
+        let q = needsQueue(entries([a, b, c, busy]))
+        let r = { (id: Int64) in TerminalRef(hub: "h", id: id) }
+        #expect(q == [r(3), r(2), r(1)])
+        #expect(nextNeeds(q, current: nil) == r(3) && nextNeeds(q, current: r(2)) == r(1) && nextNeeds(q, current: r(1)) == r(3))
+        #expect(nextNeeds(q, current: r(4)) == r(3), "after an answer the current one left the queue")
+        #expect(nextNeeds([], current: r(1)) == nil)
+    }
+
+    @Test func rollupAndStatusLine() throws {
+        func k(_ id: Int64, _ parent: Int64?, _ f: (inout Terminal) -> Void) -> Terminal {
+            term { $0.id = id; $0.hubNode = "h"; ($0.parentHub, $0.parentId) = (parent.map { _ in "h" }, parent); f(&$0) }
+        }
+        let ts = [k(1, nil) { ($0.state, $0.needsOwner) = (.waiting, false) }, k(2, 1) { $0.state = .working },
+                  k(3, 1) { ($0.state, $0.needsOwner, $0.needsOwnerSince) = (.waiting, true, "2026-11-25T12:09:00Z") },
+                  k(4, 3) { ($0.state, $0.needsOwner, $0.needsOwnerSince) = (.waiting, true, "2026-11-25T12:01:00Z") },
+                  k(5, 2) { $0.state = .working }]
+        let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"]).flatMap(\.terminals)
+        let roll = Rollup(top[0])
+        #expect([roll.needs, roll.working] == [2, 2] && roll.label == "2 need you · 2 working")
+        #expect(roll.first == TerminalRef(hub: "h", id: 4), "the oldest wait opens first")
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-11-25T12:00:00Z"))
+        let ago = { (m: Double) in ISO8601DateFormatter().string(from: now.addingTimeInterval(-m * 60)) }
+        func line(_ f: (inout Terminal) -> Void, kids: Rollup? = nil) -> String {
+            term { ($0.needsOwner, $0.subagents) = (false, 0); f(&$0) }.statusLine(kids, now: now)
+        }
+        #expect(line { ($0.state, $0.stateSince, $0.git) = (.working, ago(9), GitSummary(filesChanged: 5, insertions: 112, deletions: 19)) }
+                == "Working 9m · 5 files (+112/−19)")
+        #expect(line { ($0.state, $0.stateSince, $0.git) = (.idle, ago(14), GitSummary(filesChanged: 1, ahead: 2)) } == "Idle 14m · 2 commits ahead")
+        #expect(line { ($0.state, $0.stateSince, $0.git) = (.idle, ago(14), GitSummary(filesChanged: 1, insertions: 3, ahead: 0)) } == "Idle 14m · 1 file (+3/−0)")
+        #expect(line({ ($0.state, $0.askKind) = (.waiting, "done") }, kids: roll) == "Waiting on 2 children")
+        #expect(line({ ($0.state, $0.needsOwner, $0.stateSince) = (.waiting, true, ago(2)) }, kids: roll) == "Waiting for you 2m")
+        #expect(line { ($0.state, $0.stateSince) = (.working, ago(1)) } == "Working 1m", "an older hub: no git part")
+        #expect(line({ ($0.state, $0.status) = (.waiting, "ended") }, kids: roll).hasPrefix("Ended"), "an ended parent never waits on children")
+        #expect(line({ ($0.state, $0.askKind) = (.waiting, "error") }, kids: roll).hasPrefix("Stopped on an error"))
     }
 
     @Test func olderDetailWithoutTokensStillDecodes() throws {
