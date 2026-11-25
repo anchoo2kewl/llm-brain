@@ -25,7 +25,7 @@ public func modelShort(_ id: String?) -> String {
 
 /// A length of time: "45s", "3m", "2h 5m", "3d 4h".
 public func duration(_ seconds: TimeInterval) -> String {
-    let s = max(0, Int(seconds.isFinite ? seconds : 0))
+    let s = seconds.isFinite && seconds > 0 ? Int(min(seconds, 1e15)) : 0 // Int() traps outside its range
     switch s {
     case ..<60: return "\(s)s"
     case ..<3600: return "\(s / 60)m"

@@ -265,8 +265,10 @@ struct Sidebar: View {
                             .id(e.ref)
                             .itemProvider { NSItemProvider(object: e.ref.dragText as NSString) }
                             .contextMenu {
-                                Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
-                                    if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                if selection != e.ref { // the selected row always shows its details
+                                    Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
+                                        if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                    }
                                 }
                                 MoveMenus(ref: e.ref) { n, clone in migrate(e.ref, to: n, clone: clone) }
                                 Button("Open in New Window") { openInWindow(e.ref) }
@@ -321,8 +323,10 @@ struct Sidebar: View {
                                 .tag(e.ref)
                                 .id(e.ref)
                                 .contextMenu {
-                                    Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
-                                        if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                    if selection != e.ref {
+                                        Button(expanded.contains(e.ref) ? "Hide Details" : "Show Details") {
+                                            if expanded.contains(e.ref) { expanded.remove(e.ref) } else { expanded.insert(e.ref) }
+                                        }
                                     }
                                 }
                         }

@@ -20,6 +20,8 @@ import BrainHubCore
         #expect(duration(2 * 3600 + 5 * 60) == "2h 5m")
         #expect(duration(3 * 86400 + 4 * 3600 + 59) == "3d 4h")
         #expect(duration(-5) == "0s")
+        #expect(duration(-1e20) == "0s" && duration(.infinity) == "0s" && duration(.nan) == "0s")
+        #expect(duration(.greatestFiniteMagnitude).contains("d"), "no trap")
     }
 
     private func term(_ f: (inout Terminal) -> Void = { _ in }) -> Terminal {
@@ -40,8 +42,8 @@ import BrainHubCore
         #expect(RowMeta(term { ($0.contextUsed, $0.contextWindow) = (300, 200) }).percent == 100)
         #expect(RowMeta(term { ($0.provider, $0.cli) = ("", "Claude Code") }).mark == "CC", "only cli, as a session running elsewhere")
         #expect(RowMeta(term { $0.provider = "Codex" }).mark == "CX")
-        let other = RowMeta(term { ($0.provider, $0.cli, $0.model) = ("aider", "", nil) })
-        #expect(other.tool == "aider" && other.model == "aider")
+        let other = RowMeta(term { ($0.provider, $0.cli, $0.model) = ("Aider", "", nil) })
+        #expect(other.tool == "Aider" && other.model == "Aider")
     }
 
     @Test func detailRowsKeepTheirShape() throws {

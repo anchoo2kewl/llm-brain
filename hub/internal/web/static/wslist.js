@@ -114,7 +114,7 @@
   function rowMeta(t) {
     var p = provider(t), used = t.context_used, win = t.context_window;
     var pct = used > 0 && win > 0 ? Math.min(100, Math.round(used * 100 / win)) : null;
-    var tool = TOOLS[p] || t.cli || p;
+    var tool = TOOLS[p] || t.cli || t.provider || "";
     return { mark: MARKS[p] || ">_", tool: tool, model: modelShort(t.model) || tool, pct: pct };
   }
   function count(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? Math.floor(n / 1000) + "k" : String(n); }

@@ -121,7 +121,7 @@ test("row meta: tool mark, model or tool name, context percent", () => {
   assert.deepEqual(rowMeta({ provider: "codex", cli: "Codex", context_used: 0, context_window: 475000 }), { mark: "CX", tool: "Codex", model: "Codex", pct: null });
   assert.equal(rowMeta({ cli: "Claude Code" }).mark, "CC", "a session running elsewhere has only cli");
   assert.equal(rowMeta({ provider: "claude", context_used: 300, context_window: 200 }).pct, 100);
-  assert.deepEqual([rowMeta({ provider: "aider", cli: "" }).tool, rowMeta({ provider: "aider", cli: "" }).model], ["aider", "aider"]);
+  assert.deepEqual([rowMeta({ provider: "Aider", cli: "" }).tool, rowMeta({ provider: "Aider", cli: "" }).model], ["Aider", "Aider"]);
 });
 
 test("details: the same eight rows before and after the hub answers", () => {
