@@ -62,7 +62,7 @@ struct TerminalRow: View {
             .frame(minHeight: 22)
             let meta = RowMeta(t)
             HStack(spacing: 6) {
-                ProviderMark(provider: t.provider)
+                ProviderMark(mark: meta.mark, tool: meta.tool)
                 Text(meta.model).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
                 if let p = meta.percent {
@@ -192,21 +192,13 @@ struct StateDot: View {
 
 /// Which CLI a terminal runs, as a small muted mark.
 struct ProviderMark: View {
-    let provider: String
+    let mark: String
+    let tool: String
 
     var body: some View {
-        Text(Self.letter(provider)).font(.app(9, .medium)).foregroundStyle(.secondary)
+        Text(mark).font(.app(9, .medium)).foregroundStyle(.secondary)
             .frame(width: 16, height: 14).overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.quaternary))
-            .help(provider).accessibilityLabel(provider)
-    }
-
-    static func letter(_ p: String) -> String {
-        switch p {
-        case "claude": "CC"
-        case "codex": "CX"
-        case "antigravity": "AG"
-        default: ">_"
-        }
+            .help(tool).accessibilityLabel(tool)
     }
 }
 
@@ -218,14 +210,14 @@ struct TerminalDetailView: View {
     @ViewState private var detail: TerminalDetail?
 
     var body: some View {
-        let f = terminal.contextFraction ?? 0
+        let f = terminal.contextFraction ?? 0, p = RowMeta(terminal).percent ?? 0 // colours follow the % the row shows
         VStack(alignment: .leading, spacing: 4) {
             // Drawn, not a ProgressView: a selected list row turns a ProgressView's tint grey.
             Capsule().fill(.quaternary).frame(height: 4)
                 .overlay(alignment: .leading) {
-                    GeometryReader { g in Capsule().fill(f >= 0.9 ? Color.red : f >= 0.7 ? .orange : .blue).frame(width: g.size.width * f) }
+                    GeometryReader { g in Capsule().fill(p >= 90 ? Color.red : p >= 70 ? .orange : .blue).frame(width: g.size.width * f) }
                 }
-                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue("\(Int((f * 100).rounded())) percent")
+                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue("\(p) percent")
             TimelineView(.periodic(from: .now, by: 5)) { ctx in
                 Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
                     ForEach(terminal.detailRows(detail, now: ctx.date), id: \.label) { r in

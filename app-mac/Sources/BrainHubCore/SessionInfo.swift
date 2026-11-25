@@ -15,7 +15,8 @@ public func modelShort(_ id: String?) -> String {
     switch parts[0] {
     case "claude":
         let rest = parts.dropFirst(), nums = rest.filter(isNum)
-        return rest.filter { !isNum($0) }.map(cap).joined(separator: " ") + (nums.isEmpty ? "" : " " + nums.joined(separator: "."))
+        let words = rest.filter { !isNum($0) }.map(cap)
+        return (words.isEmpty ? "Claude" : words.joined(separator: " ")) + (nums.isEmpty ? "" : " " + nums.joined(separator: "."))
     case "gpt": return "GPT-" + parts.dropFirst().map(cap).joined(separator: "-")
     case "gemini": return parts.map(cap).joined(separator: " ")
     default: return raw
@@ -41,7 +42,8 @@ public struct RowMeta: Equatable, Sendable {
     public var percent: Int?
 
     public init(_ t: Terminal) {
-        let cli = CLI(rawValue: t.provider)
+        let name = (t.provider.isEmpty ? t.cli : t.provider).lowercased()
+        let cli = name == "claude code" ? .claude : CLI(rawValue: name)
         mark = switch cli { case .claude: "CC"; case .codex: "CX"; case .antigravity: "AG"; default: ">_" }
         tool = cli?.label ?? t.cli
         let short = modelShort(t.model)
@@ -61,6 +63,7 @@ public struct DetailRow: Equatable, Sendable {
 public extension Terminal {
     /// What the agent does, in words.
     var stateLabel: String {
+        if status == "ended" || status == "failed" { return "Ended" }
         if Recency.pulses(self, opened: false) { return "Waiting for you" }
         switch state {
         case .working: return "Working"

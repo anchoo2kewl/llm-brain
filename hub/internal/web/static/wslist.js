@@ -92,7 +92,7 @@
     var num = function (p) { return /^\d+(\.\d+)?$/.test(p); };
     if (parts[0] === "claude" && parts.length > 1) {
       var words = parts.slice(1).filter(function (p) { return !num(p); }), nums = parts.slice(1).filter(num);
-      return words.map(cap).join(" ") + (nums.length ? " " + nums.join(".") : "");
+      return (words.length ? words.map(cap).join(" ") : "Claude") + (nums.length ? " " + nums.join(".") : "");
     }
     if (parts[0] === "gpt" && parts.length > 1) return "GPT-" + parts.slice(1).map(cap).join("-");
     if (parts[0] === "gemini" && parts.length > 1) return parts.map(cap).join(" ");
@@ -120,6 +120,7 @@
   function one(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
   function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
   function stateLabel(t) {
+    if (t.status === "ended" || t.status === "failed") return "Ended";
     if (pulses(t, false)) return "Waiting for you";
     switch (t.state) {
       case "working": return "Working";

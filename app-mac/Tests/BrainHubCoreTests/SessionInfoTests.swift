@@ -7,7 +7,7 @@ import BrainHubCore
     @Test func modelShortNames() {
         let cases = ["claude-opus-5-5": "Opus 5.5", "claude-sonnet-4-5-20250929": "Sonnet 4.5", "claude-3-5-sonnet-20241022": "Sonnet 3.5",
                      "claude-opus-5-5[1m]": "Opus 5.5", "claude-fable-5-2": "Fable 5.2", "gpt-6.1-sol": "GPT-6.1-Sol", "gpt-5-codex": "GPT-5-Codex",
-                     "gemini-4-carbon": "Gemini 4 Carbon", "gemini-2.5-pro": "Gemini 2.5 Pro", "o3": "o3", "Custom Model": "Custom Model", "": ""]
+                     "gemini-4-carbon": "Gemini 4 Carbon", "gemini-2.5-pro": "Gemini 2.5 Pro", "claude-2.1": "Claude 2.1", "o3": "o3", "Custom Model": "Custom Model", "": ""]
         for (id, want) in cases { #expect(modelShort(id) == want, "\(id)") }
         #expect(modelShort(nil) == "")
     }
@@ -38,6 +38,8 @@ import BrainHubCore
         let c = RowMeta(term { ($0.provider, $0.cli, $0.model, $0.contextUsed) = ("codex", "Codex", nil, 0) })
         #expect([c.mark, c.tool, c.model] == ["CX", "Codex", "Codex"] && c.percent == nil)
         #expect(RowMeta(term { ($0.contextUsed, $0.contextWindow) = (300, 200) }).percent == 100)
+        #expect(RowMeta(term { ($0.provider, $0.cli) = ("", "Claude Code") }).mark == "CC", "only cli, as a session running elsewhere")
+        #expect(RowMeta(term { $0.provider = "Codex" }).mark == "CX")
     }
 
     @Test func detailRowsKeepTheirShape() throws {
@@ -64,6 +66,9 @@ import BrainHubCore
         #expect(waits[2].value == "studio · app")
         let done = term { ($0.state, $0.askKind, $0.needsOwner) = (.waiting, "done", false) }.detailRows(d, now: now)
         #expect(done[1].value.hasPrefix("Finished its turn"))
+        for status in ["ended", "failed"] {
+            #expect(term { ($0.status, $0.needsOwner) = (status, true) }.detailRows(d, now: now)[1].value.hasPrefix("Ended"))
+        }
     }
 
     @Test func olderDetailWithoutTokensStillDecodes() throws {
