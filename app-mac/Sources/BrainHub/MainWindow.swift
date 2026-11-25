@@ -235,8 +235,8 @@ struct Sidebar: View {
     var body: some View {
         let machines = model.machines
         let all = machines.flatMap { $0.terminals.flatMap(\.all) }
-        let showProvider = Set(all.map { ProviderMark.letter($0.terminal.provider) }).count > 1
         let ended = model.ended
+        let showProvider = Set((all + ended).map { ProviderMark.letter($0.terminal.provider) }).count > 1
         let treeOpen = self.treeOpen // decoded once per render
         ScrollViewReader { proxy in
         List(selection: $selection) {

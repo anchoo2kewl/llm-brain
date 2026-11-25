@@ -179,7 +179,7 @@
     var all = order.map(function (id) { return infos[id]; });
     var live = all.filter(function (t) { return t.status !== "ended" && t.status !== "failed"; });
     var ended = all.filter(function (t) { return t.status === "ended" || t.status === "failed"; });
-    var mixed = live.reduce(function (m, t) { m[PROV[provOf(t)] || ">_"] = 1; return m; }, {});
+    var mixed = all.reduce(function (m, t) { m[PROV[provOf(t)] || ">_"] = 1; return m; }, {});
     mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
     // The filter is the quick switcher: names that start with the text first, then the rest that match.

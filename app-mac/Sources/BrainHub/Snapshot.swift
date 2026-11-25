@@ -12,10 +12,15 @@ enum Snapshot {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { write(to: URL(fileURLWithPath: path)) }
     }
 
-    static func write(to url: URL) {
+    static func write(to url: URL, retries: Int = 30) {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.level == .normal }),
               let frame = window.contentView?.superview ?? window.contentView,
-              let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { return NSLog("Brain Hub: no window to snapshot") }
+              let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else {
+            if retries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { write(to: url, retries: retries - 1) }
+            } else { NSLog("Brain Hub: no window to snapshot") }
+            return
+        }
         frame.cacheDisplay(in: frame.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return NSLog("Brain Hub: snapshot: no PNG") }
         do { try png.write(to: url) } catch { NSLog("Brain Hub: snapshot failed: %@", error.localizedDescription) }
