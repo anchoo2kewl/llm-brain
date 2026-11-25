@@ -104,17 +104,18 @@
       Object.keys(infos).forEach(function (k) {
         if (infos[k].kind === "session" && st.slots.indexOf(k) >= 0 && !live.some(function (x) { return "s" + x.id === k; })) ts.push(infos[k]);
       });
-      var seen = {};
+      var seen = {}, seenTree = {};
       ts.sort(window.wsList.byRecent(keyOf)); // strictly the latest activity or interaction
       order = ts.map(function (t) { return t.id; });
       ts.forEach(function (t) {
-        seen[t.id] = true;
+        seen[t.id] = true; seenTree[window.wsList.treeStateKey(t)] = true;
         var old = infos[t.id];
         infos[t.id] = t;
         if (old && old.title !== t.title && slotOf(t.id) >= 0) paintSlot(slotOf(t.id));
         attach(t);
       });
-      Object.keys(treeOpen).forEach(function (id) { if (!seen[id]) delete treeOpen[id]; }); // ended parents
+      Object.keys(treeOpen).forEach(function (id) { if (!seenTree[id]) delete treeOpen[id]; }); // ended parents
+      setPref("ws.treeOpen", treeOpen);
       Object.keys(inputs).forEach(function (id) { if (!seen[id]) delete inputs[id]; });
       Object.keys(infos).forEach(function (id) {
         if (!seen[id]) { delete infos[id]; drop(id); }
@@ -183,7 +184,7 @@
     mixed = Object.keys(mixed).length > 1;
     // A search shows every match flat; otherwise the session tree, children collapsed until opened.
     // The filter is the quick switcher: names that start with the text first, then the rest that match.
-    var rows = q ? window.wsList.switcher(all.map(function (t) { return (t.title || "terminal " + t.id) + " " + folder(t) + " " + t.cli + " " + t.host; }), q, all.length)
+    var rows = q ? window.wsList.switcher(all.map(function (t) { return window.wsList.searchText(t); }), q, all.length)
         .map(function (i) { return { t: all[i], depth: 0, kids: 0, otherHub: "" }; })
       : window.wsList.treeRows(live, treeOpen, keyOf);
     function put(r, inEnded) {
@@ -202,9 +203,9 @@
       paintItem(id);
       li.style.paddingLeft = r.depth ? 8 + r.depth * 16 + "px" : "";
       li.parts.kids.hidden = !r.kids;
-      li.parts.kids.textContent = (treeOpen[id] ? "▾ " : "▸ ") + r.kids;
-      li.parts.kids.title = treeOpen[id] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
-      li.parts.kids.setAttribute("aria-expanded", treeOpen[id] ? "true" : "false");
+      li.parts.kids.textContent = (treeOpen[window.wsList.treeStateKey(infos[id])] ? "▾ " : "▸ ") + r.kids;
+      li.parts.kids.title = treeOpen[window.wsList.treeStateKey(infos[id])] ? "Hide the child sessions (←)" : "Show the " + r.kids + " child session" + (r.kids === 1 ? "" : "s") + " (→)";
+      li.parts.kids.setAttribute("aria-expanded", treeOpen[window.wsList.treeStateKey(infos[id])] ? "true" : "false");
       li.parts.hub.textContent = r.otherHub;
       li.parts.hub.hidden = !r.otherHub;
       li.kids = r.kids;
@@ -243,7 +244,7 @@
     });
   }
   function setTree(id, open) {
-    if (open) treeOpen[id] = true; else delete treeOpen[id];
+    if (open) treeOpen[window.wsList.treeStateKey(infos[id])] = true; else delete treeOpen[window.wsList.treeStateKey(infos[id])];
     setPref("ws.treeOpen", treeOpen); renderList(); if (items[id]) items[id].focus();
   }
   list.setAttribute("role", "listbox");
@@ -256,7 +257,7 @@
     if (at < 0) return;
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") { // open or close a parent's child sessions
       var pid = order.filter(function (k) { return items[k] === e.target; })[0];
-      if (pid === undefined || !e.target.kids || !!treeOpen[pid] === (e.key === "ArrowRight")) return;
+      if (pid === undefined || !e.target.kids || !!treeOpen[window.wsList.treeStateKey(infos[pid])] === (e.key === "ArrowRight")) return;
       e.preventDefault();
       setTree(pid, e.key === "ArrowRight");
       return;
@@ -277,7 +278,7 @@
     var num = el("span", "ws-it-num"), age = el("span", "ws-it-age"), prov = el("span", "ws-prov");
     var hub = el("span", "ws-it-hub"); hub.hidden = true; hub.title = "This child session runs on this hub";
     var kids = el("button", "ws-kids"); kids.type = "button"; kids.hidden = true;
-    kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[id]); });
+    kids.addEventListener("click", function (e) { e.stopPropagation(); setTree(id, !treeOpen[window.wsList.treeStateKey(infos[id])]); });
     var pen = el("button", "ws-pen", "✎"); pen.type = "button"; pen.title = "Rename";
     pen.addEventListener("click", function (e) { e.stopPropagation(); rename(id, title); });
     var prev = el("div", "ws-it-prev"); // only a close error, for a moment
@@ -298,11 +299,7 @@
     li.parts = { dot: dot, title: title, dir: dir, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
-  function folder(t) {
-    var raw = t.cwd || "", c = raw.replace(/\/+$/, "");
-    if (!c) return /^\/+$/.test(raw) ? "/" : "~";
-    return c === "~" ? "~" : c.split("/").pop();
-  }
+  function folder(t) { return window.wsList.folder(t); }
   var PROV = { claude: "CC", codex: "CX", antigravity: "AG", "claude code": "CC" };
   function provOf(t) { return (t.provider || t.cli || "").toLowerCase(); }
   var seenIds = {}, seenKey = {};
@@ -846,7 +843,7 @@
     else if (e.key === "Escape") { wsq.value = ""; renderList(); }
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key.toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); wsq.focus(); wsq.select(); }
+    if ((e.key || "").toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); wsq.focus(); wsq.select(); }
   }, true);
   narrow.addEventListener && narrow.addEventListener("change", layout);
 

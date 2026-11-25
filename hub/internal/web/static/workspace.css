@@ -134,4 +134,3 @@ main.wrapw:has(.ws){max-width:none;padding:0}
 .ws-it-top .ws-pen{opacity:1}
 /* ui.css gives every button 38 px. Compact only for a precise pointer; touch keeps its 44 px targets. */
 @media (hover:hover) and (pointer:fine) and (min-width:1101px){.ws-it-top .ws-pen,.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;font-size:12px;padding:0 2px;flex:none}}
-.ws-it-top .ws-kids{min-height:0;height:16px;line-height:16px;padding:0 2px;flex:none}

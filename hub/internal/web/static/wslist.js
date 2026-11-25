@@ -45,6 +45,13 @@
     if (typeof t.needs_owner === "boolean") return t.needs_owner;
     return !!t.blocked || t.state === "blocked" || (t.state === "waiting" && t.ask_kind === "question");
   }
+  function treeStateKey(t) { return (t.hub || "") + "#" + t.id + "#" + (t.started || ""); }
+  function folder(t) {
+    var raw = t.cwd || "", c = raw.replace(/\/+$/, "");
+    if (!c) return /^\/+$/.test(raw) ? "/" : "~";
+    return c === "~" ? "~" : c.split("/").pop();
+  }
+  function searchText(t) { return [t.title || "terminal " + t.id, t.cwd, t.cli, t.host].filter(Boolean).join(" "); }
   // The session tree: each row under its parent, (parent_hub, parent_id) = (hub, id). A hub without these fields, or a
   // child whose parent is not listed, gives a flat list. Children follow their own activity; a parent ranks by the
   // most recent row under it (`keyOf`, default recentKey). `open` holds the ids of the parents whose children show.
@@ -71,7 +78,7 @@
     top.sort(function (a, b) { return byRank(a.t, b.t); });
     function walk(n, depth, parentHub, show) {
       if (show) out.push({ t: n.t, depth: depth, kids: n.kids.length, otherHub: depth > 0 && n.t.hub !== parentHub ? n.t.hub : "" });
-      n.kids.forEach(function (c) { walk(c, depth + 1, n.t.hub, show && !!open[n.t.id]); });
+      n.kids.forEach(function (c) { walk(c, depth + 1, n.t.hub, show && !!open[treeStateKey(n.t)]); });
     }
     top.forEach(function (n) { walk(n, 0, "", true); });
     return out;
@@ -90,9 +97,9 @@
   // (ESC[0n, ESC[12;5R, ESC[?1;1R), device attributes (ESC[?62c, ESC[>0;10;1c), focus in and out (ESC[I, ESC[O)
   // and OSC answers (ESC]…BEL or ESC]…ESC\).
   function isReply(data) {
-    return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\))+$/.test(data);
+    return typeof data === "string" && /^(\x1b\[\??\d+(;\d+)*[Rn]|\x1b\[[?>][\d;]*c|\x1b\[\??\d+(;\d+)*\$y|\x1bP[^\x1b]*\x1b\\|\x1b\[[IO]|\x1b\][^\x07\x1b]*(\x07|\x1b\\))+$/.test(data);
   }
-  var api = { isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
+  var api = { treeStateKey: treeStateKey, folder: folder, searchText: searchText, isReply: isReply, recentKey: recentKey, byRecent: byRecent, lastActive: lastActive, shortAge: shortAge, dotOpacity: dotOpacity,
     pulses: pulses, treeRows: treeRows, switcher: switcher };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.wsList = api;
