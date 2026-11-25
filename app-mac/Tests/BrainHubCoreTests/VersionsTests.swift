@@ -16,6 +16,22 @@ import BrainHubCore
         #expect(Versions.restart(running: "0.1.11", installed: nil) == nil)
     }
 
+    @Test func availableFromTheCheckLine() {
+        #expect(Versions.available(inCheck: "Version 0.1.13 is available: https://github.com/anchoo2kewl/llm-brain/releases/tag/client-v0.1.13") == "0.1.13")
+        #expect(Versions.available(inCheck: "You’re up to date.") == nil)
+        #expect(Versions.available(inCheck: "Installed 0.1.13. Restart Brain Hub to use it.") == nil)
+        #expect(Versions.available(inCheck: "Version 0.1 is available: x") == nil)
+    }
+
+    @Test func scheduleWithAFakeClock() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        #expect(UpdateSchedule.isDue(now: t0, lastCheck: nil))
+        #expect(!UpdateSchedule.isDue(now: t0.addingTimeInterval(60), lastCheck: t0))
+        #expect(!UpdateSchedule.isDue(now: t0.addingTimeInterval(3599), lastCheck: t0))
+        #expect(UpdateSchedule.isDue(now: t0.addingTimeInterval(3600), lastCheck: t0))
+        #expect(UpdateSchedule.isDue(now: t0, lastCheck: t0.addingTimeInterval(60)))
+    }
+
     @Test func hubNotes() {
         func reply(_ s: String) -> HubVersions.Reply { try! JSONDecoder().decode(HubVersions.Reply.self, from: Data(s.utf8)) }
         let health = reply(#"{"version":"0.1.11","ready":true}"#)

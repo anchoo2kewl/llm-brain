@@ -2,7 +2,7 @@
 //! The main window shows the hub's own web pages. This crate adds a hub switcher, a global quick-search
 //! window, inbox notifications and a menu-bar icon. See docs/desktop-app.md.
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 mod updates;
 #[cfg(target_os = "linux")]
 mod single_instance;
@@ -308,7 +308,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let forward = MenuItemBuilder::with_id("forward", "Forward").accelerator("CmdOrCtrl+]").build(app)?;
 
     let app_menu = SubmenuBuilder::new(app, APP_TITLE);
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     let app_menu = app_menu
         .item(&MenuItem::with_id(app, "update", "Check for Updates…", true, None::<&str>)?)
         .item(&CheckMenuItem::with_id(app, "auto-update", "Automatically Install Updates", true, updates::automatic(app), None::<&str>)?);
@@ -340,26 +340,48 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let window = SubmenuBuilder::new(app, "Window").item(&terms2).separator().minimize().maximize().separator().close_window().build()?;
     let menu = MenuBuilder::new(app).items(&[&app_menu, &edit, &view, &window]).build()?;
     // Chrome style: a menu-bar item that stays until the restart. One click restarts into the new version.
-    if let Some(v) = restart_pending() {
-        menu.append(&MenuItem::with_id(app, "restart", restart_label(&v), true, None::<&str>)?)?;
+    if let Some(item) = update_item(app)? {
+        menu.append(&item)?;
     }
     Ok(menu)
 }
 
-fn restart_label(version: &str) -> String {
-    format!("● Restart to Update ({version})")
+/// "Restart to Update" once an update is installed or downloaded, else "Update Available" when a newer release
+/// exists that this run did not install (automatic updates off, or a .deb, .rpm or MSI install).
+fn update_item(app: &AppHandle) -> tauri::Result<Option<MenuItem<tauri::Wry>>> {
+    let (id, label) = match (restart_pending(), update_available()) {
+        (Some(v), _) => ("restart", format!("● Restart to Update ({v})")),
+        (None, Some(v)) => ("update-available", format!("● Update Available ({v})…")),
+        (None, None) => return Ok(None),
+    };
+    MenuItem::with_id(app, id, label, true, None::<&str>).map(Some)
 }
 
-/// The update installed in this run that needs a restart. Only the Linux AppImage installs updates itself.
+/// The update installed or downloaded in this run that needs a restart. The Mac uses the native app.
 fn restart_pending() -> Option<String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     return updates::pending();
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     None
 }
 
-/// Show the restart sign in the menu bar and the tray after the updater installed a version.
-#[cfg(target_os = "linux")]
+fn update_available() -> Option<String> {
+    #[cfg(not(target_os = "macos"))]
+    return updates::available();
+    #[cfg(target_os = "macos")]
+    None
+}
+
+/// A release page from the updater, in the default browser.
+#[cfg(not(target_os = "macos"))]
+fn open_release(url: &str) {
+    if let Ok(u) = Url::parse(url) {
+        open_external(&u);
+    }
+}
+
+/// Show the update sign in the menu bar and the tray after a check.
+#[cfg(not(target_os = "macos"))]
 fn refresh_restart(app: &AppHandle) {
     let h = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -373,8 +395,8 @@ fn refresh_restart(app: &AppHandle) {
 
 fn build_tray_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::Wry>> {
     let mut b = MenuBuilder::new(app);
-    if let Some(v) = restart_pending() {
-        b = b.item(&MenuItem::with_id(app, "restart", restart_label(&v), true, None::<&str>)?).separator();
+    if let Some(item) = update_item(app)? {
+        b = b.item(&item).separator();
     }
     let mut b = b
         .item(&MenuItem::with_id(app, "open", "Open", true, None::<&str>)?)
@@ -414,11 +436,13 @@ fn on_menu(app: &AppHandle, id: &str) {
         "reload" => focused_eval(app, "location.reload()"),
         "back" => focused_eval(app, "history.back()"),
         "forward" => focused_eval(app, "history.forward()"),
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         "update" => updates::check(app, true),
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
+        "update-available" => updates::update_now(app),
+        #[cfg(not(target_os = "macos"))]
         "restart" => { if let Err(err) = updates::restart(app) { eprintln!("restart: {err}"); } },
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         "auto-update" => { if let Err(err) = updates::toggle(app) { eprintln!("update preference: {err}"); } },
         "quit" => app.exit(0),
         other => {
@@ -507,6 +531,8 @@ struct StateView {
     app_version: String,
     /// The installed version that waits for a restart.
     restart_version: Option<String>,
+    /// A newer release that this run did not install.
+    update_available: Option<String>,
 }
 
 fn view(app: &AppHandle, state: &AppState) -> StateView {
@@ -518,6 +544,7 @@ fn view(app: &AppHandle, state: &AppState) -> StateView {
         hotkey_error: lock(&state.hotkey_error).clone(),
         app_version: app.package_info().version.to_string(),
         restart_version: restart_pending(),
+        update_available: update_available(),
     }
 }
 
@@ -532,13 +559,23 @@ async fn hub_versions(window: WebviewWindow, url: String) -> Result<hub::Version
 #[tauri::command]
 fn restart_app(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     require_local(&window)?;
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     return updates::restart(&app);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
         let _ = app;
         Err("This build does not install updates itself.".into())
     }
+}
+
+/// The "Update Available" button on the hubs page: install, or open the release page.
+#[tauri::command]
+fn update_now(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
+    require_local(&window)?;
+    #[cfg(not(target_os = "macos"))]
+    updates::update_now(&app);
+    let _ = app;
+    Ok(())
 }
 
 #[tauri::command]
@@ -767,6 +804,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state,
             restart_app,
+            update_now,
             hub_versions,
             add_hub,
             remove_hub,
@@ -800,8 +838,8 @@ fn main() {
             });
 
             app.set_menu(build_app_menu(&handle)?)?;
-            #[cfg(target_os = "linux")]
-            updates::check(&handle, false);
+            #[cfg(not(target_os = "macos"))]
+            updates::schedule(&handle);
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             build_search_window(&handle)?;

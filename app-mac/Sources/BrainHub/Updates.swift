@@ -7,12 +7,30 @@ enum Updates {
     static var checking = false
     static var automatic: Bool { UserDefaults.standard.object(forKey: "automaticUpdates") as? Bool ?? true }
     static let running = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    static let restartNote = "Sessions run on the hub and stay open. A restart only reopens the app."
+    private static var lastCheck: Date?
+    private static var timer: Timer?
 
+    /// Check now, then every hour. The app also calls `check` after a wake from sleep.
+    static func schedule() {
+        tick()
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in MainActor.assumeIsolated { Updates.tick() } }
+    }
+
+    private static func tick() {
+        if UpdateSchedule.isDue(now: Date(), lastCheck: lastCheck) { check(manual: false) }
+    }
+
+    /// Run the update helper. It installs when the user asked or automatic updates are on; otherwise it only
+    /// checks, and the toolbar shows "Update Available". A check that is still running makes this do nothing.
     static func check(manual: Bool) {
-        guard !checking, manual || automatic, let version = running,
+        guard !checking, let running,
               let helper = Bundle.main.url(forAuxiliaryExecutable: "brain-update") else { return }
         checking = true
-        let path = Bundle.main.bundleURL.path
+        lastCheck = Date()
+        // Compare with a version already installed on disk, so the hourly check does not fetch it again.
+        let version = AppModel.shared.restartVersion ?? running
+        let path = manual || automatic ? Bundle.main.bundleURL.path : ""
         Task {
             let result = await Task.detached(priority: .utility) {
                 let process = Process(), pipe = Pipe()
@@ -28,8 +46,12 @@ enum Updates {
                 } catch { return (false, error.localizedDescription) }
             }.value
             checking = false
+            AppDiagnostics.record("update_check manual=\(manual) ok=\(result.0) result=\(result.1.prefix(120))")
             refreshRestart()
-            // A background install shows only the toolbar's restart button, never a dialog.
+            if result.0 {
+                AppModel.shared.availableVersion = AppModel.shared.restartVersion == nil ? Versions.available(inCheck: result.1) : nil
+            }
+            // A background check shows only the toolbar's sign, never a dialog.
             if manual {
                 let alert = NSAlert()
                 alert.messageText = result.0 ? "Brain Hub Updates" : "Update failed"

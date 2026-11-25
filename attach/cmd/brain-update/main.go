@@ -1,6 +1,6 @@
-//go:build darwin || linux
-
 // brain-update installs stable desktop releases from the project's GitHub repository.
+// Usage: brain-update <running version> <target>. An empty target only checks. The target is the Mac .app bundle,
+// the Linux AppImage, or the path where Windows keeps the verified NSIS setup until the restart runs it.
 package main
 
 import (
@@ -18,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const repo = "https://github.com/anchoo2kewl/llm-brain"
@@ -59,6 +57,46 @@ func newer(a, b [3]int) bool {
 	}
 	return false
 }
+
+// latest gives the newest published client release above installed. Drafts and prereleases never count:
+// a release is visible to clients only once the release workflow publishes it.
+func latest(releases []release, installed [3]int) (release, bool) {
+	best, chosen := installed, release{}
+	for _, r := range releases {
+		if !strings.HasPrefix(r.Tag, "client-v") || r.Draft || r.Prerelease {
+			continue
+		}
+		if v, ok := version(strings.TrimPrefix(r.Tag, "client-v")); ok && newer(v, best) {
+			best, chosen = v, r
+		}
+	}
+	return chosen, chosen.Tag != ""
+}
+
+// assetName is the release file for this system. Linux assets have a dot for the space in "Brain Hub".
+func assetName(goos, goarch, next string) (string, error) {
+	switch {
+	case goos == "darwin":
+		return "BrainHub-mac-" + next + ".zip", nil
+	case goos == "linux" && goarch == "amd64":
+		return "Brain Hub_" + next + "_amd64.AppImage", nil
+	case goos == "windows" && goarch == "amd64":
+		return "Brain Hub_" + next + "_x64-setup.exe", nil
+	}
+	return "", fmt.Errorf("no release build for %s/%s", goos, goarch)
+}
+
+// targetOK checks the install location. A Windows setup path may not exist yet.
+func targetOK(goos, target string, st os.FileInfo, statErr error) bool {
+	switch goos {
+	case "darwin":
+		return statErr == nil && st.IsDir() && filepath.Ext(target) == ".app"
+	case "windows":
+		return strings.EqualFold(filepath.Ext(target), ".exe") && (os.IsNotExist(statErr) || statErr == nil && st.Mode().IsRegular())
+	}
+	return statErr == nil && st.Mode().IsRegular()
+}
+
 func get(ctx context.Context, u string) (*http.Response, error) {
 	req, e := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if e != nil {
@@ -98,45 +136,28 @@ func run(current, target string) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	best := installed
-	var chosen release
-	for _, r := range releases {
-		if !strings.HasPrefix(r.Tag, "client-v") || r.Draft || r.Prerelease {
-			continue
-		}
-		v, ok := version(strings.TrimPrefix(r.Tag, "client-v"))
-		if ok && newer(v, best) {
-			best = v
-			chosen = r
-		}
-	}
-	if chosen.Tag == "" {
+	chosen, found := latest(releases, installed)
+	if !found {
 		return "You’re up to date.", nil
 	}
 	next := strings.TrimPrefix(chosen.Tag, "client-v")
 	if target == "" {
-		return "Version " + next + " is available. Update through your package manager or download it from " + repo + "/releases/tag/" + chosen.Tag, nil
+		return "Version " + next + " is available: " + repo + "/releases/tag/" + chosen.Tag, nil
 	}
 	if !filepath.IsAbs(target) {
 		return "", fmt.Errorf("invalid install location")
 	}
 	st, e := os.Lstat(target)
+	if !targetOK(runtime.GOOS, target, st, e) {
+		return "", fmt.Errorf("unsupported install location")
+	}
+	name, e := assetName(runtime.GOOS, runtime.GOARCH, next)
 	if e != nil {
 		return "", e
 	}
-	if runtime.GOOS == "darwin" && (!st.IsDir() || filepath.Ext(target) != ".app") || runtime.GOOS == "linux" && !st.Mode().IsRegular() {
-		return "", fmt.Errorf("unsupported install location")
-	}
-	name := "BrainHub-mac-" + next + ".zip"
-	if runtime.GOOS == "linux" {
-		name = "Brain Hub_" + next + "_amd64.AppImage"
-		if runtime.GOARCH != "amd64" {
-			return "", fmt.Errorf("no matching Linux build")
-		}
-	}
 	var file asset
 	for _, a := range chosen.Assets {
-		if a.Name == name || (runtime.GOOS == "linux" && a.Name == strings.Replace(name, " ", ".", 1)) {
+		if a.Name == name || a.Name == strings.Replace(name, " ", ".", 1) {
 			file = a
 			break
 		}
@@ -153,14 +174,11 @@ func run(current, target string) (string, error) {
 		return "", fmt.Errorf("unexpected download URL")
 	}
 	parent := filepath.Dir(target)
-	lock, e := os.Open(parent)
+	unlock, e := lockDir(parent)
 	if e != nil {
-		return "", e
-	}
-	defer lock.Close()
-	if e = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); e != nil {
 		return "", fmt.Errorf("another update is active: %w", e)
 	}
+	defer unlock()
 	temp, e := os.MkdirTemp(parent, ".brain-update-")
 	if e != nil {
 		return "", fmt.Errorf("install directory is read-only; use the release download: %w", e)
@@ -185,6 +203,9 @@ func run(current, target string) (string, error) {
 	}
 	if e = install(path, target, next); e != nil {
 		return "", e
+	}
+	if runtime.GOOS == "windows" {
+		return "Downloaded " + next + ". Restart Brain Hub to install it.", nil
 	}
 	return "Installed " + next + ". Restart Brain Hub to use it.", nil
 }

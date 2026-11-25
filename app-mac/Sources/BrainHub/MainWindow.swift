@@ -75,7 +75,13 @@ struct MainWindow: View {
                 ToolbarItem {
                     Button { Updates.restart() } label: { Label("Restart to Update", systemImage: "arrow.clockwise.circle.fill") }
                         .labelStyle(.titleAndIcon).buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
-                        .help("Version \(v) is installed. Restart Brain Hub to use it.")
+                        .help("Version \(v) is installed. Restart Brain Hub to use it. \(Updates.restartNote)")
+                }
+            } else if let v = model.availableVersion {
+                ToolbarItem {
+                    Button { Updates.check(manual: true) } label: { Label("Update Available", systemImage: "arrow.down.circle.fill") }
+                        .labelStyle(.titleAndIcon).buttonStyle(.bordered).controlSize(.small)
+                        .help("Version \(v) is available. Click to download and install it. \(Updates.restartNote)")
                 }
             }
             ToolbarItemGroup {
