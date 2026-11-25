@@ -1,0 +1,5 @@
+{
+  "bundle": {
+    "resources": { "target/update-helper/brain-update.exe": "brain-update.exe" }
+  }
+}

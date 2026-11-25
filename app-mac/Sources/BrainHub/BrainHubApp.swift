@@ -68,10 +68,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             KeyRouter.install()
             Snapshot.scheduleIfAsked()
             GlobalHotkey.register()
-            Updates.check(manual: false)
-            // After sleep the sockets are dead but may not know it yet.
+            Updates.schedule()
+            // After sleep the sockets are dead but may not know it yet. A new release may have come out too.
             NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { AppModel.shared.sessions.values.forEach { $0.reconnect() } }
+                MainActor.assumeIsolated {
+                    AppModel.shared.sessions.values.forEach { $0.reconnect() }
+                    // Give the network a moment to come back; a failed check tries again in 5 minutes.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { MainActor.assumeIsolated { Updates.check(manual: false) } }
+                }
             }
         }
     }
@@ -93,6 +97,7 @@ struct HubCommands: Commands {
         // Cmd+W: the focused pane, else whatever window is in front (sheet, Settings, Shortcuts). Never does nothing.
         CommandGroup(after: .appInfo) {
             if let v = AppModel.shared.restartVersion { Button("Restart to Update (\(v))") { Updates.restart() } }
+            else if let v = AppModel.shared.availableVersion { Button("Install Update (\(v))…") { Updates.check(manual: true) } }
             Button("Check for Updates…") { Updates.check(manual: true) }
             Toggle("Automatically Install Updates", isOn: $automaticUpdates)
         }
@@ -164,6 +169,7 @@ struct MenuBarContent: View {
         }
         if let err = model.hubError { Divider(); Text("Hub offline: \(err)") }
         if let v = model.restartVersion { Divider(); Button("Restart to Update (\(v))") { Updates.restart() } }
+        else if let v = model.availableVersion { Divider(); Button("Install Update (\(v))…") { Updates.check(manual: true) } }
         Divider()
         Button("Show Terminals") { AppModel.shared.showMain() }
         SettingsLink { Text("Settings…") }

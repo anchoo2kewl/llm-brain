@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "attach/cmd/brain-update/**"
       - ".github/workflows/client-build.yml"
       - ".github/workflows/client-release.yml"
       - "hub/internal/web/static/**"
@@ -32,6 +33,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: attach/go.mod
+          cache-dependency-path: attach/go.sum
       - name: Linux build packages
         run: |
           sudo apt-get update
@@ -41,6 +46,7 @@ jobs:
           cargo test --manifest-path app/src-tauri/Cargo.toml --locked
           cargo clippy --manifest-path app/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
           node --test app/tests/*.test.mjs tests/*.test.mjs
+          (cd attach && go test ./cmd/brain-update)
 
   windows:
     runs-on: windows-latest
@@ -55,11 +61,16 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: attach/go.mod
+          cache-dependency-path: attach/go.sum
       - name: Tests, lint and Windows installers
         working-directory: app
         shell: bash
         run: |
           npm ci
+          (cd ../attach && go test ./cmd/brain-update)
           cargo test --manifest-path src-tauri/Cargo.toml --locked
           cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
           node --test tests/*.test.mjs

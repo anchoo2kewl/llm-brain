@@ -68,8 +68,12 @@ their first lines).
   rules win over it: the bundled JetBrainsMono Nerd Font, its menus and tmux keys own the shortcuts (Ghostty key bindings are off), Option is Meta, and
   a remote program cannot read the clipboard.
 
+- **Updates**: the app checks for a new release when it starts, every hour, and after a wake from sleep. It
+  downloads the release, verifies its SHA-256 digest and its code signature, and installs it over itself.
 - **Restart to Update**: after the app installed a newer version of itself (by its own check or the MCP
   `desktop_update` tool), a green button shows in the toolbar until you restart. One click restarts into it.
+  Sessions run on the hub, so nothing is lost. With **Automatically Install Updates** off, an **Update Available**
+  button shows instead; click it to install.
 - **Pasted images**: a preview shows at the top right of the pane until you press Return. Its red × hides the preview
   only; the path stays in the CLI's input.
 - **Settings → Hubs** shows each hub's version and its update state, and "App 0.1.x · Hub 0.1.y" at the bottom.

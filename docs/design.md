@@ -44,7 +44,12 @@ The rules come from [design/session-list-research.md](design/session-list-resear
 
 - When the app installed a newer version of itself, a green **Restart to Update** button shows until the app restarts.
   On the Mac it is in the window toolbar, the app menu and the menu-bar menu. In the Tauri app it is a menu-bar item,
-  the first tray item and a button on the Hubs page. There is no dialog.
+  the first tray item and a button on the Hubs page. There is no dialog. Its tooltip says that sessions run on the hub
+  and stay open.
+- When a newer release exists that the app did not install (automatic updates off, or a deb, rpm or MSI install), the
+  same places show **Update Available** instead.
+- The hub's web pages show a small green **Reload to update** sign at the bottom right when the hub restarted with
+  another version under an open tab. One click reloads the page.
 - One click restarts the app into the new version. The new copy starts after the old one ended.
 - A hub's own update shows only in Settings, next to that hub: "Hub 0.1.11 · 0.1.12 installed, restart pending" or
   "Hub 0.1.11 · 0.1.13 available".

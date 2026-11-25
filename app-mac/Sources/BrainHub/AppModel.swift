@@ -29,6 +29,8 @@ final class AppModel {
     /// A newer version installed over this app (by its updater or the MCP desktop_update tool): the toolbar shows
     /// "Restart to Update" until the app restarts.
     var restartVersion: String?
+    /// A newer release that this app did not install (automatic updates are off): the toolbar shows "Update Available".
+    var availableVersion: String?
 
     /// Terminals moving to another machine (or just moved), with the hub's phases.
     private(set) var migrations: [TerminalRef: Migration] = [:]

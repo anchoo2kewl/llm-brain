@@ -39,8 +39,9 @@
   }
 
   function render() {
-    restartEl.hidden = !state.restart_version;
-    restartEl.textContent = "Restart to Update (" + (state.restart_version || "") + ")";
+    var next = state.restart_version || state.update_available;
+    restartEl.hidden = !next;
+    restartEl.textContent = (state.restart_version ? "Restart to Update (" : "Update Available (") + (next || "") + ")";
     var sv = versions[state.selected];
     versionsEl.textContent = "App " + state.app_version + (sv ? " · " + sv.note.replace(/^Hub version unknown$/, "Hub unknown") : "");
     hotkeyEl.value = state.hotkey;
@@ -153,7 +154,9 @@
 
   restartEl.addEventListener("click", function () {
     restartEl.disabled = true;
-    invoke("restart_app").catch(function (e) { restartEl.disabled = false; fail(e); });
+    invoke(state.restart_version ? "restart_app" : "update_now")
+      .then(function () { restartEl.disabled = false; })
+      .catch(function (e) { restartEl.disabled = false; fail(e); });
   });
 
   document.getElementById("add").addEventListener("submit", function (ev) {

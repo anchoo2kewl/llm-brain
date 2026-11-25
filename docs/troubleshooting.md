@@ -17,6 +17,14 @@ All in `~/.local/state/llm-brain/logs/`.
 
 The hub shows all of them on Runs, a task's page and the fleet overview.
 
+## The app does not show "Restart to Update"
+
+- The app checks when it starts, every hour, and after a wake from sleep. Use **Check for Updates…** to check now.
+- A release in draft is not visible. Look for the release on the GitHub releases page; the checker sees it once it is published.
+- The app installs only where it can write: move the Mac app into `/Applications` and keep the AppImage in a
+  writable folder. A Windows MSI, deb or rpm install shows **Update Available** and needs you to install the package.
+- The Mac app writes each check to `~/Library/Logs/BrainHub/app.log` (`update_check ... result=...`).
+
 ## A terminal froze
 
 A CLI in a hub terminal that touches Desktop, Documents, Downloads, Pictures, Music or parts of Library makes macOS ask on that Mac's own screen. Nobody is there, so the CLI waits forever. After 3 minutes the hub marks it blocked and offers fixes ([Frozen terminals](hub-terminals.md#frozen-terminals)).

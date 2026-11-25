@@ -19,6 +19,30 @@ public enum Versions {
         guard let running, let installed, isNewer(installed, than: running) else { return nil }
         return installed
     }
+
+    /// The version in the update helper's check-only line "Version 0.1.13 is available: <url>".
+    public static func available(inCheck line: String) -> String? {
+        guard line.hasPrefix("Version ") else { return nil }
+        let rest = line.dropFirst(8)
+        guard let end = rest.range(of: " is available") else { return nil }
+        let v = String(rest[..<end.lowerBound])
+        return number(v) != nil ? v : nil
+    }
+}
+
+/// When the app checks for a client release: on start, every hour, and after a wake from sleep (the app calls
+/// `check` for a wake). A clock that moved back also starts a check.
+public enum UpdateSchedule {
+    public static let interval: TimeInterval = 60 * 60
+
+    /// After a failed check (for example no network yet after a wake), try again sooner.
+    public static let retry: TimeInterval = 5 * 60
+
+    public static func isDue(now: Date, lastCheck: Date?, failed: Bool = false) -> Bool {
+        guard let lastCheck else { return true }
+        let since = now.timeIntervalSince(lastCheck)
+        return since >= (failed ? retry : interval) || since < 0
+    }
 }
 
 /// A hub's own version and its update state, for Settings only.

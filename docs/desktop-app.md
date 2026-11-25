@@ -199,4 +199,15 @@ On macOS, click the Dock icon to show the window again. On Linux, use the tray i
 
 ### Desktop updates
 
-Beginning with 0.1.4, Brain Hub checks for a newer stable desktop release at startup. In the application menu, use **Check for Updates…** to check immediately or turn off **Automatically Install Updates**. On macOS, move Brain Hub into a writable Applications folder before updating. On Linux, keep the AppImage in a writable folder. Both install the matching release for the next launch and leave active terminals running. Then a green **Restart to Update** sign shows until you restart (see [design.md](design.md#restart-to-update)): in the Tauri app, a menu-bar item, the first tray item and a button on the Hubs page. Linux deb and rpm installations announce new versions and use the system package installer. Release downloads are checked against the SHA-256 digest supplied by GitHub. Users on 0.1.3 or earlier install this release once to get the updater.
+Brain Hub checks for a newer stable desktop release when it starts, every hour while it runs, and after the computer wakes from sleep. Only published releases count: the checker ignores drafts and prereleases, so a release shows once its release workflow publishes it. In the application menu, use **Check for Updates…** to check now. Release downloads are checked against the SHA-256 digest that GitHub supplies for each release file.
+
+| Install | What happens |
+|---|---|
+| macOS app (in a writable folder, for example `/Applications`) | Downloads, verifies and installs the new app over the old one. |
+| Linux AppImage (in a writable folder) | Downloads, verifies and replaces the AppImage. |
+| Windows, NSIS setup (`…_x64-setup.exe`, installs for the current user) | Downloads and verifies the new setup. **Restart to Update** runs it silently (`/S /R`), and the setup starts the new version. |
+| Windows MSI, Linux deb or rpm | Cannot update itself: the install needs administrator rights or root. **Update Available** opens the release page; install the new package from there. |
+
+When the new version is ready, a green **Restart to Update** sign shows until you restart (see [design.md](design.md#restart-to-update)). In the Tauri app it is a menu-bar item, the first tray item and a button on the Hubs page. Sessions run on the hub, so a restart only reopens the app: no terminal or session is lost.
+
+If you turn off **Automatically Install Updates**, the app still checks, and shows **Update Available (0.1.x)** instead. Click it to download and install that version. There is no dialog for a background check. Users on 0.1.3 or earlier install a newer release once to get the updater.
