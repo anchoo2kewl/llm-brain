@@ -39,6 +39,13 @@ public func mostRecentFirst(_ a: Machine.Entry, _ b: Machine.Entry) -> Bool {
     a.rank != b.rank ? a.rank > b.rank : a.terminal.id > b.terminal.id
 }
 
+/// Start order: the earliest start first, ties by the lower id. The rows move with activity; this order does not, so
+/// next/previous window visits each session once.
+public func byStart(_ entries: [Machine.Entry]) -> [Machine.Entry] {
+    func start(_ e: Machine.Entry) -> Date { wholeSeconds(e.terminal.started.flatMap(parseHubTime) ?? .distantPast) }
+    return entries.sorted { start($0) != start($1) ? start($0) < start($1) : $0.terminal.id < $1.terminal.id }
+}
+
 /// A hub time: RFC 3339 UTC, with or without fractional seconds (the hub writes `2026-11-23T15:04:05.000Z`).
 func parseHubTime(_ s: String) -> Date? { HubTime.fractional.date(from: s) ?? HubTime.whole.date(from: s) }
 

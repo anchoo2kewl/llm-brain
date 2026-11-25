@@ -32,7 +32,7 @@ final class WindowPanes {
         case .killPane: requestClose()
         case .newWindow: if model.hub != nil { showNew = true }
         case .nextWindow(let n):
-            let refs = model.orderedRefs
+            let refs = model.cycleRefs
             guard !refs.isEmpty else { return }
             let i = tree.focusedTerminal.flatMap { refs.firstIndex(of: $0) } ?? (n > 0 ? -1 : 0)
             show(refs[((i + n) % refs.count + refs.count) % refs.count])

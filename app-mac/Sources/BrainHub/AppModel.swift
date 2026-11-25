@@ -112,6 +112,8 @@ final class AppModel {
     /// Order of the sidebar, for Cmd+1…9.
     /// The top-level rows, in sidebar order: ⌘1…9 and next/previous. Child sessions open from their parent's row.
     var orderedRefs: [TerminalRef] { machines.flatMap { $0.terminals.map(\.ref) } }
+    /// The same rows in start order, for next/previous: a row that moves up does not change the cycle.
+    var cycleRefs: [TerminalRef] { byStart(machines.flatMap(\.terminals)).map(\.ref) }
     /// Every row, child sessions too.
     var allRefs: [TerminalRef] { machines.flatMap { $0.terminals.flatMap(\.all).map(\.ref) } }
 
