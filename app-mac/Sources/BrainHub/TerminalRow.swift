@@ -254,6 +254,7 @@ struct TerminalDetailView: View {
             }
         }
         .font(.appCaption)
+        .onChange(of: terminal.handoffOffered) { if !terminal.handoffOffered { note = nil } }
         .task(id: ref) {
             detail = nil // never show another session's numbers
             while !Task.isCancelled {
@@ -308,10 +309,11 @@ struct HandoffButton: View {
 
     var body: some View {
         Button(model.handingOff.contains(ref) ? "Handing off…" : "Handoff") {
+            say(nil)
             Task {
                 do {
                     let r = try await model.handoff(ref)
-                    say(r.map { $0.mode == "successor" ? "Successor session \($0.id.map(String.init) ?? "") started" : "Compacting the conversation" })
+                    say(r.map { $0.mode == "successor" ? "Successor session \($0.id ?? 0) started" : "Compacting the conversation" })
                 } catch { say("Handoff failed: \(error.localizedDescription)") }
             }
         }

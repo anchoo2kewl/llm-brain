@@ -61,15 +61,13 @@ public enum ContextLevel: String, Sendable {
 
 /// A parent's subtree in numbers, all depths: what a closed parent shows on its second line.
 public struct Rollup: Equatable, Sendable {
-    public var needs = 0, working = 0, waiting = 0, total = 0
+    public var needs = 0, working = 0
     /// The child to open from the rollup: the longest wait.
     public var first: TerminalRef?
     public init(_ e: Machine.Entry) {
         let ds = Array(e.all.dropFirst())
-        total = ds.count
         for c in ds {
             if Recency.pulses(c.terminal, opened: false) { needs += 1 } else if c.terminal.state == .working { working += 1 }
-            else if c.terminal.state == .waiting { waiting += 1 }
         }
         first = needsQueue(ds).first
     }

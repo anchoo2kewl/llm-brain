@@ -157,8 +157,8 @@
   }
   // A parent's subtree in numbers, all depths: what a closed parent shows on its second line.
   function rollup(rows, t) {
-    var ds = descendants(rows.filter(live), t), r = { needs: 0, working: 0, waiting: 0, total: ds.length };
-    ds.forEach(function (c) { if (pulses(c, false)) r.needs++; else if (c.state === "working") r.working++; else if (c.state === "waiting") r.waiting++; });
+    var ds = descendants(rows.filter(live), t), r = { needs: 0, working: 0 };
+    ds.forEach(function (c) { if (pulses(c, false)) r.needs++; else if (c.state === "working") r.working++; });
     r.label = [r.needs ? r.needs + " need" + (r.needs === 1 ? "s" : "") + " you" : "", r.working ? r.working + " working" : ""].filter(Boolean).join(" · ");
     r.first = needsQueue(ds)[0] || null; // the child to open from the rollup
     return r;
@@ -245,22 +245,27 @@
   // States, counts and pulses stay live. On leave the list orders once (with the usual glide).
   function hold(list, mark, snapshot, release) {
     var held = null;
-    function on() { if (!held) { held = snapshot(); mark.hidden = false; } }
+    function show(v) { mark.style.visibility = v ? "" : "hidden"; } // keeps its space: nothing beside it moves
+    show(false);
+    function on() { if (!held) { held = snapshot(); show(true); } }
     function off() {
       if (!held || list.matches(":hover") || list.contains(document.activeElement)) return;
-      held = null; mark.hidden = true; release();
+      held = null; show(false); release();
     }
     list.addEventListener("mouseenter", on);
     list.addEventListener("focusin", on);
     list.addEventListener("mouseleave", function () { setTimeout(off, 0); });
     list.addEventListener("focusout", function () { setTimeout(off, 0); });
-    return function key(id) { return held && Object.prototype.hasOwnProperty.call(held, id) ? held[id] : undefined; };
+    // A session that arrives during the hold keeps the key it came with.
+    function key(id, live) { if (held && !Object.prototype.hasOwnProperty.call(held, id)) held[id] = live; return held ? held[id] : live; }
+    key.check = function () { setTimeout(off, 0); }; // after a render: a removed focused row ends the hold
+    return key;
   }
 
   // A POST with a JSON body; the promise fails with the hub's error text.
   function post(url, body) {
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "error " + r.status); return j; }); });
+      .then(function (r) { return r.json().catch(function () { if (r.ok) throw new Error("the hub sent no JSON"); return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "error " + r.status); return j; }); });
   }
 
   // Make standalone: the session leaves its parent's tree; from now on its lifecycle is its own.
@@ -276,7 +281,13 @@
     busy[id] = true;
     say("Handing off…");
     post("/api/terminals/" + encodeURIComponent(id) + "/handoff", {})
-      .then(function (j) { say(j.mode === "successor" ? "Successor session " + j.id + " started" : "Compacting the conversation"); done(j); },
+      .then(function (j) {
+        if (j.mode === "successor" && j.id) say("Successor session " + j.id + " started");
+        else if (j.mode === "compact") say("Compacting the conversation");
+        else throw new Error("unexpected reply from the hub");
+        done(j);
+      })
+      .then(null,
         function (e) { say("Handoff failed: " + e.message); })
       .then(function () { delete busy[id]; }, function () { delete busy[id]; });
   }

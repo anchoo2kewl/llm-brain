@@ -209,7 +209,7 @@ test("rollup: a closed parent counts its subtree at all depths", () => {
     kid(4, 3, { state: "waiting", needs_owner: true, needs_owner_since: "2026-11-25T12:01:00Z" }), kid(5, 2, { state: "working" }),
     kid(6, 1, { state: "working", status: "ended" })];
   const r = rollup(rows, p);
-  assert.deepEqual([r.needs, r.working, r.waiting, r.total, r.label], [2, 2, 0, 4, "2 need you · 2 working"]);
+  assert.deepEqual([r.needs, r.working, r.label], [2, 2, "2 need you · 2 working"]);
   assert.equal(r.first.id, 4, "the oldest wait opens first");
   assert.equal(rollup([p], p).label, "");
   assert.equal(rollup(rows.slice(0, 3), p).label, "1 needs you · 1 working");

@@ -151,15 +151,14 @@
   var inputs = {}, treeOpen = pref("ws.treeOpen", {}), endedOpen = pref("ws.endedOpen", false);
   function pref(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch (e) { return d; } }
   function setPref(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } }
-  function keyOf(t) { var h = heldKey(t.id); return h !== undefined ? h : window.wsList.recentKey(t, inputs[t.id]); }
+  function keyOf(t) { return heldKey(t.id, window.wsList.recentKey(t, inputs[t.id])); }
   // Hold my place (wslist.js): no row moves while the pointer or the focus is in the list; it orders once on leave.
-  var paused = el("span", "ws-paused", "order paused"); paused.hidden = true; paused.title = "The rows keep their places while you are in the list";
-  var sideHead = document.querySelector("#ws-side .ws-head"); sideHead.insertBefore(paused, sideHead.querySelector(".grow"));
+  var sideHead = document.querySelector("#ws-side .ws-head"), paintNeeds = window.wsSide.needsButton(sideHead, goNeeds); // Needs me, then the mark
+  var paused = el("span", "ws-paused", "order paused"); paused.title = "The rows keep their places while you are in the list"; sideHead.insertBefore(paused, sideHead.querySelector(".grow"));
   var heldKey = window.wsSide.hold(list, paused, function () {
     var s = {}; order.forEach(function (k) { if (infos[k]) s[k] = window.wsList.recentKey(infos[k], inputs[k]); }); return s;
   }, function () { order.sort(function (a, b) { return window.wsList.byRecent(keyOf)(infos[a], infos[b]); }); renderList(); });
   // Needs me: the longest wait first; again, the next one. Its parents open so its row shows.
-  var paintNeeds = window.wsSide.needsButton(sideHead, goNeeds);
   function goNeeds() {
     var n = window.wsList.nextNeeds(window.wsList.needsQueue(liveRows()), infos[st.slots[st.focus]]);
     if (n) reveal(n);
@@ -249,7 +248,7 @@
       if (endedOpen) ended.forEach(function (t) { put({ t: t, depth: 0, kids: 0, otherHub: "" }, true); });
     }
     list.scrollTop = top;
-    paintNeeds(window.wsList.needsQueue(liveRows()).length);
+    paintNeeds(window.wsList.needsQueue(liveRows()).length); heldKey.check();
     if (focused && list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
     else if (focused && focused.classList.contains("ws-ended") && eh) eh.focus({ preventScroll: true }); // a new header element
     if (Array.prototype.map.call(list.children, function (li) { return li.dataset.id; }).join(",") === hadRows) return;

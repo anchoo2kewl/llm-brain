@@ -125,7 +125,7 @@ import BrainHubCore
                   k(5, 2) { $0.state = .working }]
         let top = machines(terminals: ts.map { ("h", $0) }, live: [], nodes: ["m"]).flatMap(\.terminals)
         let roll = Rollup(top[0])
-        #expect([roll.needs, roll.working, roll.waiting, roll.total] == [2, 2, 0, 4] && roll.label == "2 need you · 2 working")
+        #expect([roll.needs, roll.working] == [2, 2] && roll.label == "2 need you · 2 working")
         #expect(roll.first == TerminalRef(hub: "h", id: 4), "the oldest wait opens first")
         let now = try #require(ISO8601DateFormatter().date(from: "2026-11-25T12:00:00Z"))
         let ago = { (m: Double) in ISO8601DateFormatter().string(from: now.addingTimeInterval(-m * 60)) }

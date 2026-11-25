@@ -224,6 +224,7 @@ struct Sidebar: View {
         nonmutating set { treeOpenStore = String(decoding: (try? JSONEncoder().encode(Array(newValue))) ?? Data(), as: UTF8.self) }
     }
     @ViewState private var draggingOverSidebar = false
+    @ViewState private var sidebarID = UUID()
     private var model: AppModel { AppModel.shared }
 
     /// The rows to show: each top-level session, then its open children (and theirs), one level deeper each.
@@ -386,7 +387,8 @@ struct Sidebar: View {
         .onKeyPress(.rightArrow) { setTree(selection, open: true) }
         .onKeyPress(.leftArrow) { setTree(selection, open: false) }
         .onDrop(of: [.utf8PlainText, .plainText], isTargeted: $draggingOverSidebar) { _ in false }
-        .onHover { model.hold($0) } // Hold my place
+        .onHover { model.hold($0, by: sidebarID) } // Hold my place
+        .onDisappear { model.hold(false, by: sidebarID) }
         .safeAreaInset(edge: .top) { NeedsBar { if let r = nextNeeds(model.needsQueue, current: selection) { selection = r } } }
         .safeAreaInset(edge: .bottom) {
             if draggingOverSidebar {
