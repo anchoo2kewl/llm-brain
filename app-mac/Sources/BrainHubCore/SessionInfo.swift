@@ -5,10 +5,10 @@ import Foundation
 /// A model id as a short name: "claude-opus-5-5" → "Opus 5.5", "gpt-6.1-sol" → "GPT-6.1-Sol",
 /// "gemini-4-carbon" → "Gemini 4 Carbon". Date stamps and "[1m]" go. Any other id stays as it is.
 public func modelShort(_ id: String?) -> String {
-    let raw = (id ?? "").trimmingCharacters(in: .whitespaces)
+    let raw = (id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     var m = raw.lowercased()
     if m.hasSuffix("]"), let open = m.lastIndex(of: "[") { m = String(m[..<open]) }
-    let isNum = { (p: Substring) in p.first?.isNumber == true && Double(p) != nil }
+    let isNum = { (p: Substring) in p.range(of: #"^\d+(\.\d+)?$"#, options: .regularExpression) != nil }
     let parts: [Substring] = m.split(separator: "-").filter { (p: Substring) in !(p.count == 8 && p.allSatisfy(\.isNumber)) }
     let cap = { (p: Substring) in p.first?.isLetter == true ? p.prefix(1).uppercased() + p.dropFirst() : String(p) }
     guard parts.count > 1 else { return raw }
@@ -45,7 +45,7 @@ public struct RowMeta: Equatable, Sendable {
         let name = (t.provider.isEmpty ? t.cli : t.provider).lowercased()
         let cli = name == "claude code" ? .claude : CLI(rawValue: name)
         mark = switch cli { case .claude: "CC"; case .codex: "CX"; case .antigravity: "AG"; default: ">_" }
-        tool = cli?.label ?? t.cli
+        tool = cli?.label ?? (t.cli.isEmpty ? t.provider : t.cli)
         let short = modelShort(t.model)
         model = short.isEmpty ? tool : short
         percent = t.contextFraction.map { Int(($0 * 100).rounded()) }
@@ -89,7 +89,7 @@ public extension Terminal {
             .filter { !$0.isEmpty }.joined(separator: " · ")
         let totals: String = d?.stats.map { s in
             let tok = s.tokens?.values.reduce(0, +) ?? 0
-            return [s.dollars > 0 ? String(format: "$%.2f", s.dollars) : "", tok > 0 ? shortCount(tok) + " tokens" : "",
+            return [s.dollars >= 0.005 ? String(format: "$%.2f", s.dollars) : "", tok > 0 ? shortCount(tok) + " tokens" : "",
                     plural(s.prompts, "prompt"), plural(s.toolCalls, "tool call") + (s.toolErrors > 0 ? " (\(s.toolErrors) failed)" : "")]
                 .filter { !$0.isEmpty }.joined(separator: " · ")
         } ?? wait
@@ -98,7 +98,7 @@ public extension Terminal {
         let br = branch.flatMap { ["", "HEAD", "main", "master"].contains($0) ? nil : $0 }
         let account = [profile, self.account].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         let started = self.started.flatMap(parseHubTime)
-        func row(_ l: String, _ v: String, _ h: String? = nil) -> DetailRow { DetailRow(label: l, value: v, help: h ?? v) }
+        func row(_ l: String, _ v: String, _ h: String? = nil) -> DetailRow { DetailRow(label: l, value: v, help: h.flatMap { $0.isEmpty ? nil : $0 } ?? v) }
         return [
             row("Context", meta.percent.map { "\(shortCount(contextUsed!)) of \(shortCount(contextWindow!)) · \($0)%" } ?? "not reported"),
             row("State", state, tool.isEmpty ? nil : tool),

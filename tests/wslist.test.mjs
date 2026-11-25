@@ -100,7 +100,7 @@ test("folders and search preserve full paths without missing-field words", () =>
 test("model short names: Claude, GPT and Gemini ids; anything else as it is", () => {
   const cases = { "claude-opus-5-5": "Opus 5.5", "claude-sonnet-4-5-20250929": "Sonnet 4.5", "claude-3-5-sonnet-20241022": "Sonnet 3.5",
     "claude-opus-5-5[1m]": "Opus 5.5", "claude-fable-5-2": "Fable 5.2", "gpt-6.1-sol": "GPT-6.1-Sol", "gpt-5-codex": "GPT-5-Codex",
-    "gemini-4-carbon": "Gemini 4 Carbon", "gemini-2.5-pro": "Gemini 2.5 Pro", "claude-2.1": "Claude 2.1", "o3": "o3", "Custom Model": "Custom Model", "": "" };
+    "gemini-4-carbon": "Gemini 4 Carbon", "gemini-2.5-pro": "Gemini 2.5 Pro", "claude-2.1": "Claude 2.1", "claude-opus-5-5\n": "Opus 5.5", "claude-4.-opus": "4. Opus", "o3": "o3", "Custom Model": "Custom Model", "": "" };
   for (const [id, want] of Object.entries(cases)) assert.equal(modelShort(id), want, id);
   assert.equal(modelShort(undefined), "");
 });
@@ -121,6 +121,7 @@ test("row meta: tool mark, model or tool name, context percent", () => {
   assert.deepEqual(rowMeta({ provider: "codex", cli: "Codex", context_used: 0, context_window: 475000 }), { mark: "CX", tool: "Codex", model: "Codex", pct: null });
   assert.equal(rowMeta({ cli: "Claude Code" }).mark, "CC", "a session running elsewhere has only cli");
   assert.equal(rowMeta({ provider: "claude", context_used: 300, context_window: 200 }).pct, 100);
+  assert.deepEqual([rowMeta({ provider: "aider", cli: "" }).tool, rowMeta({ provider: "aider", cli: "" }).model], ["aider", "aider"]);
 });
 
 test("details: the same eight rows before and after the hub answers", () => {
@@ -150,6 +151,12 @@ test("details: the same eight rows before and after the hub answers", () => {
   assert.equal(waits[0].value, "not reported");
   assert.equal(waits[2].value, "studio · app", "the default branch is left out");
   assert.equal(detailRows({ ...t, state: "waiting", ask_kind: "done", needs_owner: false }, d, now)[1].value.split(" · ")[0], "Finished its turn");
+  const lbl = (f) => detailRows({ ...t, ...f }, d, now)[1].value.split(" · ")[0];
+  assert.deepEqual([lbl({ state: "waiting", ask_kind: "error" }), lbl({ state: "blocked" }), lbl({ state: "idle" }), lbl({ state: undefined })],
+    ["Stopped on an error", "Waiting for you", "Idle", "Unknown"], "blocked asks for you on a hub without needs_owner");
+  assert.equal(detailRows({ ...t, profile: "work", account: "dev@example.com" }, d, now)[3].value, "work · dev@example.com");
+  assert.deepEqual(detailRows(t, {}, now).slice(4, 7).map((r) => r.value), ["–", "–", "–"], "no detail: dashes, not dots");
+  assert.equal(detailRows(t, { stats: { dollars: 0.002, prompts: 1, tool_calls: 0 } }, now)[4].value, "1 prompt · 0 tool calls", "no $0.00");
   for (const status of ["ended", "failed"])
     assert.equal(detailRows({ ...t, status, needs_owner: true }, d, now)[1].value.split(" · ")[0], "Ended", "an ended row never asks for you");
 });

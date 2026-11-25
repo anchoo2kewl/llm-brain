@@ -114,7 +114,8 @@
   function rowMeta(t) {
     var p = provider(t), used = t.context_used, win = t.context_window;
     var pct = used > 0 && win > 0 ? Math.min(100, Math.round(used * 100 / win)) : null;
-    return { mark: MARKS[p] || ">_", tool: TOOLS[p] || t.cli || p, model: modelShort(t.model) || TOOLS[p] || t.cli || p, pct: pct };
+    var tool = TOOLS[p] || t.cli || p;
+    return { mark: MARKS[p] || ">_", tool: tool, model: modelShort(t.model) || tool, pct: pct };
   }
   function count(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? Math.floor(n / 1000) + "k" : String(n); }
   function one(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
@@ -141,7 +142,7 @@
       t.subagents > 0 ? plural(t.subagents, "subagent") : "", tool ? tool.split(/[\s{(]/)[0] : ""].filter(Boolean).join(" · ");
     var s = d && d.stats, tok = 0;
     if (s && s.tokens) Object.keys(s.tokens).forEach(function (k) { tok += Number(s.tokens[k]) || 0; });
-    var totals = s ? [s.dollars > 0 ? "$" + s.dollars.toFixed(2) : "", tok ? count(tok) + " tokens" : "", plural(s.prompts || 0, "prompt"),
+    var totals = s ? [s.dollars >= 0.005 ? "$" + s.dollars.toFixed(2) : "", tok ? count(tok) + " tokens" : "", plural(s.prompts || 0, "prompt"),
       plural(s.tool_calls || 0, "tool call") + (s.tool_errors > 0 ? " (" + s.tool_errors + " failed)" : "")].filter(Boolean).join(" · ") : wait;
     var acct = [t.profile, t.account].filter(Boolean).join(" · ");
     return [

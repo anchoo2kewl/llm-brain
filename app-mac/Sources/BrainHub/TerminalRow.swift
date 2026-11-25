@@ -210,14 +210,14 @@ struct TerminalDetailView: View {
     @ViewState private var detail: TerminalDetail?
 
     var body: some View {
-        let f = terminal.contextFraction ?? 0, p = RowMeta(terminal).percent ?? 0 // colours follow the % the row shows
+        let f = terminal.contextFraction ?? 0, known = RowMeta(terminal).percent, p = known ?? 0 // colours follow the % the row shows
         VStack(alignment: .leading, spacing: 4) {
             // Drawn, not a ProgressView: a selected list row turns a ProgressView's tint grey.
             Capsule().fill(.quaternary).frame(height: 4)
                 .overlay(alignment: .leading) {
                     GeometryReader { g in Capsule().fill(p >= 90 ? Color.red : p >= 70 ? .orange : .blue).frame(width: g.size.width * f) }
                 }
-                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue("\(p) percent")
+                .accessibilityElement().accessibilityLabel("Context used").accessibilityValue(known.map { "\($0) percent" } ?? "not reported")
             TimelineView(.periodic(from: .now, by: 5)) { ctx in
                 Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
                     ForEach(terminal.detailRows(detail, now: ctx.date), id: \.label) { r in
@@ -234,7 +234,10 @@ struct TerminalDetailView: View {
         .task(id: ref) {
             detail = nil // never show another session's numbers
             while !Task.isCancelled {
-                if let d = try? await HubClient(base: ref.hub).get(Paths.detail(ref.id), as: TerminalDetail.self), !Task.isCancelled { detail = d }
+                do {
+                    let d = try await HubClient(base: ref.hub).get(Paths.detail(ref.id), as: TerminalDetail.self)
+                    if !Task.isCancelled { detail = d }
+                } catch { if !Task.isCancelled, detail == nil { detail = TerminalDetail() } } // keep the last answer, else show "–"
                 try? await Task.sleep(for: .seconds(5))
             }
         }

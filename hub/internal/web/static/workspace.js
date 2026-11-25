@@ -288,8 +288,7 @@
     top.append(dot, title, hub, el("span", "grow"), kids, num, acts);
     var meta = el("div", "ws-it-meta"), model = el("span", "ws-it-model"), pct = el("span", "ws-it-pct");
     meta.append(prov, model, pct);
-    var det = el("div", "ws-det"), bar = el("div", "ws-bar"), fill = el("i"), grid = el("dl"), cells = [];
-    for (var c = 0; c < 8; c++) { var dt = el("dt"), dd = el("dd"); grid.append(dt, dd); cells.push([dt, dd]); } // updated in place: a tooltip stays open
+    var det = el("div", "ws-det"), bar = el("div", "ws-bar"), fill = el("i"), grid = el("dl"), cells = []; // cells update in place: a tooltip stays open
     bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Context used"); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
     bar.append(fill); det.append(bar, grid); det.hidden = true;
     li.append(top, meta, det, prev);
@@ -301,15 +300,16 @@
     li.addEventListener("keydown", function (e) { if (e.key === "Enter") show(id); });
     title.addEventListener("dblclick", function (e) { e.stopPropagation(); rename(id, title); });
     items[id] = li;
-    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
+    li.parts = { dot: dot, title: title, model: model, pct: pct, det: det, bar: bar, fill: fill, grid: grid, cells: cells, prev: prev, num: num, close: x, age: age, kids: kids, hub: hub, prov: prov };
     return li;
   }
   // The selected row's /detail from the hub, asked again every 5 seconds while it shows.
   var details = {};
   function loadDetail(id) {
     if (!infos[id] || infos[id].kind === "session") return;
+    function got(d) { if (infos[id] && (d || !details[id])) { details[id] = d || {}; paintItem(id); } } // a failure keeps the last answer, else shows "–"
     fetch("/api/terminals/" + encodeURIComponent(id) + "/detail", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && infos[id]) { details[id] = d; paintItem(id); } }).catch(function () { /* keep the last one */ });
+      .then(got).catch(function () { got(null); });
   }
   setInterval(function () { order.forEach(function (id) { if (slotOf(id) === st.focus) { paintItem(id); loadDetail(id); } }); }, 5000);
   var seenIds = {}, seenKey = {};
@@ -342,7 +342,10 @@
       li.parts.fill.style.width = (m.pct || 0) + "%";
       li.parts.fill.className = m.pct >= 90 ? "hi" : m.pct >= 70 ? "mid" : "";
       li.parts.bar.setAttribute("aria-valuenow", String(m.pct || 0));
-      window.wsList.detailRows(t, t.kind === "session" ? {} : details[id] || null).forEach(function (r, i) { // no /detail outside the hub
+      li.parts.bar.setAttribute("aria-valuetext", m.pct === null ? "not reported" : m.pct + "%");
+      var known = t.state ? t : Object.assign({}, t, { state: s }); // an older hub sends no state: the pane's
+      window.wsList.detailRows(known, t.kind === "session" ? {} : details[id] || null).forEach(function (r, i) { // no /detail outside the hub
+        if (!li.parts.cells[i]) { li.parts.cells[i] = [el("dt"), el("dd")]; li.parts.grid.append(li.parts.cells[i][0], li.parts.cells[i][1]); }
         var dt = li.parts.cells[i][0], dd = li.parts.cells[i][1];
         if (dt.textContent !== r.label) dt.textContent = r.label;
         if (dd.textContent !== r.value) dd.textContent = r.value;

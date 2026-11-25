@@ -141,6 +141,8 @@ public struct TerminalDetail: Decodable, Sendable {
     public var agents: [Agent]?
     public var stats: Stats?
     enum CodingKeys: String, CodingKey { case lastPrompt = "last_prompt", lastReply = "last_reply", tool, agents, stats }
+    /// Nothing known: what the row shows when the hub has no detail for it.
+    public init() {}
 }
 
 /// 63499 → "63k", 1200000 → "1.2M".
