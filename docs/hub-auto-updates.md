@@ -6,6 +6,8 @@ Automatic updates are enabled by default. A short-lived scheduler wakes every 15
 
 Updates select the machine's macOS/Linux architecture, validate the published SHA-256 checksums and the staged binary's version, and verify its macOS signature. The daemon is stopped only after downloads are verified and the hub reports no active managed work, commands or migration. Tmux terminal sessions keep running; their clients reconnect. An update that fails its running-version health check restores the previous executable. A version that previously failed is not retried automatically until a newer version is published (a manual request can retry it).
 
+On macOS the updater stops the hub with `launchctl bootout`, waits until launchd does not have the service, and then starts it with `launchctl bootstrap`. Each wait has a limit of 30 seconds. If the stop is not complete in 30 seconds, the updater starts the previous hub again. Updaters before hub 0.1.11 waited 2 seconds only, and the install rolled back with `launchctl bootstrap` exit 5. See [A hub update rolls back](troubleshooting.md#a-hub-update-rolls-back).
+
 ## Install scheduling
 
 Install a hub binary with the update API and copy bin/brain-hub-update next to bin/hub, then run:

@@ -37,6 +37,7 @@ When the CLI exits, a login shell stays in the same folder, so the terminal is s
   ```
 
 - The browser opens a websocket to the hub; the hub queues an attach with a one-time token; the host agent runs `tmux attach` under a pty and dials back. The hub copies frames between the two.
+- The hub starts the CLI from a short command. The full start script (the CLI flags, the shared-memory note and the first prompt) goes in a private file, `terminal-context/<id>/start.sh` (mode 0600), in the hub state folder. tmux runs only `. start.sh`, and the script removes the file before the CLI starts. tmux refuses a command of more than about 16 KB, and the note or a prompt can be larger ([hub 0.1.11](https://github.com/anchoo2kewl/llm-brain/releases/tag/hub-v0.1.11)). Credentials stay in their own private file, never in the start command.
 - For Claude, the hub picks the session id up front, so it knows which transcript belongs to the terminal.
 - Terminals use the CLI's own login unless `terminals.gateway: true` ([gateway](llm-roles-and-gateway.md#hub-terminals-and-the-gateway)).
 
