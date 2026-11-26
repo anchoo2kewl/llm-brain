@@ -77,3 +77,27 @@ A request reaches only windows that are open; nothing replays when a window open
 Hubs without these features answer `HTTP 404` for move, workspace or queue tools.
 
 The bridge in Brain Hub 0.1.5 lists only the configured hub's sessions. If that hub holds none (for example a laptop hub whose terminals live on another hub), pass `hub` from `hubs_list`, or use a newer `bin/brain-mcp`.
+
+## Confluence
+
+`hive/skills/confluence/confluence-mcp` is a second stdio server: fixed Confluence Cloud tools (search, read, create,
+update, attach, comment and image repair). It sends every request to `CONFLUENCE_URL` only, follows no redirect,
+limits response and attachment sizes, refuses a stale page version and attaches files only from the temp folders
+or `CONFLUENCE_ATTACH_DIRS`. It needs only `python3`.
+
+Import the skill into the hive, so every node has the file at the same path:
+
+```sh
+hub skills import --dir hive/skills --source llm-brain
+```
+
+Then add the server with its environment. The token belongs in a secret, never in a file in a repository:
+
+```sh
+claude mcp add confluence --scope user \
+  --env CONFLUENCE_URL=https://<site>.atlassian.net/wiki --env CONFLUENCE_EMAIL=<you@example.com> \
+  --env CONFLUENCE_TOKEN=<api token> -- ~/.local/state/llm-brain/hive/skill/confluence/confluence-mcp
+```
+
+The hub's MCP import turns `CONFLUENCE_TOKEN` into `${secret:confluence.CONFLUENCE_TOKEN}` and keeps the value on
+that node, encrypted. Set the same secret on each other node (or use **Copy secrets to peers** on `/mcp`).

@@ -37,7 +37,7 @@ hub skills import --dir <folder of agents> --kind agent --source <name>
 | pstack | Skills and agents for rigorous AI-assisted engineering. Skills that fetch or run code from the network are left out. | [backnotprop/pstack](https://github.com/backnotprop/pstack) |
 | Cursor team kit | Thermo-nuclear code quality review, deslop, fix-ci, loop-on-ci, fix-merge-conflicts, verify-this, new-branch-and-pr and more. In Cursor: `/add-plugin cursor-team-kit`. | [cursor/plugins](https://github.com/cursor/plugins/tree/main/cursor-team-kit) |
 | Graphify | The `/graphify` skill for each CLI. The daily tool update upgrades Graphify and copies its new skill for Claude Code, Codex and Antigravity. | [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) |
-| llm-brain | The rules below and the cross-review and design-review skills. | this repo |
+| llm-brain | The rules below, the cross-review and design-review skills, and the Confluence skill with its MCP server (see [mcp.md](mcp.md#confluence)). | this repo |
 
 ## Rules
 
