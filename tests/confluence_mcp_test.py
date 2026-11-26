@@ -120,6 +120,88 @@ class RelinkTest(unittest.TestCase):
         self.assertEqual(doc["content"][0]["content"][0]["attrs"]["id"], "UNKNOWN_MEDIA_ID")
 
 
+class MixedContentTest(unittest.TestCase):
+    def test_external_images_and_file_links_do_not_shift_the_order(self):
+        storage = ('<ac:image><ri:url ri:value="https://x.example/a.png" /></ac:image>'
+                   '<ac:link><ri:attachment ri:filename="spec.pdf" /></ac:link>'
+                   '<ac:image ac:alt="Architecture"><ri:attachment ri:filename="a&amp;b.png" /></ac:image>')
+        doc = {"type": "doc", "content": [
+            {"type": "media", "attrs": {"type": "external", "url": "https://x.example/a.png"}},
+            {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file", "alt": "Architecture"}}]}
+        fixed = m.relink_media(doc, storage, {"spec.pdf": "p1", "a&b.png": "f9"}, "7")
+        self.assertEqual(fixed, ["a&b.png"])
+        self.assertEqual(doc["content"][0]["attrs"], {"type": "external", "url": "https://x.example/a.png"})
+        self.assertEqual(doc["content"][1]["attrs"]["id"], "f9")
+        self.assertEqual(doc["content"][1]["attrs"]["alt"], "Architecture")  # the caption stays
+
+
+class FlowTest(unittest.TestCase):
+    def test_create_with_attachments_returns_the_version_after_repair(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
+            shot = os.path.join(d, "shot.png")
+            Path(shot).write_bytes(b"\x89PNG")
+            created = {"id": "9", "title": "T", "version": {"number": 1}, "_links": {"webui": "/p/9"}}
+            with patch.object(m, "call", return_value=created), \
+                    patch.object(m, "fix_images", return_value={"fixed": ["shot.png"], "version": 2}) as fix:
+                out = m.create_page("1", "T", '<ac:image><ri:attachment ri:filename="shot.png" /></ac:image>',
+                                    attachments=[shot])
+        fix.assert_called_once_with("9")
+        self.assertEqual(out["version"], 2)
+        self.assertEqual(out["attached"], ["shot.png"])
+
+    def test_bad_attachment_fails_before_the_page_exists(self):
+        with patch.object(m, "call") as call, self.assertRaises(m.ToolError):
+            m.create_page("1", "T", "<p/>", attachments=["/etc/hosts"])
+        call.assert_not_called()
+
+    def test_quotes_in_file_name_are_refused(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"CONFLUENCE_ATTACH_DIRS": d}):
+            bad = os.path.join(d, 'a"b.png')
+            Path(bad).write_bytes(b"x")
+            with self.assertRaises(m.ToolError):
+                m.check_file(bad)
+
+
+class TransportTest(unittest.TestCase):
+    def test_dots_in_a_query_are_allowed(self):
+        with patch.dict(os.environ, ENV), patch.object(m.urllib.request, "build_opener") as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{"results": []}'
+            self.assertEqual(m.search('text ~ "v1..v2"'), [])
+
+    def test_timeout_becomes_a_tool_error(self):
+        with patch.dict(os.environ, ENV), patch.object(m.urllib.request, "build_opener") as opener:
+            opener.return_value.open.side_effect = TimeoutError()
+            with self.assertRaises(m.ToolError):
+                m.whoami()
+
+    def test_null_search_fields_do_not_crash(self):
+        with patch.object(m, "call", return_value={"results": [{"content": None, "resultGlobalContainer": None}]}):
+            self.assertEqual(m.search("x")[0]["id"], None)
+
+
+class ProtocolTest(unittest.TestCase):
+    def test_bad_params_and_arguments_are_errors(self):
+        with self.assertRaises(ValueError):
+            m.respond({"method": "tools/call", "params": []})
+        out = m.respond({"method": "tools/call", "params": {"name": "confluence_whoami", "arguments": []}})
+        self.assertTrue(out["isError"])
+
+    def test_server_keeps_answering_after_an_unexpected_error(self):
+        lines = [json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+                 json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                 json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"})]
+        printed = []
+        with patch.object(m, "respond", side_effect=[RuntimeError("boom"), {}]), \
+                patch.object(m.sys, "stdin", lines), patch("builtins.print", lambda s, **k: printed.append(s)):
+            m.serve()
+        self.assertEqual([json.loads(x)["id"] for x in printed], [1, 2])
+        self.assertEqual(json.loads(printed[0])["error"]["code"], -32603)
+
+    def test_unicode_digits_are_not_a_page_id(self):
+        with self.assertRaises(m.ToolError):
+            m.page_id("\u0661\u0662")
+
+
 class CommentTest(unittest.TestCase):
     def test_comment_text_is_escaped(self):
         with patch.object(m, "call", return_value={"id": "c1"}) as call:

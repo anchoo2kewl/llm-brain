@@ -10,6 +10,8 @@ Configuration (environment):
 Every request goes to CONFLUENCE_URL only, never follows a redirect and has a size limit.
 """
 import base64
+import html
+import http.client
 import json
 import mimetypes
 import os
@@ -45,7 +47,8 @@ def config():
 
 
 def call(method, path, body=None, raw=None, headers=None):
-    if not path.startswith("/") or "//" in path or ".." in path:
+    route = path.split("?", 1)[0]
+    if not route.startswith("/") or "//" in route or ".." in route.split("/"):
         raise ToolError("Bad API path")
     base, email, token = config()
     h = {"Authorization": "Basic " + base64.b64encode(f"{email}:{token}".encode()).decode(),
@@ -63,6 +66,8 @@ def call(method, path, body=None, raw=None, headers=None):
         raise ToolError(f"Confluence answered HTTP {e.code}: {detail}") from None
     except urllib.error.URLError as e:
         raise ToolError(f"Confluence is not reachable: {e.reason}") from None
+    except (OSError, http.client.HTTPException) as e:
+        raise ToolError(f"Confluence request failed: {e.__class__.__name__}") from None
     if len(text) > MAX_RESPONSE:
         raise ToolError("Response too large")
     # Page bodies can hold raw control characters.
@@ -75,7 +80,7 @@ def q(params):
 
 def page_id(v):
     v = str(v)
-    if not v.isdigit():
+    if not (v.isascii() and v.isdigit()):
         raise ToolError("page_id must be the number in the page URL")
     return v
 
@@ -88,10 +93,12 @@ def link(p):
 
 def search(cql, limit=25):
     r = call("GET", "/rest/api/search?" + q({"cql": cql, "limit": min(int(limit), 100)}))
-    return [{"id": x.get("content", {}).get("id"), "type": x.get("content", {}).get("type"),
-             "title": x.get("content", {}).get("title"), "space": x.get("resultGlobalContainer", {}).get("title"),
-             "last_modified": x.get("lastModified"), "excerpt": x.get("excerpt", "")[:300]}
-            for x in r.get("results", [])]
+    out = []
+    for x in r.get("results") or []:
+        c, sp = x.get("content") or {}, x.get("resultGlobalContainer") or {}
+        out.append({"id": c.get("id"), "type": c.get("type"), "title": c.get("title"), "space": sp.get("title"),
+                    "last_modified": x.get("lastModified"), "excerpt": (x.get("excerpt") or "")[:300]})
+    return out
 
 
 def spaces(limit=100):
@@ -119,7 +126,7 @@ def children(page_id_):
 
 def allowed_dirs():
     raw = os.environ.get("CONFLUENCE_ATTACH_DIRS")
-    dirs = raw.split(os.pathsep) if raw else [tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders"]
+    dirs = raw.split(os.pathsep) if raw else [tempfile.gettempdir(), "/tmp", "/private/tmp"]
     return [os.path.realpath(os.path.expanduser(d)) for d in dirs if d]
 
 
@@ -129,6 +136,8 @@ def check_file(path):
         raise ToolError(f"{path} is outside the allowed attachment folders (CONFLUENCE_ATTACH_DIRS)")
     if any(part.startswith(".") for part in real.split(os.sep)[1:]):
         raise ToolError("Hidden files and folders cannot be attached")
+    if any(c in os.path.basename(real) for c in '"\\\r\n'):
+        raise ToolError("The file name must not contain quotes, backslashes or line breaks")
     if not os.path.isfile(real) or os.path.getsize(real) > MAX_ATTACHMENT:
         raise ToolError(f"{path} is not a file of 25 MB or less")
     ctype = mimetypes.guess_type(real)[0] or ""
@@ -142,8 +151,13 @@ def attach(page_id_, paths):
     for path in paths:
         real, ctype = check_file(path)
         name, boundary = os.path.basename(real), uuid.uuid4().hex
-        with open(real, "rb") as f:
-            data = f.read()
+        try:
+            with open(real, "rb") as f:
+                data = f.read(MAX_ATTACHMENT + 1)
+        except OSError as e:
+            raise ToolError(f"Cannot read {path}: {e.strerror}") from None
+        if len(data) > MAX_ATTACHMENT:
+            raise ToolError(f"{path} is larger than 25 MB")
         raw = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{name}"\r\n'
                f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
         # PUT adds the file, or a new version of it when the page already has a file of that name.
@@ -153,26 +167,36 @@ def attach(page_id_, paths):
     return out
 
 
+def image_names(storage):
+    """File names of the attached images, in page order. External images and file links are not images."""
+    names = []
+    for block in re.findall(r"<ac:image\b.*?</ac:image>|<ac:image\b[^>]*/>", storage, re.S):
+        m = re.search(r'<ri:attachment\b[^>]*\bri:filename="([^"]+)"', block)
+        if m:
+            names.append(html.unescape(m.group(1)))
+    return names
+
+
 def relink_media(doc, storage, files, pid):
-    """Point media nodes that Confluence left as UNKNOWN_MEDIA_ID at their attachments. Returns the fixed names.
+    """Point file media nodes that Confluence left as UNKNOWN_MEDIA_ID at their attachments. Returns fixed names.
 
     A page body that names an attachment before the file exists converts to a media node with no file id, which
-    shows "Preview unavailable". The node keeps no file name, so match the broken nodes in page order to the
-    <ri:attachment> names of the storage body.
+    shows "Preview unavailable". The node keeps no file name, so match the file media nodes in page order to the
+    attached images of the storage body.
     """
-    names, fixed = iter(re.findall(r'<ri:attachment[^>]*ri:filename="([^"]+)"', storage)), []
+    names, fixed = iter(image_names(storage)), []
 
     def walk(n):
         if isinstance(n, dict):
-            if n.get("type") == "media":
-                attrs = n.setdefault("attrs", {})
+            attrs = n.get("attrs") if isinstance(n.get("attrs"), dict) else {}
+            if n.get("type") == "media" and attrs.get("type", "file") == "file":
                 name = next(names, None)
-                if attrs.get("id") in (None, "", "UNKNOWN_MEDIA_ID"):
-                    name = attrs.get("alt") or name
-                    if name in files:
-                        attrs.pop("__fileMimeType", None)
-                        attrs.update({"id": files[name], "collection": f"contentId-{pid}", "type": "file", "alt": name})
-                        fixed.append(name)
+                if attrs.get("id") in (None, "", "UNKNOWN_MEDIA_ID") and name in files:
+                    attrs.pop("__fileMimeType", None)
+                    attrs.update({"id": files[name], "collection": f"contentId-{pid}", "type": "file"})
+                    attrs.setdefault("alt", name)
+                    n["attrs"] = attrs
+                    fixed.append(name)
             for v in n.values():
                 walk(v)
         elif isinstance(n, list):
@@ -189,20 +213,21 @@ def fix_images(page_id_):
     adf = call("GET", f"/api/v2/pages/{pid}?body-format=atlas_doc_format")
     storage = call("GET", f"/api/v2/pages/{pid}?body-format=storage")["body"]["storage"]["value"]
     doc = json.loads(adf["body"]["atlas_doc_format"]["value"], strict=False)
-    fixed = relink_media(doc, storage, files, pid)
+    fixed, version = relink_media(doc, storage, files, pid), adf["version"]["number"]
     if fixed:
-        call("PUT", f"/api/v2/pages/{pid}", {
+        version = call("PUT", f"/api/v2/pages/{pid}", {
             "id": pid, "status": "current", "title": adf["title"],
             "body": {"representation": "atlas_doc_format", "value": json.dumps(doc)},
-            "version": {"number": adf["version"]["number"] + 1, "message": "Link images to their attachments"}})
-    return {"fixed": fixed}
+            "version": {"number": version + 1, "message": "Link images to their attachments"}})["version"]["number"]
+    return {"fixed": fixed, "version": version}
 
 
 def finish(p, attachments):
     out = {"id": p["id"], "title": p["title"], "version": p["version"]["number"], "url": link(p)}
     if attachments:
         out["attached"] = attach(p["id"], attachments)
-        out["images_fixed"] = fix_images(p["id"])["fixed"]
+        repaired = fix_images(p["id"])
+        out["images_fixed"], out["version"] = repaired["fixed"], repaired["version"]
     return out
 
 
@@ -233,7 +258,7 @@ def update_page(page_id_, version, body, title=None, message=None, attachments=N
 
 
 def add_comment(page_id_, text):
-    esc = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    esc = html.escape(str(text), quote=False)
     r = call("POST", "/api/v2/footer-comments", {"pageId": page_id(page_id_),
                                                  "body": {"representation": "storage", "value": f"<p>{esc}</p>"}})
     return {"comment_id": r["id"]}
@@ -284,8 +309,12 @@ def run_tool(name, args):
 
 def respond(msg):
     method = msg.get("method")
+    params = msg.get("params")
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("params must be an object")
+    params = params or {}
     if method == "initialize":
-        return {"protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
+        return {"protocolVersion": params.get("protocolVersion", "2024-11-05"),
                 "capabilities": {"tools": {}}, "serverInfo": {"name": "confluence", "version": "1"}}
     if method == "ping":
         return {}
@@ -294,17 +323,17 @@ def respond(msg):
                                                                           "required": r, "additionalProperties": False}}
                           for n, (_, d, p, r) in TOOLS.items()]}
     if method == "tools/call":
-        p = msg.get("params", {})
+        p = params
         if p.get("name") not in TOOLS:
             raise ValueError("Unknown tool")
-        args = p.get("arguments") or {}
+        args = p.get("arguments", {})
         allowed = TOOLS[p["name"]][2]
         if not isinstance(args, dict) or any(k not in allowed for k in args):
             return {"isError": True, "content": [{"type": "text", "text": "Unknown or invalid arguments"}]}
         try:
             out = run_tool(p["name"], args)
-        except (ToolError, TypeError, ValueError, KeyError) as e:
-            return {"isError": True, "content": [{"type": "text", "text": str(e)}]}
+        except (ToolError, TypeError, ValueError, KeyError, AttributeError) as e:
+            return {"isError": True, "content": [{"type": "text", "text": str(e) or e.__class__.__name__}]}
         return {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}]}
     raise ValueError("Unknown method")
 
@@ -321,6 +350,8 @@ def serve():
             out = {"jsonrpc": "2.0", "id": msg["id"], "result": respond(msg)}
         except ValueError as e:
             out = {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": str(e)}}
+        except Exception as e:  # one bad request must not end the server
+            out = {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32603, "message": e.__class__.__name__}}
         print(json.dumps(out), flush=True)
 
 
