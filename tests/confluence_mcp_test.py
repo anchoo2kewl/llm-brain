@@ -162,7 +162,7 @@ class PaginationTest(unittest.TestCase):
 
 
 class FlowTest(unittest.TestCase):
-    def test_update_uploads_before_it_publishes(self):
+    def test_update_uploads_only_after_the_page_write(self):
         order = []
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
             shot = os.path.join(d, "shot.png")
@@ -174,9 +174,78 @@ class FlowTest(unittest.TestCase):
             with patch.object(m, "call", side_effect=fake), \
                     patch.object(m, "fix_images", return_value={"fixed": [], "version": 4}):
                 out = m.update_page("9", 3, "<p/>", attachments=[shot])
-        self.assertEqual(order, [("GET", "/api/v2/pages/9"), ("PUT", "/rest/api/content/9/child/attachment"),
-                                 ("PUT", "/api/v2/pages/9")])
-        self.assertEqual(out["version"], 4)
+        self.assertEqual(order, [("GET", "/api/v2/pages/9"), ("PUT", "/api/v2/pages/9"),
+                                 ("PUT", "/rest/api/content/9/child/attachment")])
+        self.assertEqual(out["version"], 3)  # no image in the body, so no repair
+
+    def test_failed_upload_keeps_the_page_link(self):
+        created = {"id": "9", "title": "T", "version": {"number": 1}, "_links": {"webui": "/p/9"}}
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
+            shot = os.path.join(d, "shot.png")
+            Path(shot).write_bytes(b"x")
+            with patch.object(m, "call", return_value=created), \
+                    patch.object(m, "attach", side_effect=m.ToolError("HTTP 500")):
+                out = m.create_page("1", "T", "<p/>", attachments=[shot])
+        self.assertEqual(out["id"], "9")
+        self.assertIn("HTTP 500", out["error"])
+
+    def test_one_bad_file_stops_every_upload(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"CONFLUENCE_ATTACH_DIRS": d}):
+            good = os.path.join(d, "a.png")
+            Path(good).write_bytes(b"x")
+            with patch.object(m, "call") as call, self.assertRaises(m.ToolError):
+                m.attach("9", [good, "/etc/hosts"])
+        call.assert_not_called()
+
+    def test_most_specific_allowed_folder_wins(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.join(d, ".cache", "shots")
+            os.makedirs(root)
+            shot = os.path.join(root, "a.png")
+            Path(shot).write_bytes(b"x")
+            with patch.dict(os.environ, {"CONFLUENCE_ATTACH_DIRS": os.pathsep.join([d, root])}):
+                self.assertEqual(m.check_file(shot)[1], "image/png")
+
+    def test_attachment_over_the_limit_is_refused(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
+            shot = os.path.join(d, "a.png")
+            Path(shot).write_bytes(b"x" * 10)
+            with patch.object(m, "MAX_ATTACHMENT", 5), self.assertRaises(m.ToolError):
+                m.check_file(shot)
+
+
+class FixImagesTest(unittest.TestCase):
+    ADF = {"type": "doc", "content": [{"type": "mediaSingle", "content": [
+        {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file", "collection": ""}}]}]}
+    STORAGE = '<ac:image><ri:attachment ri:filename="a.png" /></ac:image>'
+
+    def run_fix(self, adf):
+        writes = []
+
+        def fake(method, path, body=None, raw=None, headers=None):
+            if method == "PUT":
+                writes.append(body)
+                return {"version": {"number": 8}}
+            if "attachments" in path:
+                return {"results": [{"title": "a.png", "fileId": "f1"}], "_links": {}}
+            fmt = path.split("body-format=")[1]
+            value = json.dumps(adf) if fmt == "atlas_doc_format" else self.STORAGE
+            return {"title": "T", "version": {"number": 7}, "body": {fmt: {"value": value}}}
+        with patch.object(m, "call", side_effect=fake):
+            return m.fix_images("5"), writes
+
+    def test_broken_image_is_written_back(self):
+        out, writes = self.run_fix(json.loads(json.dumps(self.ADF)))
+        self.assertEqual(out, {"fixed": ["a.png"], "version": 8})
+        doc = json.loads(writes[0]["body"]["value"])
+        self.assertEqual(doc["content"][0]["content"][0]["attrs"]["id"], "f1")
+        self.assertEqual(writes[0]["version"]["number"], 8)
+
+    def test_good_page_is_not_written(self):
+        good = json.loads(json.dumps(self.ADF))
+        good["content"][0]["content"][0]["attrs"]["id"] = "f1"
+        out, writes = self.run_fix(good)
+        self.assertEqual((out, writes), ({"fixed": [], "version": 7}, []))
 
     def test_hidden_parent_of_the_allowed_folder_is_fine(self):
         with tempfile.TemporaryDirectory() as d:
@@ -214,6 +283,27 @@ class FlowTest(unittest.TestCase):
 
 
 class TransportTest(unittest.TestCase):
+    def test_redirect_is_not_followed(self):
+        self.assertIsNone(m.NoRedirect().redirect_request(None, None, 302, "Found", {}, "https://evil.example/"))
+
+    def test_oversized_response_is_refused(self):
+        with patch.dict(os.environ, ENV), patch.object(m, "MAX_RESPONSE", 4), \
+                patch.object(m.urllib.request, "build_opener") as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{"a": 12345}'
+            with self.assertRaises(m.ToolError):
+                m.whoami()
+
+    def test_cyclic_next_link_stops(self):
+        loop = {"results": [], "_links": {"next": "/api/v2/pages/9/children?cursor=x"}}
+        with patch.object(m, "call", return_value=loop) as call:
+            self.assertEqual(m.collect("/api/v2/pages/9/children?cursor=x"), [])
+        self.assertEqual(call.call_count, 1)
+
+    def test_code_samples_are_not_images(self):
+        storage = ('<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[<ac:image><ri:attachment '
+                   'ri:filename="x.png" /></ac:image>]]></ac:plain-text-body></ac:structured-macro>')
+        self.assertEqual(m.image_names(storage), [])
+
     def test_dots_in_a_query_are_allowed(self):
         with patch.dict(os.environ, ENV), patch.object(m.urllib.request, "build_opener") as opener:
             opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{"results": []}'
@@ -231,6 +321,19 @@ class TransportTest(unittest.TestCase):
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_argument_types_are_checked(self):
+        for name, args in [("confluence_search", {"cql": None}), ("confluence_attach", {"page_id": "1", "paths": "/tmp/a"}),
+                           ("confluence_update_page", {"page_id": "1", "version": True, "body": "x"})]:
+            with self.subTest(name=name), patch.object(m, "call") as call:
+                out = m.respond({"method": "tools/call", "params": {"name": name, "arguments": args}})
+                self.assertTrue(out["isError"])
+                call.assert_not_called()
+
+    def test_null_arguments_mean_none(self):
+        with patch.object(m, "call", return_value={"displayName": "A"}), patch.dict(os.environ, ENV):
+            out = m.respond({"method": "tools/call", "params": {"name": "confluence_whoami", "arguments": None}})
+        self.assertNotIn("isError", out)
+
     def test_bad_params_and_arguments_are_errors(self):
         with self.assertRaises(m.InvalidParams):
             m.respond({"method": "tools/call", "params": []})
