@@ -38,6 +38,10 @@ class ToolError(Exception):
     pass
 
 
+class InvalidParams(ValueError):
+    pass
+
+
 def config():
     base = os.environ.get("CONFLUENCE_URL", "").rstrip("/")
     email, token = os.environ.get("CONFLUENCE_EMAIL", ""), os.environ.get("CONFLUENCE_TOKEN", "")
@@ -74,11 +78,22 @@ def call(method, path, body=None, raw=None, headers=None):
     return json.loads(text, strict=False) if text else {}
 
 
+def collect(path, limit=2000):
+    """Every result of a v2 list, following its next links."""
+    out = []
+    while path and len(out) < limit:
+        r = call("GET", path)
+        out += r.get("results") or []
+        nxt = (r.get("_links") or {}).get("next")
+        path = nxt[len("/wiki"):] if nxt and nxt.startswith("/wiki/") else nxt
+    return out
+
+
 def q(params):
     return urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
 
 
-def page_id(v):
+def parse_page_id(v):
     v = str(v)
     if not (v.isascii() and v.isdigit()):
         raise ToolError("page_id must be the number in the page URL")
@@ -107,19 +122,19 @@ def spaces(limit=100):
             for s in r.get("results", [])]
 
 
-def get_page(page_id_, body_format="storage"):
+def get_page(page_id, body_format="storage"):
     if body_format not in ("storage", "atlas_doc_format", "view"):
         raise ToolError("body_format must be storage, atlas_doc_format or view")
-    p = call("GET", f"/api/v2/pages/{page_id(page_id_)}?" + q({"body-format": body_format}))
+    p = call("GET", f"/api/v2/pages/{parse_page_id(page_id)}?" + q({"body-format": body_format}))
     body = p.get("body", {}).get(body_format, {}).get("value", "")
     return {"id": p["id"], "title": p["title"], "version": p["version"]["number"], "space_id": p.get("spaceId"),
             "parent_id": p.get("parentId"), "url": link(p), "body_format": body_format,
             "body": body[:MAX_BODY_TEXT], "truncated": len(body) > MAX_BODY_TEXT}
 
 
-def children(page_id_):
-    r = call("GET", f"/api/v2/pages/{page_id(page_id_)}/children?limit=250")
-    return [{"id": c["id"], "title": c["title"]} for c in r.get("results", [])]
+def children(page_id):
+    return [{"id": c["id"], "title": c["title"]}
+            for c in collect(f"/api/v2/pages/{parse_page_id(page_id)}/children?limit=250")]
 
 
 # ---- write tools ------------------------------------------------------------------------------------------
@@ -132,9 +147,10 @@ def allowed_dirs():
 
 def check_file(path):
     real = os.path.realpath(os.path.expanduser(path))
-    if not any(real == d or real.startswith(d + os.sep) for d in allowed_dirs()):
+    root = next((d for d in allowed_dirs() if real.startswith(d + os.sep)), None)
+    if root is None:
         raise ToolError(f"{path} is outside the allowed attachment folders (CONFLUENCE_ATTACH_DIRS)")
-    if any(part.startswith(".") for part in real.split(os.sep)[1:]):
+    if any(part.startswith(".") for part in os.path.relpath(real, root).split(os.sep)):
         raise ToolError("Hidden files and folders cannot be attached")
     if any(c in os.path.basename(real) for c in '"\\\r\n'):
         raise ToolError("The file name must not contain quotes, backslashes or line breaks")
@@ -146,8 +162,8 @@ def check_file(path):
     return real, ctype
 
 
-def attach(page_id_, paths):
-    pid, out = page_id(page_id_), []
+def attach(page_id, paths):
+    pid, out = parse_page_id(page_id), []
     for path in paths:
         real, ctype = check_file(path)
         name, boundary = os.path.basename(real), uuid.uuid4().hex
@@ -170,7 +186,7 @@ def attach(page_id_, paths):
 def image_names(storage):
     """File names of the attached images, in page order. External images and file links are not images."""
     names = []
-    for block in re.findall(r"<ac:image\b.*?</ac:image>|<ac:image\b[^>]*/>", storage, re.S):
+    for block in re.findall(r"<ac:image\b[^>]*/>|<ac:image\b(?:[^>]*[^/>])?>.*?</ac:image>", storage, re.S):
         m = re.search(r'<ri:attachment\b[^>]*\bri:filename="([^"]+)"', block)
         if m:
             names.append(html.unescape(m.group(1)))
@@ -178,25 +194,20 @@ def image_names(storage):
 
 
 def relink_media(doc, storage, files, pid):
-    """Point file media nodes that Confluence left as UNKNOWN_MEDIA_ID at their attachments. Returns fixed names.
+    """Point images that Confluence left as UNKNOWN_MEDIA_ID at their attachments. Returns the fixed names.
 
-    A page body that names an attachment before the file exists converts to a media node with no file id, which
-    shows "Preview unavailable". The node keeps no file name, so match the file media nodes in page order to the
-    attached images of the storage body.
+    A page body that names an attachment before the file exists converts to an image with no file id, which shows
+    "Preview unavailable". The image keeps no file name, so match the images (media inside mediaSingle) in page
+    order to the attached images of the storage body. Refuse when the counts differ: a guess could link the wrong
+    file.
     """
-    names, fixed = iter(image_names(storage)), []
+    images = []
 
     def walk(n):
         if isinstance(n, dict):
-            attrs = n.get("attrs") if isinstance(n.get("attrs"), dict) else {}
-            if n.get("type") == "media" and attrs.get("type", "file") == "file":
-                name = next(names, None)
-                if attrs.get("id") in (None, "", "UNKNOWN_MEDIA_ID") and name in files:
-                    attrs.pop("__fileMimeType", None)
-                    attrs.update({"id": files[name], "collection": f"contentId-{pid}", "type": "file"})
-                    attrs.setdefault("alt", name)
-                    n["attrs"] = attrs
-                    fixed.append(name)
+            if n.get("type") == "mediaSingle":
+                images.extend(c for c in n.get("content") or [] if isinstance(c, dict) and c.get("type") == "media")
+                return
             for v in n.values():
                 walk(v)
         elif isinstance(n, list):
@@ -204,12 +215,25 @@ def relink_media(doc, storage, files, pid):
                 walk(v)
 
     walk(doc)
+    names = image_names(storage)
+    files_only = [m for m in images if (m.get("attrs") or {}).get("type", "file") == "file"]
+    if len(files_only) != len(names):
+        raise ToolError(f"The page has {len(files_only)} attached images but its body names {len(names)}; "
+                        "fix the images by hand")
+    fixed = []
+    for node, name in zip(files_only, names):
+        attrs = node.setdefault("attrs", {})
+        if attrs.get("id") in (None, "", "UNKNOWN_MEDIA_ID") and name in files:
+            attrs.pop("__fileMimeType", None)
+            attrs.update({"id": files[name], "collection": f"contentId-{pid}", "type": "file"})
+            attrs.setdefault("alt", name)
+            fixed.append(name)
     return fixed
 
 
-def fix_images(page_id_):
-    pid = page_id(page_id_)
-    files = {a["title"]: a["fileId"] for a in call("GET", f"/api/v2/pages/{pid}/attachments?limit=250")["results"]}
+def fix_images(page_id):
+    pid = parse_page_id(page_id)
+    files = {a["title"]: a["fileId"] for a in collect(f"/api/v2/pages/{pid}/attachments?limit=250")}
     adf = call("GET", f"/api/v2/pages/{pid}?body-format=atlas_doc_format")
     storage = call("GET", f"/api/v2/pages/{pid}?body-format=storage")["body"]["storage"]["value"]
     doc = json.loads(adf["body"]["atlas_doc_format"]["value"], strict=False)
@@ -222,10 +246,10 @@ def fix_images(page_id_):
     return {"fixed": fixed, "version": version}
 
 
-def finish(p, attachments):
+def finish(p, attachments, upload=True):
     out = {"id": p["id"], "title": p["title"], "version": p["version"]["number"], "url": link(p)}
     if attachments:
-        out["attached"] = attach(p["id"], attachments)
+        out["attached"] = attach(p["id"], attachments) if upload else attachments
         repaired = fix_images(p["id"])
         out["images_fixed"], out["version"] = repaired["fixed"], repaired["version"]
     return out
@@ -241,25 +265,23 @@ def create_page(space_id, title, body, parent_id=None, attachments=None):
     return finish(p, attachments)
 
 
-def update_page(page_id_, version, body, title=None, message=None, attachments=None):
-    pid = page_id(page_id_)
+def update_page(page_id, version, body, title=None, message=None, attachments=None):
+    pid = parse_page_id(page_id)
     cur = call("GET", f"/api/v2/pages/{pid}")
     if int(version) != cur["version"]["number"]:
         raise ToolError(f"The page is at version {cur['version']['number']}, not {version}. "
                         "Read it again and merge your change into the current body.")
-    if attachments:
-        for path in attachments:
-            check_file(path)
+    attached = attach(pid, attachments) if attachments else []  # the page exists: upload first
     p = call("PUT", f"/api/v2/pages/{pid}", {
         "id": pid, "status": "current", "title": title or cur["title"],
         "body": {"representation": "storage", "value": body},
         "version": {"number": cur["version"]["number"] + 1, "message": message or ""}})
-    return finish(p, attachments)
+    return finish(p, attached, upload=False)
 
 
-def add_comment(page_id_, text):
+def add_comment(page_id, text):
     esc = html.escape(str(text), quote=False)
-    r = call("POST", "/api/v2/footer-comments", {"pageId": page_id(page_id_),
+    r = call("POST", "/api/v2/footer-comments", {"pageId": parse_page_id(page_id),
                                                  "body": {"representation": "storage", "value": f"<p>{esc}</p>"}})
     return {"comment_id": r["id"]}
 
@@ -299,19 +321,28 @@ TOOLS = {
     "confluence_comment": (add_comment, "Add a footer comment to a page." + PUBLISH,
                            {"page_id": S, "text": S}, ["page_id", "text"]),
 }
-ARG_NAMES = {"page_id": "page_id_"}
+
+
+def check_args(name, args):
+    _, _, props, required = TOOLS[name]
+    if not isinstance(args, dict) or any(k not in props for k in args):
+        raise ToolError(f"Unknown or invalid arguments; {name} takes {', '.join(props) or 'none'}")
+    missing = [k for k in required if k not in args]
+    if missing:
+        raise ToolError(f"Missing arguments: {', '.join(missing)}")
+    return args
 
 
 def run_tool(name, args):
     fn = TOOLS[name][0]
-    return fn(**{ARG_NAMES.get(k, k): v for k, v in (args or {}).items()})
+    return fn(**args)
 
 
 def respond(msg):
     method = msg.get("method")
     params = msg.get("params")
     if params is not None and not isinstance(params, dict):
-        raise ValueError("params must be an object")
+        raise InvalidParams("params must be an object")
     params = params or {}
     if method == "initialize":
         return {"protocolVersion": params.get("protocolVersion", "2024-11-05"),
@@ -325,13 +356,9 @@ def respond(msg):
     if method == "tools/call":
         p = params
         if p.get("name") not in TOOLS:
-            raise ValueError("Unknown tool")
-        args = p.get("arguments", {})
-        allowed = TOOLS[p["name"]][2]
-        if not isinstance(args, dict) or any(k not in allowed for k in args):
-            return {"isError": True, "content": [{"type": "text", "text": "Unknown or invalid arguments"}]}
+            raise InvalidParams("Unknown tool")
         try:
-            out = run_tool(p["name"], args)
+            out = run_tool(p["name"], check_args(p["name"], p.get("arguments", {})))
         except (ToolError, TypeError, ValueError, KeyError, AttributeError) as e:
             return {"isError": True, "content": [{"type": "text", "text": str(e) or e.__class__.__name__}]}
         return {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}]}
@@ -348,6 +375,8 @@ def serve():
             continue  # notifications need no answer
         try:
             out = {"jsonrpc": "2.0", "id": msg["id"], "result": respond(msg)}
+        except InvalidParams as e:
+            out = {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32602, "message": str(e)}}
         except ValueError as e:
             out = {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": str(e)}}
         except Exception as e:  # one bad request must not end the server
@@ -361,9 +390,12 @@ if __name__ == "__main__":
         if tool not in TOOLS:
             sys.exit("tools: " + ", ".join(n.removeprefix("confluence_") for n in TOOLS))
         try:
-            print(json.dumps(run_tool(tool, json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}), indent=2,
-                             ensure_ascii=False))
-        except ToolError as e:
+            args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+        except ValueError:
+            sys.exit("The second argument must be a JSON object")
+        try:
+            print(json.dumps(run_tool(tool, check_args(tool, args)), indent=2, ensure_ascii=False))
+        except (ToolError, TypeError, ValueError) as e:
             sys.exit(str(e))
     else:
         serve()

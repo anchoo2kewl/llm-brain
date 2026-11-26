@@ -3,11 +3,12 @@ import importlib.util
 import json
 import os
 import tempfile
-import unittest
 from pathlib import Path
+import unittest
 from unittest.mock import patch
 
-loader = importlib.machinery.SourceFileLoader("confluence_mcp", "hive/skills/confluence/confluence-mcp")
+SCRIPT = Path(__file__).resolve().parents[1] / "hive/skills/confluence/confluence-mcp"
+loader = importlib.machinery.SourceFileLoader("confluence_mcp", str(SCRIPT))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 m = importlib.util.module_from_spec(spec)
 loader.exec_module(m)
@@ -57,7 +58,7 @@ class McpTest(unittest.TestCase):
 
     def test_page_id_must_be_numeric(self):
         with self.assertRaises(m.ToolError):
-            m.page_id("1/../2")
+            m.parse_page_id("1/../2")
 
 
 class UpdateTest(unittest.TestCase):
@@ -116,7 +117,8 @@ class RelinkTest(unittest.TestCase):
 
     def test_missing_attachment_is_left_alone(self):
         doc = {"type": "doc", "content": [self.media(id="UNKNOWN_MEDIA_ID", collection="", type="file")]}
-        self.assertEqual(m.relink_media(doc, self.STORAGE, {}, "99"), [])
+        one = '<ac:image><ri:attachment ri:filename="one.jpg" /></ac:image>'
+        self.assertEqual(m.relink_media(doc, one, {}, "99"), [])
         self.assertEqual(doc["content"][0]["content"][0]["attrs"]["id"], "UNKNOWN_MEDIA_ID")
 
 
@@ -125,17 +127,66 @@ class MixedContentTest(unittest.TestCase):
         storage = ('<ac:image><ri:url ri:value="https://x.example/a.png" /></ac:image>'
                    '<ac:link><ri:attachment ri:filename="spec.pdf" /></ac:link>'
                    '<ac:image ac:alt="Architecture"><ri:attachment ri:filename="a&amp;b.png" /></ac:image>')
-        doc = {"type": "doc", "content": [
-            {"type": "media", "attrs": {"type": "external", "url": "https://x.example/a.png"}},
-            {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file", "alt": "Architecture"}}]}
+        external = {"type": "media", "attrs": {"type": "external", "url": "https://x.example/a.png"}}
+        card = {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file"}}
+        image = {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file", "alt": "Architecture"}}
+        doc = {"type": "doc", "content": [{"type": "mediaSingle", "content": [external]},
+                                          {"type": "mediaGroup", "content": [card]},
+                                          {"type": "mediaSingle", "content": [image]}]}
         fixed = m.relink_media(doc, storage, {"spec.pdf": "p1", "a&b.png": "f9"}, "7")
         self.assertEqual(fixed, ["a&b.png"])
-        self.assertEqual(doc["content"][0]["attrs"], {"type": "external", "url": "https://x.example/a.png"})
-        self.assertEqual(doc["content"][1]["attrs"]["id"], "f9")
-        self.assertEqual(doc["content"][1]["attrs"]["alt"], "Architecture")  # the caption stays
+        self.assertEqual(external["attrs"], {"type": "external", "url": "https://x.example/a.png"})
+        self.assertEqual(card["attrs"]["id"], "UNKNOWN_MEDIA_ID")  # a file card is not an image
+        self.assertEqual(image["attrs"]["id"], "f9")
+        self.assertEqual(image["attrs"]["alt"], "Architecture")  # the caption stays
+
+    def test_self_closing_image_does_not_swallow_a_link(self):
+        storage = ('<ac:image ac:width="1" /><ac:link><ri:attachment ri:filename="spec.pdf" /></ac:link>'
+                   '<ac:image><ri:attachment ri:filename="b.png" /></ac:image>')
+        self.assertEqual(m.image_names(storage), ["b.png"])
+
+    def test_count_mismatch_refuses_to_guess(self):
+        doc = {"type": "doc", "content": [{"type": "mediaSingle", "content": [
+            {"type": "media", "attrs": {"id": "UNKNOWN_MEDIA_ID", "type": "file"}}]}]}
+        with self.assertRaises(m.ToolError):
+            m.relink_media(doc, "<p>no images</p>", {"a.png": "f"}, "1")
+
+
+class PaginationTest(unittest.TestCase):
+    def test_collect_follows_next_links(self):
+        pages = [{"results": [{"id": "1"}], "_links": {"next": "/wiki/api/v2/pages/9/children?cursor=abc"}},
+                 {"results": [{"id": "2"}], "_links": {}}]
+        with patch.object(m, "call", side_effect=pages) as call:
+            self.assertEqual([x["id"] for x in m.collect("/api/v2/pages/9/children?limit=250")], ["1", "2"])
+        self.assertEqual(call.call_args_list[1][0][1], "/api/v2/pages/9/children?cursor=abc")
 
 
 class FlowTest(unittest.TestCase):
+    def test_update_uploads_before_it_publishes(self):
+        order = []
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
+            shot = os.path.join(d, "shot.png")
+            Path(shot).write_bytes(b"\x89PNG")
+
+            def fake(method, path, body=None, raw=None, headers=None):
+                order.append((method, path.split("?")[0]))
+                return {"id": "9", "title": "T", "version": {"number": 3}, "_links": {}}
+            with patch.object(m, "call", side_effect=fake), \
+                    patch.object(m, "fix_images", return_value={"fixed": [], "version": 4}):
+                out = m.update_page("9", 3, "<p/>", attachments=[shot])
+        self.assertEqual(order, [("GET", "/api/v2/pages/9"), ("PUT", "/rest/api/content/9/child/attachment"),
+                                 ("PUT", "/api/v2/pages/9")])
+        self.assertEqual(out["version"], 4)
+
+    def test_hidden_parent_of_the_allowed_folder_is_fine(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = os.path.join(d, ".cache", "shots")
+            os.makedirs(root)
+            shot = os.path.join(root, "a.png")
+            Path(shot).write_bytes(b"x")
+            with patch.dict(os.environ, {"CONFLUENCE_ATTACH_DIRS": root}):
+                self.assertEqual(m.check_file(shot)[1], "image/png")
+
     def test_create_with_attachments_returns_the_version_after_repair(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, dict(ENV, CONFLUENCE_ATTACH_DIRS=d)):
             shot = os.path.join(d, "shot.png")
@@ -181,8 +232,10 @@ class TransportTest(unittest.TestCase):
 
 class ProtocolTest(unittest.TestCase):
     def test_bad_params_and_arguments_are_errors(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(m.InvalidParams):
             m.respond({"method": "tools/call", "params": []})
+        missing = m.respond({"method": "tools/call", "params": {"name": "confluence_get_page", "arguments": {}}})
+        self.assertIn("Missing arguments: page_id", missing["content"][0]["text"])
         out = m.respond({"method": "tools/call", "params": {"name": "confluence_whoami", "arguments": []}})
         self.assertTrue(out["isError"])
 
@@ -199,7 +252,7 @@ class ProtocolTest(unittest.TestCase):
 
     def test_unicode_digits_are_not_a_page_id(self):
         with self.assertRaises(m.ToolError):
-            m.page_id("\u0661\u0662")
+            m.parse_page_id("\u0661\u0662")
 
 
 class CommentTest(unittest.TestCase):
