@@ -241,12 +241,16 @@ public struct ClusterNodes: Codable, Sendable {
         public var role: String?
         public var cluster: String?
         public var version: String?
+        public init(node: String, role: String? = nil, cluster: String? = nil, version: String? = nil) {
+            (self.node, self.role, self.cluster, self.version) = (node, role, cluster, version)
+        }
     }
     public struct Peer: Codable, Hashable, Sendable {
         public var url: String
         public var info: Info
         public var ok: Bool
         public var error: String?
+        public init(url: String, info: Info, ok: Bool, error: String? = nil) { (self.url, self.info, self.ok, self.error) = (url, info, ok, error) }
     }
     /// This hub (`self` in the JSON).
     public var me: Info
@@ -257,6 +261,14 @@ public struct ClusterNodes: Codable, Sendable {
 
     /// Machine names: this hub's node first, then its peers.
     public var names: [String] { [me.node] + peers.map(\.info.node) }
+
+    /// The URL of the peer hub that runs `node`, or nil for this hub's own machine. A node can have several peer
+    /// URLs (Tailscale and a LAN tunnel): take one that answers, so a dead route does not hide a live one.
+    public func peerURL(for node: String) -> String? {
+        guard node != me.node else { return nil }
+        let routes = peers.filter { $0.info.node == node }
+        return (routes.first(where: \.ok) ?? routes.first)?.url
+    }
 }
 
 /// `GET /api/inbox`. The hub encodes this struct without JSON tags, so the keys are capitalised.

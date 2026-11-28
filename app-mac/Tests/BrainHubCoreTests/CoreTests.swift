@@ -123,6 +123,17 @@ import BrainHubCore
         #expect(n.names == ["studio", "laptop"])
     }
 
+    @Test func peerURLTakesTheLiveRoute() {
+        func peer(_ url: String, _ node: String, ok: Bool) -> ClusterNodes.Peer { .init(url: url, info: .init(node: node), ok: ok) }
+        let n = ClusterNodes(me: .init(node: "laptop"), peers: [peer("https://hub.ts.net", "studio", ok: false),
+                                                                 peer("http://127.0.0.1:28787", "studio", ok: true)])
+        #expect(n.peerURL(for: "studio") == "http://127.0.0.1:28787") // the dead Tailscale route comes first
+        #expect(n.peerURL(for: "laptop") == nil) // this hub's own machine
+        #expect(n.peerURL(for: "other") == nil)
+        let down = ClusterNodes(me: .init(node: "laptop"), peers: [peer("https://hub.ts.net", "studio", ok: false)])
+        #expect(down.peerURL(for: "studio") == "https://hub.ts.net") // no live route: the hub's error explains it
+    }
+
     @Test func searchWithNulls() throws {
         let r: SearchReply = try decode(#"{"took_ms":3,"total":0,"partial":null,"sessions":null}"#)
         #expect(r.sessions.isEmpty && r.partial.isEmpty)
