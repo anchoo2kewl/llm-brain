@@ -169,6 +169,14 @@ import BrainHubCore
         #expect(openedTerminalRef(remote, hub: hub, nodes: nodes) == TerminalRef(hub: "http://100.100.1.2:8787", id: 4))
         let none: OpenedTerminal = try decode(#"{}"#)
         #expect(openedTerminalRef(none, hub: hub, nodes: nodes) == nil)
+        // A move from the peer to this app's own hub links to the home hub, never to the id on the peer.
+        let home: OpenedTerminal = try decode(#"{"terminal_id":5,"link":"/cluster/open?node=studio&path=%2Fterminals%2F5","hub":"studio"}"#)
+        #expect(openedTerminalRef(home, hub: "http://100.100.1.2:8787", home: hub, nodes: nodes) == TerminalRef(hub: hub, id: 5))
+        let lost: OpenedTerminal = try decode(#"{"terminal_id":6,"link":"/cluster/open?node=nas&path=%2Fterminals%2F6"}"#)
+        #expect(openedTerminalRef(lost, hub: hub, home: hub, nodes: nodes) == nil)
+        let m: Migration = try decode(#"{"id":"j","to":"laptop","phases":[],"dest_terminal":42,"dest_hub":"laptop","done":true}"#)
+        #expect(m.destHub == "laptop")
+        #expect(terminalRef(node: "laptop", id: 42, home: hub, nodes: nodes) == TerminalRef(hub: "http://100.100.1.2:8787", id: 42))
     }
 }
 
