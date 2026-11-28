@@ -532,7 +532,9 @@ final class AppModel {
                 if m.done {
                     await refresh()
                     if let e = m.error { throw HubError("\(clone ? "Clone" : "Move") failed: \(e). The terminal still runs where it was.") }
-                    return m.dest.map { TerminalRef(hub: ref.hub, id: $0) }
+                    guard let dest = m.dest else { return nil }
+                    guard let node = m.destHub else { return TerminalRef(hub: ref.hub, id: dest) }
+                    return terminalRef(node: node, id: dest, home: client?.base, nodes: nodes)
                 }
             } catch let e as HubError where e.message.hasPrefix("Move failed") || e.message.hasPrefix("Clone failed") {
                 throw e
@@ -545,7 +547,7 @@ final class AppModel {
     }
 
     private func opened(_ reply: OpenedTerminal, hub: String) async throws -> TerminalRef {
-        guard let ref = openedTerminalRef(reply, hub: hub, nodes: nodes) else { throw HubError("The hub did not say which terminal it opened.") }
+        guard let ref = openedTerminalRef(reply, hub: hub, home: client?.base, nodes: nodes) else { throw HubError("The hub did not say which terminal it opened.") }
         await refresh()
         return ref
     }

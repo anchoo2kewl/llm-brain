@@ -331,9 +331,11 @@ public struct Migration: Decodable, Sendable, Equatable {
     public var mode: String?
     public var phases: [Phase]
     public var dest: Int64?
+    /// The peer hub that holds `dest` when the destination machine is served by another hub; nil: the job's hub.
+    public var destHub: String?
     public var done: Bool
     public var error: String?
-    enum CodingKeys: String, CodingKey { case id, to, mode, phases, dest = "dest_terminal", done, error }
+    enum CodingKeys: String, CodingKey { case id, to, mode, phases, dest = "dest_terminal", destHub = "dest_hub", done, error }
     public var isClone: Bool { mode == "clone" }
 
     /// The phase to show: the one running or failed, else the last one done.
@@ -354,20 +356,26 @@ public struct Migration: Decodable, Sendable, Equatable {
     }
 }
 
-/// Where a continue or move reply's terminal lives. A local reply carries `terminal_id`; a peer's session continued
-/// through this hub carries a link `/cluster/open?node=<node>&path=/terminals/<id>` instead.
-public func openedTerminalRef(_ reply: OpenedTerminal, hub: String, nodes: ClusterNodes?) -> TerminalRef? {
-    if let link = reply.link, link.hasPrefix("/cluster/open?"),
-       let q = URLComponents(string: link)?.queryItems,
-       let node = q.first(where: { $0.name == "node" })?.value,
-       let path = q.first(where: { $0.name == "path" })?.value,
-       path.hasPrefix("/terminals/"), let id = Int64(path.dropFirst("/terminals/".count)),
-       let peer = nodes?.peers.first(where: { $0.info.node == node }),
-       let base = try? HubURL.validate(peer.url) {
-        return TerminalRef(hub: base, id: id)
+/// Where a continue or move reply's terminal lives. A local reply carries `terminal_id`; a terminal on another hub
+/// (a peer's session continued through this hub, or a move to a machine of a peer hub) carries a link
+/// `/cluster/open?node=<node>&path=/terminals/<id>` instead. `home` is the app's own hub, for a node that is that hub.
+public func openedTerminalRef(_ reply: OpenedTerminal, hub: String, home: String? = nil, nodes: ClusterNodes?) -> TerminalRef? {
+    if let link = reply.link, link.hasPrefix("/cluster/open?") {
+        guard let q = URLComponents(string: link)?.queryItems,
+              let node = q.first(where: { $0.name == "node" })?.value,
+              let path = q.first(where: { $0.name == "path" })?.value,
+              path.hasPrefix("/terminals/"), let id = Int64(path.dropFirst("/terminals/".count)) else { return nil }
+        return terminalRef(node: node, id: id, home: home, nodes: nodes) // never the id on the wrong hub
     }
     if let id = reply.terminalID, id > 0 { return TerminalRef(hub: hub, id: id) }
     return nil
+}
+
+/// Terminal `id` of hub `node`: the app's own hub (`home`) or a peer of it.
+public func terminalRef(node: String, id: Int64, home: String?, nodes: ClusterNodes?) -> TerminalRef? {
+    if let home, node == nodes?.me.node { return TerminalRef(hub: home, id: id) }
+    guard let url = nodes?.peerURL(for: node), let base = try? HubURL.validate(url) else { return nil }
+    return TerminalRef(hub: base, id: id)
 }
 
 /// Request paths.
