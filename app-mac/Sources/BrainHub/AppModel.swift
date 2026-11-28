@@ -411,9 +411,11 @@ final class AppModel {
     func create(host: String, cli: CLI, path: String, title: String, account: String = "") async throws -> TerminalRef {
         guard let client else { throw HubError("Add a hub first (Settings).") }
         struct Created: Decodable { var id: Int64 }
-        let r = try await client.post(Paths.newTerminal, form: [("host", host), ("cli", cli.rawValue), ("path", path),
+        // A hub starts sessions only on its own machine: send a peer's machine to that peer.
+        let target = try peerBase(for: host).map { try HubClient(base: $0) } ?? client
+        let r = try await target.post(Paths.newTerminal, form: [("host", host), ("cli", cli.rawValue), ("path", path),
                                                                 ("profile", account), ("format", "json")], as: Created.self)
-        let ref = TerminalRef(hub: client.base, id: r.id)
+        let ref = TerminalRef(hub: target.base, id: r.id)
         if !title.trimmingCharacters(in: .whitespaces).isEmpty { try? await rename(ref, to: title) }
         await refresh()
         return ref
@@ -493,11 +495,13 @@ final class AppModel {
         return try await opened(reply, hub: client.base)
     }
 
+    /// The peer hub that runs `node`, or nil for this hub's own machine (see `ClusterNodes.peerURL`).
+    func peerBase(for node: String) throws -> String? { try nodes?.peerURL(for: node).map(HubURL.validate) }
+
     /// Move a conversation to another machine. A peer's session is moved by the peer that holds its copy.
     func move(_ hit: SessionHit, to machine: String, closeSource: Bool) async throws -> TerminalRef {
         guard let client else { throw HubError("Add a hub first (Settings).") }
-        var base = client.base
-        if let peer = nodes?.peers.first(where: { $0.info.node == hit.node }) { base = try HubURL.validate(peer.url) }
+        let base = try peerBase(for: hit.node) ?? client.base
         let reply = try await HubClient(base: base).post(Paths.move(hit.id), json: ["to": machine, "close_source": closeSource],
                                                          as: OpenedTerminal.self)
         return try await opened(reply, hub: base)
